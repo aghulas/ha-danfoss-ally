@@ -22,7 +22,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import ecriture_autorisee, encode_consigne
-from .const import DATA_COORDINATOR, DOMAIN, DP_TEMP_SET, SETPOINT_STEP
+from .const import (
+    DATA_COORDINATOR,
+    DOMAIN,
+    DP_TEMP_SET,
+    MODE_SETPOINT_DP,
+    SETPOINT_STEP,
+)
 from .coordinator import DanfossCoordinator
 from .entity import DanfossEntity
 
@@ -114,7 +120,12 @@ class DanfossClimate(DanfossEntity, ClimateEntity):
         return attrs
 
     async def async_set_temperature(self, **kwargs) -> None:
-        """Écrit la consigne (DP 16), validée et bornée. Refuse si le modèle n'est pas autorisé."""
+        """Écrit la consigne du MODE ACTIF (validée et bornée). Refuse si modèle non autorisé.
+
+        Prouvé en réel : écrire le DP16 ``temp_set`` ne tient pas sur une tête sur programme
+        (l'horaire le réécrit). On écrit donc la consigne du réglage du mode courant
+        (``at_home_setting``…) ; ``temp_set`` suit. Repli sur DP16 si le mode est inconnu.
+        """
         dev = self.device
         if dev is None or not ecriture_autorisee(dev):
             return
@@ -122,7 +133,8 @@ class DanfossClimate(DanfossEntity, ClimateEntity):
         if temp is None:
             return
         valeur = encode_consigne(temp, self.min_temp, self.max_temp, SETPOINT_STEP)
+        dp = MODE_SETPOINT_DP.get(dev.mode or "", DP_TEMP_SET)
         await self.coordinator.client.async_write_setting(
-            dev.id, dev.product_id or "", {str(DP_TEMP_SET): valeur}
+            dev.id, dev.product_id or "", {str(dp): valeur}
         )
         await self.coordinator.async_request_refresh()
