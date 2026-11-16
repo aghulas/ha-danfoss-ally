@@ -1,7 +1,9 @@
 ruff
 mypy
 pytest
+pytest-cov
 pytest-homeassistant-custom-component
+pip-audit
 # Dépendances d'exécution de l'intégration (cf. manifest.json / requirements.txt).
 pycryptodome
 requests
