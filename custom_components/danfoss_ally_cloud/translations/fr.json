@@ -1,0 +1,37 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Danfoss Ally (Cloud)",
+        "description": "Connectez-vous avec le compte de l'application Danfoss Ally / Smart Life. Aucune application développeur ni clé API n'est requise.",
+        "data": {
+          "username": "Identifiant (e-mail ou téléphone)",
+          "password": "Mot de passe",
+          "region": "Région (eu, us, cn, in)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Connexion impossible",
+      "invalid_auth": "Identifiants invalides",
+      "unknown": "Erreur inattendue"
+    },
+    "abort": {
+      "already_configured": "Ce compte est déjà configuré"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "data": {
+          "scan_interval": "Intervalle d'interrogation du cloud (secondes)",
+          "enable_local": "Activer le tunnel Zigbee local (passerelles) pour les écritures que le cloud rate",
+          "mqtt_mode": "Publication MQTT : off, discovery (entités HA auto), zigbee2mqtt (topics compatibles z2m)",
+          "mqtt_source": "Source des valeurs publiées : cloud ou local",
+          "mqtt_base_topic": "Préfixe de topic MQTT"
+        }
+      }
+    }
+  }
+}

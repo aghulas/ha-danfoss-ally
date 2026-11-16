@@ -1,0 +1,3 @@
+# Dépendances d'exécution de l'intégration. À synchroniser avec
+# manifest.json -> requirements une fois la couche api/ extraite en lib.
+tinytuya

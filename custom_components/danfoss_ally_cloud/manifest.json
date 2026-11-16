@@ -1,0 +1,13 @@
+{
+  "domain": "danfoss_ally_cloud",
+  "name": "Danfoss Ally (Cloud)",
+  "version": "0.0.1",
+  "codeowners": ["@aghulas"],
+  "config_flow": true,
+  "documentation": "https://github.com/aghulas/ha-danfoss-ally",
+  "issue_tracker": "https://github.com/aghulas/ha-danfoss-ally/issues",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "after_dependencies": ["mqtt"],
+  "requirements": []
+}
