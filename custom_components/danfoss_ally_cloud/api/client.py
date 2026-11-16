@@ -173,6 +173,34 @@ class CloudClient:
                     devices.append(dev)
         return devices
 
+    async def async_list_raw(self) -> list[dict]:
+        """Appareils bruts de toutes les maisons (devId, name, category, localKey, meshId, nodeId).
+
+        Utile au repli local : la localKey des passerelles est dans le champ `localKey` (voie 1a).
+        """
+        out: list[dict] = []
+        seen: set[str] = set()
+        for home in await self.async_get_homes():
+            raw = await self._request(
+                "tuya.m.my.group.device.list", "1.0", None, extra_params={"gid": home["gid"]}
+            )
+            for d in raw if isinstance(raw, list) else []:
+                dev_id = d.get("devId") if isinstance(d, dict) else None
+                if dev_id and dev_id not in seen:
+                    seen.add(dev_id)
+                    out.append(d)
+        return out
+
+    async def async_device_meta(self, dev_id: str) -> dict:
+        """Méta d'une passerelle (smartlife.m.device.get v4.0 → meta) : lan_ip, canal Zigbee."""
+        r = await self._request("smartlife.m.device.get", "4.0", {"devId": dev_id})
+        meta = (r.get("meta") or {}) if isinstance(r, dict) else {}
+        return {
+            "nom": r.get("name") if isinstance(r, dict) else None,
+            "lan_ip": meta.get("lan_ip"),
+            "canal": meta.get("zigChannel"),
+        }
+
     async def async_write_setting(self, dev_id: str, pid: str, dps: dict) -> object:
         """Écrit des DP de réglage sur une TÊTE (tuya.m.custom.wkf.settings.change, resType 1).
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from .client import CloudAuthError, CloudClient, CloudError, CloudWriteError
 from .decode import DanfossDevice, decoder
+from .keys import GatewayKey, async_fetch_gateway_keys
 from .writes import ecriture_autorisee, encode_consigne
 
 __all__ = [
@@ -22,6 +23,8 @@ __all__ = [
     "CloudError",
     "CloudWriteError",
     "DanfossDevice",
+    "GatewayKey",
+    "async_fetch_gateway_keys",
     "decoder",
     "ecriture_autorisee",
     "encode_consigne",
