@@ -41,7 +41,7 @@ _LOGGER = logging.getLogger(__name__)
 _REGIONS = ["eu", "us", "cn", "in"]
 
 
-class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
+class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
     """Première configuration : un compte Danfoss Ally."""
 
     VERSION = 1
