@@ -2,4 +2,7 @@ ruff
 mypy
 pytest
 pytest-homeassistant-custom-component
+# Dépendances d'exécution de l'intégration (cf. manifest.json / requirements.txt).
+pycryptodome
+requests
 tinytuya

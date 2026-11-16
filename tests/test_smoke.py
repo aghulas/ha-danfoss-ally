@@ -9,8 +9,8 @@ def test_domain():
 
 def test_dp_pieges():
     # Pièges repris du schéma officiel : à ne pas inverser.
-    assert const.DP_UPPER_TEMP == 18          # borne haute, pas la consigne
-    assert const.DP_SETPOINT == 171           # consigne en cours
+    assert const.DP_UPPER_TEMP == 18  # borne haute, pas la consigne
+    assert const.DP_SETPOINT == 171  # consigne en cours
     assert const.DP_PREHEAT == 1
     assert const.ZB_ATTR_PROGRAMMING_MODE == 0x0025
 

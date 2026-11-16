@@ -14,3 +14,4 @@ disallow_untyped_defs = false
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = "-q"
+pythonpath = "."

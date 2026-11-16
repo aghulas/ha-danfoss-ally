@@ -4,18 +4,28 @@ from __future__ import annotations
 
 DOMAIN = "danfoss_ally_cloud"
 
-# Plateformes exposées. On démarre avec climate + capteurs ; switch/number
-# s'activent au fur et à mesure que les écritures sont validées.
-PLATFORMS = ["climate", "sensor", "binary_sensor", "number", "switch"]
+# Plateformes exposées. v0.1 = lecture seule (climate + capteurs). number/switch
+# (écritures) s'activeront en v0.2 une fois les écritures validées en réel.
+PLATFORMS = ["climate", "sensor", "binary_sensor"]
 
-# --- Options de configuration (config_flow / options_flow) ---
+# Clé de hass.data[DOMAIN][entry_id] -> coordinateur.
+DATA_COORDINATOR = "coordinator"
+
+# --- Identifiants et secrets d'installation (config_flow / options_flow) ---
+# username/password/country_code : identifiants du compte de l'app (login voie 1a).
+# sign_key/device_id/ch_key : matériel d'INSTALLATION capturé une fois (voir README),
+# stable, indispensable à la signature et au chiffrement. SECRETS : jamais journalisés.
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
-CONF_REGION = "region"
+CONF_COUNTRY_CODE = "country_code"  # indicatif pays, ex. "33" (France)
+CONF_REGION = "region"  # datacenter : "eu" | "us" | "cn" | "in"
+CONF_SIGN_KEY = "sign_key"
+CONF_DEVICE_ID = "device_id"
+CONF_CH_KEY = "ch_key"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_ENABLE_LOCAL = "enable_local"
-CONF_MQTT_MODE = "mqtt_mode"        # "off" | "discovery" | "zigbee2mqtt"
-CONF_MQTT_SOURCE = "mqtt_source"    # "cloud" | "local"
+CONF_MQTT_MODE = "mqtt_mode"  # "off" | "discovery" | "zigbee2mqtt"
+CONF_MQTT_SOURCE = "mqtt_source"  # "cloud" | "local"
 CONF_MQTT_BASE_TOPIC = "mqtt_base_topic"
 
 # Défauts conservateurs : le quota et la sécurité du compte priment.
@@ -26,7 +36,8 @@ DEFAULT_MQTT_BASE_TOPIC = "danfoss_ally_cloud"
 
 # Codes DP (noms officiels : voir danfoss-app-capture/dp_schema_officiel.md).
 # Source de vérité, à ne pas deviner. Rappels des pièges connus :
-#   DP 171 = OccupiedSetpoint (consigne en cours, centièmes)
+#   DP 16  = temp_set (consigne EFFECTIVE, dixièmes de °C) — lue comme consigne en v0.1
+#   DP 171 = OccupiedSetpoint (échelle à CONFIRMER en réel : 171 non fiable tant que non vérifié)
 #   DP 18  = upper_temp (BORNE HAUTE, pas la consigne)
 #   DP 114 = consigne du mode manuel
 #   DP 1   = pré-chauffage (côté cloud : ne change que le cache passerelle)

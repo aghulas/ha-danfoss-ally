@@ -9,3 +9,16 @@ Réutilisation (voir docs/reuse.md) :
   - récupération des clés, DP    : ~/dev/danfoss-ally-mcp (tuya/pilote_tuya.py)
   - tunnel Zigbee DP 198/199     : ~/dev/danfoss-ally-mcp (local.py)
 """
+
+from __future__ import annotations
+
+from .client import CloudAuthError, CloudClient, CloudError
+from .decode import DanfossDevice, decoder
+
+__all__ = [
+    "CloudAuthError",
+    "CloudClient",
+    "CloudError",
+    "DanfossDevice",
+    "decoder",
+]

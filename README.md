@@ -27,6 +27,24 @@ Assistant en dehors de l'écran de connexion de l'intégration.
 2. Installer « Danfoss Ally (Cloud) », redémarrer Home Assistant.
 3. Réglages → Appareils et services → Ajouter une intégration.
 
+## Configuration
+
+L'écran de configuration demande :
+
+- **Identifiant / Mot de passe** : le compte de l'application Danfoss Ally / Smart Life.
+- **Indicatif pays** : ex. `33` pour la France.
+- **Datacenter** : `eu`, `us`, `cn` ou `in` (France → `eu`).
+- **Secrets d'installation** : `sign_key`, `device_id` (`deviceId`), `ch_key` (`chKey`).
+
+Les trois secrets d'installation sont propres à une installation de l'application et **se
+capturent une fois** (ils restent stables ensuite). Ils sont indispensables à la signature et au
+chiffrement de l'API mobile Tuya ; le serveur refuse un `chKey` inconnu. La méthode de capture est
+décrite dans `docs/` (hook natif / capture réseau). Ces valeurs, le mot de passe et le matériel de
+session (`sid`/`ecode`) sont des **secrets** : ils ne sont jamais écrits dans les journaux ni les
+diagnostics (voir `diagnostics.py`).
+
 ## État
 
-Amorçage (squelette). Voir `docs/roadmap.md`.
+**v0.1 — lecture seule cloud** : chaque tête apparaît comme un thermostat (température, consigne) ;
+capteurs batterie, ouverture de vanne, code défaut ; capteurs binaires en ligne / fenêtre. Pas
+encore d'écriture. Voir `docs/roadmap.md`.

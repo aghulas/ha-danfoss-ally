@@ -1,6 +1,7 @@
 """Récupération des clés locales des passerelles (voie 1a).
 
-Remplace l'émulateur / Frida : lit les localKey des passerelles via l'API cloud (déjà validé en réel sur le parc Sainte-Marie). Ces clés permettent le
+Remplace l'émulateur / Frida : lit les localKey des passerelles via l'API
+cloud (déjà validé en réel sur le parc Sainte-Marie). Ces clés permettent le
 tunnel Zigbee local. À manipuler comme des secrets : jamais en clair dans les
 logs, les diagnostics ou le dépôt.
 """

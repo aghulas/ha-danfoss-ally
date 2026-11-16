@@ -9,5 +9,5 @@
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "after_dependencies": ["mqtt"],
-  "requirements": []
+  "requirements": ["pycryptodome==3.21.0", "requests==2.32.3"]
 }
