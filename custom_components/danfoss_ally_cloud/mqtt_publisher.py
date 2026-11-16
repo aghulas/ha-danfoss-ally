@@ -3,7 +3,9 @@
 mode "discovery"  : publie la config MQTT Discovery de HA
                     (homeassistant/<composant>/<node>/config + topics d'état)
                     pour que HA (ou un autre consommateur) crée les entités. Un pont.
-mode "zigbee2mqtt": topics compatibles z2m (v0.5).
+mode "zigbee2mqtt": bridge/state + bridge/devices (avec exposes) et un topic d'état par
+                    friendly_name, aux noms de propriétés z2m (local_temperature,
+                    occupied_heating_setpoint, battery, pi_heating_demand, window_open).
 
 source ("cloud" | "local") : d'où viennent les valeurs. v0.4 : source cloud, en lecture
 (capteurs + binaire + disponibilité). Le pilotage par MQTT viendra plus tard.
@@ -78,6 +80,71 @@ def etat_payload(dev: DanfossDevice) -> dict[str, Any]:
     return {k: v for k, v in champs.items() if v is not None}
 
 
+# --- mode zigbee2mqtt -------------------------------------------------------------------------
+# Propriétés d'état au nom z2m (eTRV Danfoss) et « exposes » minimal pour bridge/devices.
+# access 1 = publié (lecture) : la v0.5 est en lecture, aucun topic de commande n'est traité.
+_EXPOSES_Z2M: tuple[dict[str, Any], ...] = (
+    {
+        "type": "numeric",
+        "name": "local_temperature",
+        "property": "local_temperature",
+        "access": 1,
+        "unit": "°C",
+    },
+    {
+        "type": "numeric",
+        "name": "occupied_heating_setpoint",
+        "property": "occupied_heating_setpoint",
+        "access": 1,
+        "unit": "°C",
+        "value_min": 5,
+        "value_max": 35,
+        "value_step": 0.5,
+    },
+    {
+        "type": "numeric",
+        "name": "pi_heating_demand",
+        "property": "pi_heating_demand",
+        "access": 1,
+        "unit": "%",
+    },
+    {"type": "numeric", "name": "battery", "property": "battery", "access": 1, "unit": "%"},
+    {
+        "type": "binary",
+        "name": "window_open",
+        "property": "window_open",
+        "access": 1,
+        "value_on": True,
+        "value_off": False,
+    },
+)
+
+
+def etat_z2m(dev: DanfossDevice) -> dict[str, Any]:
+    """État d'une tête aux noms de propriétés zigbee2mqtt. None exclus."""
+    out: dict[str, Any] = {}
+    if dev.temperature is not None:
+        out["local_temperature"] = dev.temperature
+    if dev.consigne is not None:
+        out["occupied_heating_setpoint"] = dev.consigne
+    if dev.ouverture_vanne is not None:
+        out["pi_heating_demand"] = dev.ouverture_vanne
+        out["running_state"] = "heat" if dev.ouverture_vanne > 0 else "idle"
+    if dev.batterie is not None:
+        out["battery"] = dev.batterie
+    if dev.fenetre_ouverte is not None:
+        out["window_open"] = dev.fenetre_ouverte
+    return out
+
+
+def nom_z2m(dev: DanfossDevice) -> str:
+    """friendly_name z2m : nom de la tête (ou id), nettoyé des caractères interdits en topic."""
+    nom = (dev.nom or dev.id or "").strip() or dev.id
+    for c in ("/", "+", "#"):
+        nom = nom.replace(c, "_")
+    return nom
+
+
 class MqttPublisher:
     """Publie l'état des têtes vers le broker MQTT de HA (mode discovery, source cloud)."""
 
@@ -105,6 +172,8 @@ class MqttPublisher:
             return
         if self._source == "local":
             _LOGGER.info("Source MQTT « local » pas encore gérée : publication des valeurs cloud.")
+        if self._mode == "zigbee2mqtt":
+            await self._async_publish_bridge()
         await self._async_publish_all()
         self._unsub = self._coordinator.async_add_listener(self._on_update)
 
@@ -118,7 +187,11 @@ class MqttPublisher:
 
     async def _async_publish_all(self) -> None:
         for dev in self._coordinator.data.values():
-            if dev.est_tete:
+            if not dev.est_tete:
+                continue
+            if self._mode == "zigbee2mqtt":
+                await self._async_publish_device_z2m(dev)
+            else:
                 await self._async_publish_device(dev)
 
     async def _async_publish_device(self, dev: DanfossDevice) -> None:
@@ -144,6 +217,60 @@ class MqttPublisher:
             qos=0,
             retain=True,
         )
+
+    # --- mode zigbee2mqtt ---------------------------------------------------------------------
+
+    def _ieee(self, dev: DanfossDevice) -> str:
+        base = dev.node_id or dev.id or ""
+        return base if base.startswith("0x") else f"0x{base}"
+
+    def device_z2m(self, dev: DanfossDevice) -> dict[str, Any]:
+        """Descripteur z2m d'une tête pour bridge/devices (exposé pour les tests)."""
+        return {
+            "friendly_name": nom_z2m(dev),
+            "ieee_address": self._ieee(dev),
+            "type": "EndDevice",
+            "supported": True,
+            "disabled": False,
+            "definition": {
+                "vendor": "Danfoss",
+                "model": dev.product_id or "Ally eTRV",
+                "description": "Danfoss Ally radiator thermostat",
+                "exposes": list(_EXPOSES_Z2M),
+            },
+        }
+
+    def bridge_devices(self) -> list[dict[str, Any]]:
+        return [self.device_z2m(d) for d in self._coordinator.data.values() if d.est_tete]
+
+    async def _async_publish_bridge(self) -> None:
+        from homeassistant.components import mqtt
+
+        await mqtt.async_publish(
+            self._hass, f"{self._base}/bridge/state", AVAIL_ONLINE, retain=True
+        )
+        await mqtt.async_publish(
+            self._hass,
+            f"{self._base}/bridge/devices",
+            json.dumps(self.bridge_devices()),
+            retain=True,
+        )
+
+    async def _async_publish_device_z2m(self, dev: DanfossDevice) -> None:
+        from homeassistant.components import mqtt
+
+        nom = nom_z2m(dev)
+        await mqtt.async_publish(
+            self._hass,
+            f"{self._base}/{nom}/availability",
+            AVAIL_ONLINE if dev.en_ligne else AVAIL_OFFLINE,
+            retain=True,
+        )
+        await mqtt.async_publish(
+            self._hass, f"{self._base}/{nom}", json.dumps(etat_z2m(dev)), retain=True
+        )
+
+    # --- mode discovery -----------------------------------------------------------------------
 
     def _device_block(self, dev: DanfossDevice) -> dict[str, Any]:
         return {

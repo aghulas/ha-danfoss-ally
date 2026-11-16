@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, MagicMock
 import homeassistant.components.mqtt as mqtt_mod
 
 from custom_components.danfoss_ally_cloud.api import DanfossDevice
-from custom_components.danfoss_ally_cloud.mqtt_publisher import MqttPublisher, etat_payload
+from custom_components.danfoss_ally_cloud.mqtt_publisher import (
+    MqttPublisher,
+    etat_payload,
+    etat_z2m,
+    nom_z2m,
+)
 
 
 def _dev(**kw):
@@ -26,9 +31,9 @@ def _dev(**kw):
     return DanfossDevice(**base)
 
 
-def _publisher(coordinator=None):
+def _publisher(coordinator=None, mode="discovery"):
     return MqttPublisher(
-        MagicMock(), coordinator or MagicMock(), "discovery", "cloud", "danfoss_ally_cloud"
+        MagicMock(), coordinator or MagicMock(), mode, "cloud", "danfoss_ally_cloud"
     )
 
 
@@ -91,3 +96,54 @@ async def test_publish_off_si_broker_absent(monkeypatch):
     pub = _publisher(coordinator)
     await pub.async_start()
     publie.assert_not_awaited()
+
+
+# --- mode zigbee2mqtt -------------------------------------------------------------------------
+
+
+def test_etat_z2m_noms_proprietes():
+    etat = etat_z2m(_dev(ouverture_vanne=40))
+    assert etat["local_temperature"] == 20.5
+    assert etat["occupied_heating_setpoint"] == 21.0
+    assert etat["battery"] == 90.0
+    assert etat["pi_heating_demand"] == 40
+    assert etat["running_state"] == "heat"
+    assert etat["window_open"] is False
+
+
+def test_etat_z2m_running_state_idle():
+    assert etat_z2m(_dev(ouverture_vanne=0))["running_state"] == "idle"
+
+
+def test_nom_z2m_nettoie_les_topics():
+    assert nom_z2m(_dev(nom="Salon/RDC+1")) == "Salon_RDC_1"
+    assert nom_z2m(_dev(nom="")) == "dev-1"  # repli sur l'id
+
+
+def test_device_z2m_descripteur():
+    d = _publisher().device_z2m(_dev(node_id="abc123"))
+    assert d["friendly_name"] == "Salon"
+    assert d["ieee_address"] == "0xabc123"
+    assert d["definition"]["vendor"] == "Danfoss"
+    assert any(e["property"] == "occupied_heating_setpoint" for e in d["definition"]["exposes"])
+
+
+async def test_publish_flow_z2m(monkeypatch):
+    publie = AsyncMock()
+    monkeypatch.setattr(mqtt_mod, "async_publish", publie)
+    monkeypatch.setattr(mqtt_mod, "async_wait_for_mqtt_client", AsyncMock(return_value=True))
+    coordinator = MagicMock()
+    coordinator.data = {"dev-1": _dev()}
+    coordinator.async_add_listener = MagicMock(return_value=lambda: None)
+    pub = _publisher(coordinator, mode="zigbee2mqtt")
+    await pub.async_start()
+
+    topics = [c.args[1] for c in publie.await_args_list]
+    assert "danfoss_ally_cloud/bridge/state" in topics
+    assert "danfoss_ally_cloud/bridge/devices" in topics
+    assert "danfoss_ally_cloud/Salon" in topics
+    assert "danfoss_ally_cloud/Salon/availability" in topics
+    etat = next(
+        c.args[2] for c in publie.await_args_list if c.args[1] == "danfoss_ally_cloud/Salon"
+    )
+    assert json.loads(etat)["local_temperature"] == 20.5
