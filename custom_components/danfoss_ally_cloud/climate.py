@@ -1,16 +1,16 @@
-"""Plateforme climate : une tête Danfoss = un thermostat.
+"""Plateforme climate : un thermostat par PIÈCE (groupe Danfoss), aligné sur le modèle Danfoss.
 
-Lecture : température courante et consigne effective (DP 16). Écriture : consigne DURABLE au niveau
-PIÈCE (groupe), UNIQUEMENT pour les produits du garde-fou (WRITE_VERIFIED_PRODUCTS) et validée avant
-envoi.
+Danfoss pilote une pièce multi-têtes par son GROUPE (programme et consignes communs) ; l'app ne
+règle plus les têtes individuellement. On expose donc **un climate par pièce** :
 
-⚠ Correction de PR #8 : écrire le DP du MODE sur la tête (settings.change) NE TIENT PAS (l'horaire
-réécrit la consigne — vérifié en réel). La vraie voie 1a écrit la consigne du GROUPE de la pièce
-puis réécrit un jour du programme (voir api/client.async_set_room_setpoint et api/const.py). On ne
-pilote donc la consigne que dans les modes CONFORT (at_home) et RÉDUIT (leaving_home), les seuls
-prouvés par capture ; dans les autres modes la consigne n'est pas modifiable (erreur explicite
-plutôt qu'écriture mensongère). Une tête NON groupée n'a pas de méthode voie-1a prouvée : l'écriture
-échoue proprement.
+- lecture agrégée des têtes membres (température moyenne, consigne active, mode, chauffe) ;
+- écriture DURABLE de la consigne selon le mode courant (confort = DP 118 ; réduit = DP 109 + 119)
+  via ``client.async_set_group_setpoint`` (publish groupe + ré-écriture d'un jour du programme),
+  validée en réel.
+
+Les têtes restent exposées comme sous-appareils (capteurs, switches, pré-chauffage local). Une tête
+**isolée** (hors groupe) garde un climate en **lecture seule** : pas de méthode d'écriture voie-1a
+prouvée hors pièce (entité non mensongère plutôt que fausse).
 """
 
 from __future__ import annotations
@@ -25,19 +25,23 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import CloudError, ecriture_autorisee, encode_consigne
+from .api import CloudError, encode_consigne
+from .api.rooms import RoomState
 from .const import (
     DATA_COORDINATOR,
     DOMAIN,
     MODE_GROUP_SETPOINT_DP,
     SETPOINT_STEP,
+    WRITE_VERIFIED_PRODUCTS,
 )
 from .coordinator import DanfossCoordinator
 from .entity import DanfossEntity
 
-# Modes DP 2 -> libellé lisible (attribut d'état, pas encore pilotable en v0.1).
+# Mode DP 2 -> libellé lisible (attribut d'état).
 _MODES = {
     "manual": "manuel",
     "at_home": "confort",
@@ -47,37 +51,157 @@ _MODES = {
     "holiday_sat": "vacances",
 }
 
+_MIN_TEMP = 5.0
+_MAX_TEMP = 35.0
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: DanfossCoordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
-    async_add_entities(
-        DanfossClimate(coordinator, dev.id) for dev in coordinator.data.values() if dev.est_tete
-    )
+    entities: list[ClimateEntity] = [
+        DanfossRoomClimate(coordinator, group_id) for group_id in coordinator.rooms
+    ]
+    # Têtes isolées (hors groupe) : climate en lecture seule.
+    entities += [
+        DanfossHeadClimate(coordinator, dev.id)
+        for dev in coordinator.data.values()
+        if dev.est_tete and dev.id not in coordinator.grouped_ids
+    ]
+    async_add_entities(entities)
 
 
-class DanfossClimate(DanfossEntity, ClimateEntity):
-    """Tête thermostatique (lecture seule en v0.1)."""
+class DanfossRoomClimate(CoordinatorEntity[DanfossCoordinator], ClimateEntity):
+    """Thermostat d'une PIÈCE (groupe de têtes) : lecture agrégée + écriture de consigne durable."""
 
-    _attr_name = None  # entité principale de l'appareil
+    _attr_has_entity_name = True
+    _attr_name = None  # entité principale de l'appareil « pièce »
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT]
     _attr_target_temperature_step = SETPOINT_STEP
-    _attr_min_temp = 5.0
-    _attr_max_temp = 35.0
+
+    def __init__(self, coordinator: DanfossCoordinator, group_id: str) -> None:
+        super().__init__(coordinator)
+        self._group_id = group_id
+        self._attr_unique_id = group_id
+
+    @property
+    def room(self) -> RoomState | None:
+        return self.coordinator.rooms.get(self._group_id)
+
+    @property
+    def available(self) -> bool:
+        room = self.room
+        return bool(super().available and room is not None and room.en_ligne)
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        room = self.room
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"group_{self._group_id}")},
+            name=(room.nom if room and room.nom else self._group_id),
+            manufacturer="Danfoss",
+            model="Pièce Danfoss Ally (groupe)",
+        )
+
+    @property
+    def supported_features(self) -> ClimateEntityFeature:
+        # Écriture de consigne seulement pour les produits vérifiés (sinon lecture seule).
+        room = self.room
+        if room is not None and room.pid in WRITE_VERIFIED_PRODUCTS:
+            return ClimateEntityFeature.TARGET_TEMPERATURE
+        return ClimateEntityFeature(0)
+
+    @property
+    def current_temperature(self) -> float | None:
+        room = self.room
+        return room.temperature if room else None
+
+    @property
+    def target_temperature(self) -> float | None:
+        room = self.room
+        return room.consigne if room else None
+
+    @property
+    def min_temp(self) -> float:
+        room = self.room
+        return room.borne_basse if room and room.borne_basse is not None else _MIN_TEMP
+
+    @property
+    def max_temp(self) -> float:
+        room = self.room
+        return room.borne_haute if room and room.borne_haute is not None else _MAX_TEMP
+
+    @property
+    def hvac_mode(self) -> HVACMode:
+        return HVACMode.HEAT
+
+    @property
+    def hvac_action(self) -> HVACAction | None:
+        room = self.room
+        if room is None or room.chauffe is None:
+            return None
+        return HVACAction.HEATING if room.chauffe else HVACAction.IDLE
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        room = self.room
+        if room is None:
+            return {}
+        attrs: dict = {"nb_tetes": room.nb_tetes}
+        if room.mode is not None:
+            attrs["mode"] = _MODES.get(room.mode, room.mode)
+        if room.consignes:
+            attrs["consignes"] = room.consignes
+        return attrs
+
+    async def async_set_temperature(self, **kwargs) -> None:
+        """Écrit la consigne DURABLE de la pièce selon le mode courant (confort/réduit).
+
+        Publie la consigne sur le groupe puis réécrit un jour du programme (voir
+        ``client.async_set_group_setpoint``). Hors modes confort/réduit → erreur propre (les autres
+        modes n'ont pas de méthode groupe voie-1a prouvée).
+        """
+        room = self.room
+        if room is None or room.pid not in WRITE_VERIFIED_PRODUCTS:
+            return
+        temp = kwargs.get(ATTR_TEMPERATURE)
+        if temp is None:
+            return
+        dps_nums = MODE_GROUP_SETPOINT_DP.get(room.mode or "")
+        if not dps_nums:
+            raise HomeAssistantError(
+                "Consigne modifiable seulement en mode confort (at_home) ou réduit "
+                f"(leaving_home) ; mode courant : {room.mode!r}."
+            )
+        valeur = encode_consigne(temp, self.min_temp, self.max_temp, SETPOINT_STEP)
+        dps = {str(dp): valeur for dp in dps_nums}
+        try:
+            await self.coordinator.client.async_set_group_setpoint(self._group_id, room.pid, dps)
+        except CloudError as err:
+            raise HomeAssistantError(f"écriture de consigne refusée : {err}") from err
+        await self.coordinator.async_request_refresh()
+
+
+class DanfossHeadClimate(DanfossEntity, ClimateEntity):
+    """Thermostat d'une tête ISOLÉE (hors groupe), en LECTURE SEULE.
+
+    Pas de méthode d'écriture voie-1a prouvée hors pièce : on n'expose pas TARGET_TEMPERATURE
+    (entité non mensongère). Les têtes groupées, elles, se pilotent par leur pièce (voir
+    ``DanfossRoomClimate``) et n'ont pas de climate propre.
+    """
+
+    _attr_name = None
+    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_hvac_modes = [HVACMode.HEAT]
+    _attr_target_temperature_step = SETPOINT_STEP
+    _attr_supported_features = ClimateEntityFeature(0)
+    _attr_min_temp = _MIN_TEMP
+    _attr_max_temp = _MAX_TEMP
 
     @property
     def unique_id(self) -> str:
         return self._device_id
-
-    @property
-    def supported_features(self) -> ClimateEntityFeature:
-        # Écriture de consigne seulement pour les produits du garde-fou (sinon lecture seule).
-        dev = self.device
-        if dev is not None and ecriture_autorisee(dev):
-            return ClimateEntityFeature.TARGET_TEMPERATURE
-        return ClimateEntityFeature(0)
 
     @property
     def current_temperature(self) -> float | None:
@@ -106,11 +230,9 @@ class DanfossClimate(DanfossEntity, ClimateEntity):
     @property
     def hvac_action(self) -> HVACAction | None:
         dev = self.device
-        if dev is None or not dev.en_ligne:
+        if dev is None or not dev.en_ligne or dev.ouverture_vanne is None:
             return None
-        if dev.ouverture_vanne is not None:
-            return HVACAction.HEATING if dev.ouverture_vanne > 0 else HVACAction.IDLE
-        return None
+        return HVACAction.HEATING if dev.ouverture_vanne > 0 else HVACAction.IDLE
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -123,36 +245,3 @@ class DanfossClimate(DanfossEntity, ClimateEntity):
         if dev.consignes:
             attrs["consignes"] = dev.consignes
         return attrs
-
-    async def async_set_temperature(self, **kwargs) -> None:
-        """Écrit la consigne DURABLE de la PIÈCE selon le mode courant (confort/réduit).
-
-        Prouvé en réel : écrire le DP16 ``temp_set`` — comme le DP du mode sur la tête (PR #8) —
-        ne tient pas sur une tête sur programme (l'horaire réécrit la consigne). La vraie voie 1a
-        publie la consigne sur le GROUPE de la pièce (confort = DP 118 ; réduit = DP 109 + 119) puis
-        réécrit un jour du programme pour que les têtes la reprennent
-        (``client.async_set_room_setpoint``).
-
-        ⚠ Effet de PIÈCE : toutes les têtes du groupe suivent la nouvelle consigne, et le ré-envoi
-        du programme touche la vraie prog de chauffe. Hors modes confort/réduit, ou si la tête
-        n'est pas groupée, l'écriture échoue proprement (pas de valeur mensongère).
-        """
-        dev = self.device
-        if dev is None or not ecriture_autorisee(dev):
-            return
-        temp = kwargs.get(ATTR_TEMPERATURE)
-        if temp is None:
-            return
-        dps_nums = MODE_GROUP_SETPOINT_DP.get(dev.mode or "")
-        if not dps_nums:
-            raise HomeAssistantError(
-                "Consigne modifiable seulement en mode confort (at_home) ou réduit "
-                f"(leaving_home) ; mode courant : {dev.mode!r}."
-            )
-        valeur = encode_consigne(temp, self.min_temp, self.max_temp, SETPOINT_STEP)
-        dps = {str(dp): valeur for dp in dps_nums}
-        try:
-            await self.coordinator.client.async_set_room_setpoint(dev.id, dps)
-        except CloudError as err:
-            raise HomeAssistantError(f"écriture de consigne refusée : {err}") from err
-        await self.coordinator.async_request_refresh()

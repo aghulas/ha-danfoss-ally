@@ -21,6 +21,9 @@ class _FakeCloudCoord:
         self.last_update_success = last_update_success
         self.refreshed = False
 
+    def group_of(self, head_id):
+        return None
+
     async def async_request_refresh(self):
         self.refreshed = True
 

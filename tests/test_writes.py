@@ -10,7 +10,6 @@ from custom_components.danfoss_ally_cloud.api import (
     ecriture_autorisee,
     encode_consigne,
 )
-from custom_components.danfoss_ally_cloud.climate import DanfossClimate
 from custom_components.danfoss_ally_cloud.switch import SWITCHES, DanfossSwitch
 
 
@@ -31,7 +30,6 @@ def _coord(dev):
     coord = MagicMock()
     coord.data = {dev.id: dev}
     coord.client.async_write_setting = AsyncMock(return_value={"ok": True})
-    coord.client.async_set_room_setpoint = AsyncMock(return_value="90000001")
     coord.async_request_refresh = AsyncMock()
     return coord
 
@@ -50,24 +48,6 @@ def test_encode_consigne_arrondi_et_bornes():
         encode_consigne(40.0, 5.0, 35.0)
     with pytest.raises(CloudWriteError):
         encode_consigne("chaud", 5.0, 35.0)
-
-
-async def test_climate_set_temperature_ecrit_consigne_piece():
-    dev = _dev(mode="at_home")
-    coord = _coord(dev)
-    ent = DanfossClimate(coord, dev.id)
-    await ent.async_set_temperature(temperature=21.0)
-    coord.client.async_set_room_setpoint.assert_awaited_once_with(dev.id, {"118": 210})
-    coord.client.async_write_setting.assert_not_awaited()  # plus de DP16/mode sur la tête
-    coord.async_request_refresh.assert_awaited_once()
-
-
-async def test_climate_refuse_modele_non_autorise():
-    dev = _dev("autre")
-    coord = _coord(dev)
-    ent = DanfossClimate(coord, dev.id)
-    await ent.async_set_temperature(temperature=21.0)
-    coord.client.async_set_room_setpoint.assert_not_awaited()
 
 
 async def test_switch_verrou_enfant_envoie_dp30():
