@@ -35,10 +35,15 @@ from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN
 
+# Classe de collection des ressources Lovelace (mode stockage). Rangée dans une
+# variable annotée `type | None` plutôt que de réassigner le nom importé : lovelace
+# peut être absent (HA minimal), et réassigner un nom de classe déplaît à mypy.
 try:
     from homeassistant.components.lovelace.resources import ResourceStorageCollection
-except Exception:  # noqa: BLE001 - lovelace peut être absent (HA minimal)
-    ResourceStorageCollection = None
+
+    _ResourcesCls: type | None = ResourceStorageCollection
+except ImportError:  # lovelace absent
+    _ResourcesCls = None
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -101,11 +106,11 @@ def _resources_collection(hass: HomeAssistant):
     En mode YAML (ou si lovelace n'est pas chargé), renvoie None : la ressource
     doit alors être ajoutée à la main (documenté dans le README).
     """
-    if ResourceStorageCollection is None:
+    if _ResourcesCls is None:
         return None
     lovelace = hass.data.get("lovelace")
     resources = getattr(lovelace, "resources", None)
-    if not isinstance(resources, ResourceStorageCollection):
+    if not isinstance(resources, _ResourcesCls):
         return None
     return resources
 

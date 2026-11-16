@@ -65,7 +65,7 @@ async def test_collection_absente_hors_lovelace(hass: HomeAssistant):
 
 async def test_import_lovelace_indisponible(hass: HomeAssistant, monkeypatch):
     # HA minimal sans lovelace : le garde-fou renvoie None.
-    monkeypatch.setattr(frontend, "ResourceStorageCollection", None)
+    monkeypatch.setattr(frontend, "_ResourcesCls", None)
     await _install_fake_lovelace(hass)  # présent, mais classe indisponible
     assert _resources_collection(hass) is None
 
