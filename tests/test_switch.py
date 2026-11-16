@@ -115,3 +115,11 @@ def test_preheat_indisponible_si_tete_hors_ligne():
 
 def test_switches_catalogue_non_vide():
     assert {d.key for d in switch_mod.SWITCHES} == {"verrou_enfant", "detection_fenetre"}
+
+
+async def test_preheat_ecrire_sans_appareil_ne_fait_rien():
+    # Tête disparue du cache cloud : l'écriture (turn_on) sort avant toute I/O, sans hass.
+    cloud = _FakeCloudCoord({})
+    local = _FakeLocalCoord({})
+    ph = DanfossPreheat(local, cloud, "absent")
+    await ph.async_turn_on()  # garde-fou : dev None -> return
