@@ -19,7 +19,11 @@ passerelles et publication MQTT des appareils.
 L'API cloud couvre l'essentiel. Mais on a établi en réel des cas où le cloud
 **ment ou n'agit pas** — à traiter en local (détail dans `docs/architecture.md`) :
 
-- `at_home` / `leaving_home` cloud → tête en **manuel** au lieu du programme.
+- Le **passage en mode manuel** (DP 2 `manual`) efface le programme de la tête
+  (R4) ; `at_home` / `leaving_home` publiés par le DP 2 ne sont que des
+  **étiquettes** côté cloud : la tête garde la consigne de son programme (R5).
+  Le retour au programme = réécrire le programme de la pièce, puis publier
+  `at_home`. Détail et règles R1–R7 : `docs/contrat-interface.md`.
 - Pré-chauffage : DP 1 cloud ne touche que le cache passerelle ; le vrai levier
   est l'attribut Zigbee **0x0025**, accessible seulement par le tunnel local.
 - `update_time` est événementiel : `online` fait foi, pas lui.
