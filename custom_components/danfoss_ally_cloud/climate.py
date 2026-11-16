@@ -1,11 +1,16 @@
 """Plateforme climate : une tête Danfoss = un thermostat.
 
-Lecture : température courante et consigne effective (DP 16). Écriture (v0.2) : consigne via
-tuya.m.custom.wkf.settings.change, UNIQUEMENT pour les produits du garde-fou
-(WRITE_VERIFIED_PRODUCTS) et validée avant envoi. Les modes at_home / leaving_home du cloud passent
-la tête en
-MANUEL au lieu du programme (voir docs/architecture.md) : on n'écrit donc que la consigne, pas ces
-modes. ⚠ Effet réel de l'écriture de consigne à confirmer en réel.
+Lecture : température courante et consigne effective (DP 16). Écriture : consigne DURABLE au niveau
+PIÈCE (groupe), UNIQUEMENT pour les produits du garde-fou (WRITE_VERIFIED_PRODUCTS) et validée avant
+envoi.
+
+⚠ Correction de PR #8 : écrire le DP du MODE sur la tête (settings.change) NE TIENT PAS (l'horaire
+réécrit la consigne — vérifié en réel). La vraie voie 1a écrit la consigne du GROUPE de la pièce
+puis réécrit un jour du programme (voir api/client.async_set_room_setpoint et api/const.py). On ne
+pilote donc la consigne que dans les modes CONFORT (at_home) et RÉDUIT (leaving_home), les seuls
+prouvés par capture ; dans les autres modes la consigne n'est pas modifiable (erreur explicite
+plutôt qu'écriture mensongère). Une tête NON groupée n'a pas de méthode voie-1a prouvée : l'écriture
+échoue proprement.
 """
 
 from __future__ import annotations
@@ -19,14 +24,14 @@ from homeassistant.components.climate import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .api import ecriture_autorisee, encode_consigne
+from .api import CloudError, ecriture_autorisee, encode_consigne
 from .const import (
     DATA_COORDINATOR,
     DOMAIN,
-    DP_TEMP_SET,
-    MODE_SETPOINT_DP,
+    MODE_GROUP_SETPOINT_DP,
     SETPOINT_STEP,
 )
 from .coordinator import DanfossCoordinator
@@ -120,11 +125,17 @@ class DanfossClimate(DanfossEntity, ClimateEntity):
         return attrs
 
     async def async_set_temperature(self, **kwargs) -> None:
-        """Écrit la consigne du MODE ACTIF (validée et bornée). Refuse si modèle non autorisé.
+        """Écrit la consigne DURABLE de la PIÈCE selon le mode courant (confort/réduit).
 
-        Prouvé en réel : écrire le DP16 ``temp_set`` ne tient pas sur une tête sur programme
-        (l'horaire le réécrit). On écrit donc la consigne du réglage du mode courant
-        (``at_home_setting``…) ; ``temp_set`` suit. Repli sur DP16 si le mode est inconnu.
+        Prouvé en réel : écrire le DP16 ``temp_set`` — comme le DP du mode sur la tête (PR #8) —
+        ne tient pas sur une tête sur programme (l'horaire réécrit la consigne). La vraie voie 1a
+        publie la consigne sur le GROUPE de la pièce (confort = DP 118 ; réduit = DP 109 + 119) puis
+        réécrit un jour du programme pour que les têtes la reprennent
+        (``client.async_set_room_setpoint``).
+
+        ⚠ Effet de PIÈCE : toutes les têtes du groupe suivent la nouvelle consigne, et le ré-envoi
+        du programme touche la vraie prog de chauffe. Hors modes confort/réduit, ou si la tête
+        n'est pas groupée, l'écriture échoue proprement (pas de valeur mensongère).
         """
         dev = self.device
         if dev is None or not ecriture_autorisee(dev):
@@ -132,9 +143,16 @@ class DanfossClimate(DanfossEntity, ClimateEntity):
         temp = kwargs.get(ATTR_TEMPERATURE)
         if temp is None:
             return
+        dps_nums = MODE_GROUP_SETPOINT_DP.get(dev.mode or "")
+        if not dps_nums:
+            raise HomeAssistantError(
+                "Consigne modifiable seulement en mode confort (at_home) ou réduit "
+                f"(leaving_home) ; mode courant : {dev.mode!r}."
+            )
         valeur = encode_consigne(temp, self.min_temp, self.max_temp, SETPOINT_STEP)
-        dp = MODE_SETPOINT_DP.get(dev.mode or "", DP_TEMP_SET)
-        await self.coordinator.client.async_write_setting(
-            dev.id, dev.product_id or "", {str(dp): valeur}
-        )
+        dps = {str(dp): valeur for dp in dps_nums}
+        try:
+            await self.coordinator.client.async_set_room_setpoint(dev.id, dps)
+        except CloudError as err:
+            raise HomeAssistantError(f"écriture de consigne refusée : {err}") from err
         await self.coordinator.async_request_refresh()

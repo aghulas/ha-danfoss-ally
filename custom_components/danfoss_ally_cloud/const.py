@@ -11,6 +11,8 @@ from __future__ import annotations
 from .api.const import (  # noqa: F401 - ré-export pour l'intégration (device/protocole)
     DP_AT_HOME_SETPOINT,
     DP_CHILD_LOCK,
+    DP_CONSIGNE_CONFORT,
+    DP_CONSIGNE_REDUIT,
     DP_HEAT_DEMAND,
     DP_HOLIDAY_SETPOINT,
     DP_LEAVING_HOME_SETPOINT,
@@ -21,6 +23,7 @@ from .api.const import (  # noqa: F401 - ré-export pour l'intégration (device/
     DP_TEMP_SET,
     DP_UPPER_TEMP,
     DP_WINDOW_DETECT,
+    MODE_GROUP_SETPOINT_DP,
     MODE_SETPOINT_DP,
     SETPOINT_MAX,
     SETPOINT_MIN,

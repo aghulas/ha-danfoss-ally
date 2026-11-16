@@ -38,6 +38,31 @@ MODE_SETPOINT_DP = {
     "manual": DP_MANUAL_SETPOINT,
 }
 
+# --- Écriture de consigne DURABLE, voie 1a « vraie » : au niveau PIÈCE (groupe) -----------------
+# Corrige PR #8 (mergé) : écrire le DP du MODE sur la TÊTE (settings.change) NE TIENT PAS non plus
+# (vérifié en réel le 16/11/2026, 0.1.0). La méthode que l'app emploie réellement (captures
+# 15-16/11, _CONSIGNES_PIECE du connecteur MCP, rejouées et relues dans les têtes) :
+#   1. publier la consigne sur le GROUPE de la pièce via s.m.dev.group.dp.publish {dps, groupId} ;
+#   2. PUIS réécrire le programme de la pièce (un jour suffit, le cloud renvoie toute la semaine aux
+#      têtes avec les consignes du moment), sinon les têtes gardent l'ancienne valeur dans leurs
+#      transitions programmées.
+# Échelle : dixièmes de °C, pas de 0,5 — identique à encode_consigne (round(°C*2)*5, 50..350).
+#   confort = DP 118 (at_home_setting)
+#   réduit  = DP 109 ET DP 119 (les deux) — leaving_home_setting + jumeau capté par l'app
+DP_CONSIGNE_CONFORT = 118
+DP_CONSIGNE_REDUIT = (109, 119)
+
+# Mode courant (DP 2) -> DP(s) de consigne de PIÈCE à publier au groupe. Seuls confort/réduit sont
+# prouvés par capture ; les autres modes n'ont pas de méthode groupe voie-1a vérifiée.
+MODE_GROUP_SETPOINT_DP: dict[str, tuple[int, ...]] = {
+    "at_home": (DP_CONSIGNE_CONFORT,),
+    "leaving_home": DP_CONSIGNE_REDUIT,
+}
+
+# Types de ressource « week timer » Tuya : 2 = pièce (groupe), 1 = tête isolée.
+RES_TYPE_GROUP = 2
+RES_TYPE_DEVICE = 1
+
 # Le vrai levier du pré-chauffage est l'attribut Zigbee standard (tunnel local uniquement).
 ZB_ATTR_PROGRAMMING_MODE = 0x0025  # bit 0 programme, bit 1 pré-chauffage
 
