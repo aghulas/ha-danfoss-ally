@@ -1,13 +1,20 @@
 {
   "domain": "danfoss_ally_cloud",
   "name": "Danfoss Ally (Cloud)",
-  "after_dependencies": ["mqtt"],
-  "codeowners": ["@aghulas"],
+  "after_dependencies": [
+    "mqtt"
+  ],
+  "codeowners": [
+    "@aghulas"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/aghulas/ha-danfoss-ally",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/aghulas/ha-danfoss-ally/issues",
-  "requirements": ["pycryptodome==3.21.0", "tinytuya==1.15.1"],
-  "version": "0.0.1"
+  "requirements": [
+    "pycryptodome==3.21.0",
+    "tinytuya==1.15.1"
+  ],
+  "version": "0.1.0"
 }
