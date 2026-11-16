@@ -92,7 +92,7 @@
       "fields": {
         "target": {
           "name": "Cible",
-          "description": "{\"type\": \"room\"|\"device\", \"id\": \"…\"}."
+          "description": "Cible : type « room » ou « device », et son identifiant."
         },
         "refresh": {
           "name": "Rafraîchir",
@@ -110,11 +110,11 @@
       "fields": {
         "target": {
           "name": "Cible",
-          "description": "{\"type\": \"room\"|\"device\", \"id\": \"…\"}."
+          "description": "Cible : type « room » ou « device », et son identifiant."
         },
         "days": {
           "name": "Jours",
-          "description": "{\"mon\": [{\"start\": \"08:30\", \"end\": \"17:30\"}], …}."
+          "description": "Jours à écrire : chaque jour porte ses plages (heures de début et de fin)."
         },
         "config_entry_id": {
           "name": "Compte",
@@ -150,7 +150,7 @@
       "fields": {
         "target": {
           "name": "Cible",
-          "description": "{\"type\": \"room\"|\"device\", \"id\": \"…\"}."
+          "description": "Cible : type « room » ou « device », et son identifiant."
         },
         "config_entry_id": {
           "name": "Compte",

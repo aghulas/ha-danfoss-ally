@@ -92,7 +92,7 @@
       "fields": {
         "target": {
           "name": "Target",
-          "description": "{\"type\": \"room\"|\"device\", \"id\": \"…\"}."
+          "description": "Target: type 'room' or 'device', and its id."
         },
         "refresh": {
           "name": "Refresh",
@@ -110,11 +110,11 @@
       "fields": {
         "target": {
           "name": "Target",
-          "description": "{\"type\": \"room\"|\"device\", \"id\": \"…\"}."
+          "description": "Target: type 'room' or 'device', and its id."
         },
         "days": {
           "name": "Days",
-          "description": "{\"mon\": [{\"start\": \"08:30\", \"end\": \"17:30\"}], …}."
+          "description": "Days to write: each day holds its ranges (start and end times)."
         },
         "config_entry_id": {
           "name": "Account",
@@ -150,7 +150,7 @@
       "fields": {
         "target": {
           "name": "Target",
-          "description": "{\"type\": \"room\"|\"device\", \"id\": \"…\"}."
+          "description": "Target: type 'room' or 'device', and its id."
         },
         "config_entry_id": {
           "name": "Account",
