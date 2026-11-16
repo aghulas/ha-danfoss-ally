@@ -129,24 +129,34 @@ class CloudClient:
             else:
                 await self.async_login()
 
-    async def _request(
-        self, api: str, version: str, body=None, extra_params=None, _retry: bool = True
-    ):
-        """Requête ``m.*`` dans l'executor, avec re-login unique sur erreur de session."""
+    async def _request_once(self, api: str, version: str, body, extra_params):
+        """Un seul essai de requête ``m.*`` dans l'executor, sous verrou.
+
+        Laisse remonter ``TuyaApiError`` brut : l'orchestration (re-login + rejeu) se fait
+        HORS du verrou, car ``asyncio.Lock`` n'est pas réentrant (un rejeu sous verrou
+        tenu se bloquerait indéfiniment).
+        """
         async with self._lock:
             await self._ensure_client()
             client = self._client
             assert client is not None
-            try:
-                return await asyncio.to_thread(
-                    client.request, api, version, body, extra_params=extra_params
-                )
-            except TuyaApiError as err:
-                if _retry and _is_session_error(err):
-                    _LOGGER.debug("session cloud invalide (%s) : re-login", err.code)
-                    await self.async_login()
-                    return await self._request(api, version, body, extra_params, _retry=False)
+            return await asyncio.to_thread(
+                client.request, api, version, body, extra_params=extra_params
+            )
+
+    async def _request(self, api: str, version: str, body=None, extra_params=None):
+        """Requête ``m.*`` avec re-login unique sur erreur de session, puis rejeu."""
+        try:
+            return await self._request_once(api, version, body, extra_params)
+        except TuyaApiError as err:
+            if not _is_session_error(err):
                 raise CloudError(f"cloud Tuya : {err.code} {err.msg}") from err
+            _LOGGER.debug("session cloud invalide (%s) : re-login", err.code)
+            await self.async_login()
+            try:
+                return await self._request_once(api, version, body, extra_params)
+            except TuyaApiError as err2:
+                raise CloudError(f"cloud Tuya : {err2.code} {err2.msg}") from err2
 
     async def async_get_homes(self) -> list[dict]:
         """Liste des maisons du compte (tuya.m.location.list). Renvoie [{gid, nom}]."""
