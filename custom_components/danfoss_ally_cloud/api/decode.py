@@ -125,12 +125,55 @@ class DanfossDevice:
     verrouillage: bool | None = None  # DP 30 child_lock
     borne_haute: float | None = None  # °C (DP 18)
     borne_basse: float | None = None  # °C (DP 27)
+    schedule_active: bool | None = None  # DP 172 bit 0 (R6) ; None si DP absent
+    preheat: bool | None = None  # DP 172 bit 1 (R6) ; None si DP absent
+    mounting: bool | None = None  # DP 149 (mode montage : ne régule pas)
     defauts: list[dict[str, Any]] = field(default_factory=list)
     dps: dict[str, Any] = field(default_factory=dict)
 
     @property
     def est_tete(self) -> bool:
         return self.categorie == "tete"
+
+    @property
+    def inconsistent(self) -> bool:
+        """Mode affiché confort/réduit alors que le programme est inactif dans la tête (R6)."""
+        return self.mode in ("at_home", "leaving_home") and self.schedule_active is False
+
+
+def _int(v: Any) -> int | None:
+    if v is None or v == "":
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def decoder_operation(dp172: Any) -> tuple[bool | None, bool | None]:
+    """DP 172 (operation_mode, reflet de l'attribut Zigbee 0x0025) -> (programme, pré-chauffage).
+
+    bit 0 = programme actif, bit 1 = pré-chauffage ; 0 = manuel. (None, None) si le DP est absent.
+    """
+    v = _int(dp172)
+    if v is None:
+        return None, None
+    return bool(v & 1), bool(v & 2)
+
+
+def etat_tete(dev: DanfossDevice, room_id: str | None = None) -> dict[str, Any]:
+    """`HeadState` du contrat (§3.3) à partir d'un appareil décodé."""
+    return {
+        "device_id": dev.id,
+        "name": dev.nom,
+        "room_id": room_id,
+        "online": dev.en_ligne,
+        "mode_displayed": dev.mode,
+        "schedule_active": dev.schedule_active,
+        "preheat": dev.preheat,
+        "mounting": bool(dev.mounting),
+        "inconsistent": dev.inconsistent,
+    }
 
 
 def _online(appareil: dict[str, Any]) -> bool:
@@ -169,6 +212,8 @@ def decoder(appareil: dict[str, Any]) -> DanfossDevice:
     d.detection_fenetre = _bool(dps.get("116"))
     d.borne_haute = _num(dps.get("18"), 10)
     d.borne_basse = _num(dps.get("27"), 10)
+    d.schedule_active, d.preheat = decoder_operation(dps.get("172"))
+    d.mounting = _bool(dps.get("149"))
     ws = dps.get("25")
     if ws is not None and ws != "":
         d.fenetre_ouverte = _bool(ws)
