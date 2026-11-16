@@ -46,12 +46,29 @@ def tete(dev_id="dev-1", nom="Salon", **kw) -> DanfossDevice:
 
 
 class FakeCloudClient:
-    """Faux CloudClient : renvoie des têtes synthétiques, sans réseau."""
+    """Faux CloudClient : renvoie des têtes synthétiques et une topologie de pièces, sans réseau.
 
-    def __init__(self, *args, devices=None, validate_exc=None, list_exc=None, **kwargs) -> None:
+    ``groups`` : liste de pièces [{group_id, nom, pid, nb_tetes}]. ``members`` :
+    {group_id: [devId]}. Par défaut aucune pièce : les têtes sont donc traitées comme isolées.
+    """
+
+    def __init__(
+        self,
+        *args,
+        devices=None,
+        validate_exc=None,
+        list_exc=None,
+        groups=None,
+        members=None,
+        topology_exc=None,
+        **kwargs,
+    ) -> None:
         self._devices = [tete()] if devices is None else devices
         self._validate_exc = validate_exc
         self._list_exc = list_exc
+        self._groups = groups or []
+        self._members = members or {}
+        self._topology_exc = topology_exc
         self.closed = False
 
     async def async_validate(self):
@@ -63,6 +80,19 @@ class FakeCloudClient:
         if self._list_exc is not None:
             raise self._list_exc
         return list(self._devices)
+
+    async def async_get_homes(self):
+        return [{"gid": 1, "nom": "Maison"}]
+
+    async def async_list_groups(self, gid):
+        if self._topology_exc is not None:
+            raise self._topology_exc
+        return list(self._groups)
+
+    async def async_group_members(self, gid):
+        if self._topology_exc is not None:
+            raise self._topology_exc
+        return dict(self._members)
 
     async def async_close(self):
         self.closed = True

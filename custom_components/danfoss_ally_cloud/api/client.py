@@ -16,7 +16,9 @@ import asyncio
 import json
 import logging
 
+from . import schedule
 from ._tuya.http import ENDPOINTS, TuyaApiError, TuyaHttpClient, login
+from .const import RES_TYPE_GROUP
 from .decode import DanfossDevice, decoder
 
 _LOGGER = logging.getLogger(__name__)
@@ -232,6 +234,168 @@ class CloudClient:
             "settings": json.dumps(dps, separators=(",", ":")),
         }
         return await self._request("tuya.m.custom.wkf.settings.change", "1.0", body)
+
+    # --- Écriture de consigne DURABLE au niveau PIÈCE (groupe), voie 1a « vraie » ---------------
+    # Remplace l'approche fausse de PR #8 (DP du mode sur la tête). Voir api/const.py
+    # (MODE_GROUP_SETPOINT_DP) : publier la consigne sur le GROUPE, puis réécrire un jour du
+    # programme pour que les têtes reprennent la valeur dans leurs transitions.
+
+    async def async_list_groups(self, gid: str | int) -> list[dict]:
+        """Pièces (groupes Tuya) d'une maison (m.life.my.group.device.group.list v4.3).
+
+        Renvoie [{group_id, nom, nb_tetes, pid}]. Une pièce multi-têtes se pilote par son GROUPE.
+        """
+        r = await self._request("m.life.my.group.device.group.list", "4.3", {"gid": gid})
+        out: list[dict] = []
+        for g in r if isinstance(r, list) else []:
+            gid5 = g.get("id") or g.get("groupId")
+            if gid5 is not None:
+                out.append(
+                    {
+                        "group_id": gid5,
+                        "nom": g.get("name"),
+                        "nb_tetes": g.get("deviceNum"),
+                        "pid": g.get("productId"),
+                    }
+                )
+        return out
+
+    async def async_group_members(self, gid: str | int) -> dict[str, list[str]]:
+        """Têtes membres de chaque pièce (m.life.my.group.device.relation.list v3.2).
+
+        Renvoie {group_id (str): [devId, ...]} : clé « 5 » = groupes-programme (type 5), leurs
+        enfants « 6 » = têtes membres.
+        """
+        rel = await self._request("m.life.my.group.device.relation.list", "3.2", {"gid": gid})
+        out: dict[str, list[str]] = {}
+        for entry in rel.get("5", []) if isinstance(rel, dict) else []:
+            group_id = str(entry.get("id"))
+            children = (entry.get("children") or {}).get("6") or []
+            out[group_id] = [c.get("id") for c in children if c.get("id")]
+        return out
+
+    async def async_resolve_group(self, dev_id: str) -> tuple[str, str | None] | None:
+        """Trouve la pièce (groupe) d'une tête : (group_id, pid), ou None si non groupée.
+
+        Une tête NON groupée n'a pas de méthode de consigne voie-1a prouvée (le connecteur passe
+        alors par l'API officielle Danfoss) : l'appelant doit refuser plutôt que mentir.
+        """
+        for home in await self.async_get_homes():
+            gid = home["gid"]
+            members = await self.async_group_members(gid)
+            group_id = next((g for g, devs in members.items() if dev_id in devs), None)
+            if group_id is None:
+                continue
+            pid = next(
+                (
+                    g["pid"]
+                    for g in await self.async_list_groups(gid)
+                    if str(g["group_id"]) == str(group_id)
+                ),
+                None,
+            )
+            return (group_id, pid)
+        return None
+
+    async def async_group_publish(self, group_id: str | int, dps: dict) -> object:
+        """Publie des DP sur une PIÈCE (groupe) : s.m.dev.group.dp.publish {dps, groupId}."""
+        return await self._request(
+            "s.m.dev.group.dp.publish",
+            "1.0",
+            {"dps": json.dumps(dps, separators=(",", ":")), "groupId": int(group_id)},
+        )
+
+    async def async_read_week_timer(
+        self,
+        res_id: str | int,
+        pid: str,
+        *,
+        res_type: int = RES_TYPE_GROUP,
+        gw_id: str | int | None = None,
+    ) -> list[dict]:
+        """Programme hebdomadaire brut (tuya.m.custom.wkf.week.timer.list) : [{loops, loopData}]."""
+        body = {
+            "devId": str(res_id),
+            "gwId": str(gw_id or res_id),
+            "pid": pid,
+            "resId": str(res_id),
+            "resType": res_type,
+        }
+        r = await self._request("tuya.m.custom.wkf.week.timer.list", "1.0", body)
+        data = r.get("data") if isinstance(r, dict) else r
+        return data if isinstance(data, list) else []
+
+    async def async_write_week_day(
+        self,
+        res_id: str | int,
+        pid: str,
+        loops: str,
+        periods: list[dict],
+        *,
+        res_type: int = RES_TYPE_GROUP,
+        gw_id: str | int | None = None,
+    ) -> None:
+        """Réécrit UN jour du programme : delete puis create.
+
+        ``periods`` = fenêtres de confort « HH:MM ». ``loops`` = masque d'un seul jour (bit 0 =
+        dimanche). ``periods`` vide = jour éteint (pas de create). Deux appels v1.0, corps
+        {devId, gwId, loops, pid, resId, resType}.
+        """
+        base = {
+            "devId": str(res_id),
+            "gwId": str(gw_id or res_id),
+            "pid": pid,
+            "resId": str(res_id),
+            "resType": res_type,
+        }
+        await self._request("tuya.m.custom.wkf.week.timer.delete", "1.0", {**base, "loops": loops})
+        if periods:
+            await self._request(
+                "tuya.m.custom.wkf.week.timer.create",
+                "1.0",
+                {**base, "loops": loops, "periods": json.dumps(periods)},
+            )
+
+    async def async_set_group_setpoint(
+        self, group_id: str | int, pid: str | None, dps: dict, *, repush: bool = True
+    ) -> None:
+        """Consigne DURABLE sur une PIÈCE dont on connaît déjà le groupe (voie 1a « vraie »).
+
+        1. publie ``dps`` (ex. {"118": 60} confort, {"109": 60, "119": 60} réduit) sur le groupe ;
+        2. si ``repush`` et ``pid`` connu, réécrit UN jour du programme à l'identique pour que les
+           têtes reprennent la nouvelle consigne dans leurs transitions (sinon elles gardent
+           l'ancienne).
+
+        ⚠ Effet de pièce : toutes les têtes du groupe sont concernées, et le ré-envoi touche la
+        vraie prog de chauffe. À valider en réel avant tout usage (voir CLAUDE.md, mémoires).
+        """
+        await self.async_group_publish(group_id, dps)
+        if repush and pid:
+            data = await self.async_read_week_timer(group_id, pid)
+            jour = schedule.premier_jour_confort(data)
+            if jour is not None:
+                await self.async_write_week_day(
+                    group_id,
+                    pid,
+                    jour["loops"],
+                    schedule.confort_periods(jour.get("loopData")),
+                )
+
+    async def async_set_room_setpoint(self, dev_id: str, dps: dict, *, repush: bool = True) -> str:
+        """Consigne DURABLE pour la pièce d'une tête, en résolvant d'abord son groupe.
+
+        Résout la pièce (groupe) de la tête — refuse si la tête n'est pas groupée — puis délègue à
+        ``async_set_group_setpoint``. Renvoie l'identifiant du groupe écrit. Le climate de pièce,
+        qui connaît déjà son groupe, appelle directement ``async_set_group_setpoint``.
+        """
+        resolved = await self.async_resolve_group(dev_id)
+        if resolved is None:
+            raise CloudWriteError(
+                f"tête {dev_id} non groupée : consigne voie-1a non prouvée hors pièce."
+            )
+        group_id, pid = resolved
+        await self.async_set_group_setpoint(group_id, pid, dps, repush=repush)
+        return str(group_id)
 
     async def async_validate(self) -> list[dict]:
         """Login + lecture de contrôle (maisons). Lève CloudAuthError/CloudError si échec."""

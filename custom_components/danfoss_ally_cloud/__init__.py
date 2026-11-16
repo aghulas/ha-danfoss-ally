@@ -11,6 +11,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 
 from .api import CloudClient, async_fetch_gateway_keys
@@ -87,6 +88,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_LOCAL: local_coordinator,
         DATA_MQTT: publisher,
     }
+    _cleanup_orphaned_head_climates(hass, entry, coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
     return True
@@ -143,6 +145,27 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             coordinator: DanfossCoordinator = data[DATA_COORDINATOR]
             await coordinator.client.async_close()
     return unloaded
+
+
+def _cleanup_orphaned_head_climates(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: DanfossCoordinator
+) -> None:
+    """Retire les anciens climate PAR TÊTE désormais remplacés par le climate de PIÈCE.
+
+    Conservateur : ne supprime QUE des entités ``climate`` de CETTE entrée dont l'unique_id est l'id
+    d'une tête maintenant groupée (ancien modèle « un climate par tête »). Les têtes isolées gardent
+    leur climate (lecture seule), et rien d'autre n'est touché — mieux vaut laisser une entité
+    orpheline que supprimer de travers une entité personnalisée par l'utilisateur.
+    """
+    registry = er.async_get(hass)
+    for head_id in coordinator.grouped_ids:
+        ent_id = registry.async_get_entity_id("climate", DOMAIN, head_id)
+        if ent_id is None:
+            continue
+        entity = registry.async_get(ent_id)
+        if entity is not None and entity.config_entry_id == entry.entry_id:
+            _LOGGER.debug("Retrait de l'ancien climate par tête %s (pièce %s)", ent_id, head_id)
+            registry.async_remove(ent_id)
 
 
 async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
