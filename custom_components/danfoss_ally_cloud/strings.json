@@ -40,17 +40,166 @@
   },
   "entity": {
     "sensor": {
-      "ouverture_vanne": { "name": "Ouverture de vanne" },
-      "defaut": { "name": "Code défaut" }
+      "ouverture_vanne": {
+        "name": "Ouverture de vanne"
+      },
+      "defaut": {
+        "name": "Code défaut"
+      },
+      "incoherentes": {
+        "name": "Têtes incohérentes"
+      }
     },
     "binary_sensor": {
-      "en_ligne": { "name": "En ligne" },
-      "fenetre": { "name": "Fenêtre" }
+      "en_ligne": {
+        "name": "En ligne"
+      },
+      "fenetre": {
+        "name": "Fenêtre"
+      },
+      "programme_actif": {
+        "name": "Programme actif"
+      }
     },
     "switch": {
-      "verrou_enfant": { "name": "Verrouillage enfant" },
-      "detection_fenetre": { "name": "Détection de fenêtre" },
-      "pre_chauffage": { "name": "Pré-chauffage" }
+      "verrou_enfant": {
+        "name": "Verrouillage enfant"
+      },
+      "detection_fenetre": {
+        "name": "Détection de fenêtre"
+      },
+      "pre_chauffage": {
+        "name": "Pré-chauffage"
+      }
+    },
+    "number": {
+      "consigne_confort": {
+        "name": "Consigne confort"
+      },
+      "consigne_reduit": {
+        "name": "Consigne réduit"
+      }
+    }
+  },
+  "services": {
+    "get_rooms": {
+      "name": "Lister les pièces",
+      "description": "Liste les pièces et l'état de leurs têtes."
+    },
+    "get_schedule": {
+      "name": "Lire le programme",
+      "description": "Programme hebdomadaire d'une pièce ou d'une tête isolée.",
+      "fields": {
+        "target": {
+          "name": "Cible",
+          "description": "{\"type\": \"room\"|\"device\", \"id\": \"…\"}."
+        },
+        "refresh": {
+          "name": "Rafraîchir",
+          "description": "Relire depuis le cloud au lieu du cache."
+        },
+        "config_entry_id": {
+          "name": "Compte",
+          "description": "Si plusieurs comptes sont configurés."
+        }
+      }
+    },
+    "set_schedule": {
+      "name": "Écrire le programme",
+      "description": "Écrit les jours fournis d'une cible (valide avant envoi). Administrateur.",
+      "fields": {
+        "target": {
+          "name": "Cible",
+          "description": "{\"type\": \"room\"|\"device\", \"id\": \"…\"}."
+        },
+        "days": {
+          "name": "Jours",
+          "description": "{\"mon\": [{\"start\": \"08:30\", \"end\": \"17:30\"}], …}."
+        },
+        "config_entry_id": {
+          "name": "Compte",
+          "description": "Si plusieurs comptes sont configurés."
+        }
+      }
+    },
+    "copy_schedule": {
+      "name": "Copier le programme",
+      "description": "Recopie le programme d'une cible vers d'autres. Administrateur.",
+      "fields": {
+        "source": {
+          "name": "Source",
+          "description": "Cible d'origine."
+        },
+        "targets": {
+          "name": "Destinations",
+          "description": "Liste de cibles."
+        },
+        "days": {
+          "name": "Jours",
+          "description": "Jours à copier (tous si absent)."
+        },
+        "config_entry_id": {
+          "name": "Compte",
+          "description": "Si plusieurs comptes sont configurés."
+        }
+      }
+    },
+    "restore_schedule": {
+      "name": "Revenir au programme",
+      "description": "Réécrit le programme puis publie at_home (R4). Administrateur.",
+      "fields": {
+        "target": {
+          "name": "Cible",
+          "description": "{\"type\": \"room\"|\"device\", \"id\": \"…\"}."
+        },
+        "config_entry_id": {
+          "name": "Compte",
+          "description": "Si plusieurs comptes sont configurés."
+        }
+      }
+    },
+    "get_write_job": {
+      "name": "État d'un lot d'écriture",
+      "description": "Suivi d'un lot d'écriture par son identifiant.",
+      "fields": {
+        "job_id": {
+          "name": "Identifiant du lot",
+          "description": "job_id renvoyé par une écriture."
+        },
+        "config_entry_id": {
+          "name": "Compte",
+          "description": "Si plusieurs comptes sont configurés."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "invalid_time": {
+      "message": "Heure invalide (attendu HH:MM, 00:00–23:59)."
+    },
+    "empty_or_reversed": {
+      "message": "Plage vide ou inversée (début ≥ fin)."
+    },
+    "overlap": {
+      "message": "Deux plages se chevauchent."
+    },
+    "too_many_transitions": {
+      "message": "Trop de plages : au plus trois plages séparées (6 transitions) par jour."
+    },
+    "unknown_target": {
+      "message": "Pièce ou tête inconnue."
+    },
+    "grouped_device": {
+      "message": "Tête groupée : viser sa pièce."
+    },
+    "not_admin": {
+      "message": "Écriture réservée aux administrateurs."
+    },
+    "cloud_refused": {
+      "message": "Le cloud a refusé l'appel."
+    },
+    "session_expired": {
+      "message": "Session à renouveler."
     }
   }
 }

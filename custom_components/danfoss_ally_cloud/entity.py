@@ -42,3 +42,31 @@ class DanfossEntity(CoordinatorEntity[DanfossCoordinator]):
             manufacturer="Danfoss",
             model=(dev.product_id if dev else None),
         )
+
+
+class DanfossRoomEntity(CoordinatorEntity[DanfossCoordinator]):
+    """Entité rattachée à un appareil « pièce » (groupe-programme), piloté par le coordinateur."""
+
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator: DanfossCoordinator, group_id: str) -> None:
+        super().__init__(coordinator)
+        self._group_id = group_id
+
+    @property
+    def room(self) -> dict | None:
+        return self.coordinator.rooms_by_id.get(self._group_id)
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.room is not None
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        room = self.room
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"room_{self._group_id}")},
+            name=(room["name"] if room and room.get("name") else self._group_id),
+            manufacturer="Danfoss",
+            model="Pièce",
+        )

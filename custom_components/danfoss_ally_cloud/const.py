@@ -35,14 +35,14 @@ from .api.const import (  # noqa: F401 - ré-export pour l'intégration (device/
 
 DOMAIN = "danfoss_ally_cloud"
 
-# Plateformes exposées. v0.2 : climate (consigne) + capteurs + switch (verrou enfant,
-# détection fenêtre). number viendra avec d'autres réglages numériques (borne haute…).
-PLATFORMS = ["climate", "sensor", "binary_sensor", "switch"]
+# Plateformes exposées. number = consignes confort/réduit d'une pièce (lot 2).
+PLATFORMS = ["climate", "sensor", "binary_sensor", "switch", "number"]
 
 # Clés de hass.data[DOMAIN][entry_id].
 DATA_COORDINATOR = "coordinator"
 DATA_LOCAL = "local_coordinator"  # repli local (tunnel), None si enable_local désactivé
 DATA_MQTT = "mqtt_publisher"  # publicateur MQTT, None si mqtt_mode = off
+DATA_JOBS = "jobs"  # file en mémoire des lots d'écriture (WriteJob)
 
 # Intervalle du relevé LOCAL (tunnel Zigbee) : lent, car ~8 s par tête. Distinct du polling cloud.
 DEFAULT_LOCAL_SCAN_INTERVAL = 900  # secondes

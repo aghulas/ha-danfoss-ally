@@ -36,6 +36,8 @@ TO_REDACT = {
 }
 # Champs d'appareil qui identifient le matériel réel (à rédiger).
 DEVICE_REDACT = {"id", "node_id", "mesh_id", "dps"}
+# Champs de pièce / d'état de tête identifiant le matériel réel (à rédiger).
+ROOM_REDACT = {"id", "device_id", "room_id"}
 
 
 async def async_get_config_entry_diagnostics(
@@ -43,9 +45,12 @@ async def async_get_config_entry_diagnostics(
 ) -> dict[str, Any]:
     coordinator: DanfossCoordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
     devices = [async_redact_data(asdict(dev), DEVICE_REDACT) for dev in coordinator.data.values()]
+    rooms = [async_redact_data(room, ROOM_REDACT) for room in coordinator.rooms]
     return {
         "entry": async_redact_data(dict(entry.data), TO_REDACT),
         "options": dict(entry.options),
         "nombre_appareils": len(coordinator.data),
         "appareils": devices,
+        "nombre_pieces": len(coordinator.rooms),
+        "pieces": rooms,
     }

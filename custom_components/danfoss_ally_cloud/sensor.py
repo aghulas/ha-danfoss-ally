@@ -22,7 +22,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import DanfossDevice
 from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import DanfossCoordinator
-from .entity import DanfossEntity
+from .entity import DanfossEntity, DanfossRoomEntity
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -67,12 +67,14 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: DanfossCoordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
-    async_add_entities(
+    entities: list[SensorEntity] = [
         DanfossSensor(coordinator, dev.id, desc)
         for dev in coordinator.data.values()
         if dev.est_tete
         for desc in SENSORS
-    )
+    ]
+    entities.extend(DanfossRoomInconsistent(coordinator, room["id"]) for room in coordinator.rooms)
+    async_add_entities(entities)
 
 
 class DanfossSensor(DanfossEntity, SensorEntity):
@@ -94,3 +96,23 @@ class DanfossSensor(DanfossEntity, SensorEntity):
     def native_value(self):
         dev = self.device
         return self.entity_description.value(dev) if dev else None
+
+
+class DanfossRoomInconsistent(DanfossRoomEntity, SensorEntity):
+    """Nombre de têtes incohérentes de la pièce (confort/réduit affiché, programme inactif : R6)."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_translation_key = "incoherentes"
+    _attr_icon = "mdi:alert-circle-outline"
+
+    def __init__(self, coordinator: DanfossCoordinator, group_id: str) -> None:
+        super().__init__(coordinator, group_id)
+        self._attr_unique_id = f"room_{group_id}_incoherentes"
+
+    @property
+    def native_value(self) -> int | None:
+        room = self.room
+        if room is None:
+            return None
+        return sum(1 for h in room["heads"] if h["inconsistent"])

@@ -460,6 +460,32 @@ class CloudClient:
                 )
         return rooms
 
+    async def async_room_structure(self) -> list[dict]:
+        """Ossature des pièces (sans dps) : {id, name, home, product_id, members:[devId]}.
+
+        Groupes (group.list v4.3) + appartenance (relation.list v3.2), SANS device.list : le
+        coordinateur la met en cache et superpose les états des têtes lus par ailleurs (4.3),
+        pour ne pas multiplier les appels à chaque rafraîchissement.
+        """
+        out: list[dict] = []
+        for home in await self.async_get_homes():
+            groups = await self._request(
+                "m.life.my.group.device.group.list", "4.3", {"gid": home["gid"]}
+            )
+            membres = await self._membres_par_piece(home["gid"])
+            for g in groups if isinstance(groups, list) else []:
+                group_id = str(g.get("id") or g.get("groupId"))
+                out.append(
+                    {
+                        "id": group_id,
+                        "name": g.get("name"),
+                        "home": home.get("nom"),
+                        "product_id": g.get("productId"),
+                        "members": membres.get(group_id, []),
+                    }
+                )
+        return out
+
     async def _resolve_target(self, target: dict) -> dict:
         """Résout {type, id} en {res_id, res_type, pid, gw_id, name, comfort, setback}.
 
