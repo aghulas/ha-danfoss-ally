@@ -31,6 +31,10 @@ class _FakeClient:
     async def async_publish_room_dps(self, group_id, dps):
         self.calls.append(("publish", group_id, dps))
 
+    async def async_set_room_setpoint(self, dev_id, dps, *, repush=True):
+        self.calls.append(("setpoint", dev_id, dps))
+        return "grp"
+
 
 class _FakeCoord:
     def __init__(self, rooms):
@@ -111,21 +115,20 @@ async def test_restore_cree_un_lot_restore(hass):
     assert coord.client.calls[0][0] == "restore"
 
 
-# --- R3 : consigne de pièce publie le DP PUIS réécrit le programme ----------------------------
+# --- R3 : consigne de pièce déléguée à async_set_room_setpoint (#10, publie DP + reprog) -------
 
 
-async def test_set_setpoint_confort_publie_puis_reecrit(hass):
+async def test_set_setpoint_confort_delegue_a_set_room_setpoint(hass):
     store, coord = _store()
     await ops.set_setpoint(hass, store, "13000000", "comfort", 20.0)
-    kinds = [c[0] for c in coord.client.calls]
-    assert kinds == ["publish", "set"]  # DP publié, puis programme réécrit (R3)
-    assert coord.client.calls[0][2] == {"118": 200}  # 20,0 °C -> 200 dixièmes
+    assert coord.client.calls == [("setpoint", "a", {"118": 200})]  # tête de la pièce, 20,0 °C
+    assert coord.invalidated == [{"type": "room", "id": "13000000"}]
 
 
 async def test_set_setpoint_reduit_publie_109_et_119(hass):
     store, coord = _store()
     await ops.set_setpoint(hass, store, "13000000", "setback", 14.0)
-    assert coord.client.calls[0][2] == {"109": 140, "119": 140}
+    assert coord.client.calls == [("setpoint", "a", {"109": 140, "119": 140})]
 
 
 # --- Garde administrateur -----------------------------------------------------------------------

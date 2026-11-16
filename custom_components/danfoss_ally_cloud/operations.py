@@ -130,10 +130,11 @@ async def restore_schedule(hass: HomeAssistant, store: dict, target: dict) -> di
 
 
 async def set_setpoint(hass: HomeAssistant, store: dict, group_id: str, kind: str, celsius) -> dict:
-    """Consigne confort/réduit d'une pièce (R3) : publie le DP, puis réécrit le programme.
+    """Consigne confort/réduit d'une pièce (R3), via `async_set_room_setpoint` (PR #10).
 
-    Sans la réécriture, la consigne en cours change mais les transitions gardent l'ancienne valeur
-    (la tête y revient au prochain horaire). `kind` : « comfort » ou « setback ».
+    #10 publie le DP de consigne sur le groupe PUIS réécrit un jour du programme (sinon les têtes
+    gardent l'ancienne valeur dans leurs transitions). On réutilise ce chemin unique plutôt que d'en
+    créer un second. `kind` : « comfort » ou « setback ».
     """
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     jobs: JobManager = store[DATA_JOBS]
@@ -142,15 +143,16 @@ async def set_setpoint(hass: HomeAssistant, store: dict, group_id: str, kind: st
     valeur = encode_consigne(celsius, SETPOINT_MIN, SETPOINT_MAX)
     dps = {dp: valeur for dp in _SETPOINT_DPS[kind]}
     target = {"type": "room", "id": str(group_id)}
+    heads = _head_ids(coordinator, target)
+    if not heads:
+        raise OperationError("unknown_target", f"pièce {group_id} sans tête")
     try:
-        await coordinator.client.async_publish_room_dps(group_id, dps)
-        # R3 : réécrire le programme pour que les transitions portent la nouvelle consigne.
-        current = await coordinator.async_get_schedule(target, refresh=True)
-        await coordinator.client.async_set_schedule_days(target, current["days"])
+        # async_set_room_setpoint : résout le groupe, publie la consigne, reprog un jour.
+        await coordinator.client.async_set_room_setpoint(heads[0], dps)
     except CloudError as err:
         raise OperationError("cloud_refused", str(err)) from err
     coordinator.invalidate_schedule(target)
-    job = jobs.create("set_setpoint", target, _head_ids(coordinator, target))
+    job = jobs.create("set_setpoint", target, heads)
     _defer_verification(hass, store, job)
     return job.to_dict()
 
