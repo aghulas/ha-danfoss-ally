@@ -1,0 +1,175 @@
+"""Tests d'intégration des actions et commandes WebSocket (harnais hass).
+
+Le serveur WebSocket ne démarre pas dans cet environnement (import de la pile HTTP en échec, hors
+de ce code) : on appelle les handlers WebSocket en direct avec une fausse connexion.
+"""
+
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+from homeassistant.core import Context, HomeAssistant
+from homeassistant.exceptions import ServiceValidationError, Unauthorized
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.danfoss_ally_cloud import operations as ops
+from custom_components.danfoss_ally_cloud import websocket_api as ws
+from custom_components.danfoss_ally_cloud.const import DOMAIN
+
+from .common import ENTRY_DATA, FakeCloudClient, tete
+
+_GROUPS = [{"group_id": "13000000", "nom": "Salle 1", "pid": "03wvrwpv", "nb_tetes": 2}]
+_MEMBERS = {"13000000": ["a", "b"]}
+_ROOM_TARGET = {"type": "room", "id": "13000000"}
+_VALID_DAYS = {"mon": [{"start": "08:30", "end": "17:30"}]}
+_INVALID_DAYS = {"mon": [{"start": "17:30", "end": "08:30"}]}
+
+
+@pytest.fixture(autouse=True)
+def _no_timer(monkeypatch):
+    monkeypatch.setattr(ops, "_defer_verification", lambda *a, **k: None)
+
+
+@pytest.fixture
+async def setup(hass: HomeAssistant):
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, unique_id="compte@exemple.fr")
+    entry.add_to_hass(hass)
+    fake = FakeCloudClient(
+        devices=[tete("a", "Salle 1 #2"), tete("b", "Salle 1 #3")],
+        groups=_GROUPS,
+        members=_MEMBERS,
+    )
+    with patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=fake):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    yield hass, entry, fake
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+# --- Actions (services) ------------------------------------------------------------------------
+
+
+async def test_service_get_rooms(setup):
+    hass, _, _ = setup
+    res = await hass.services.async_call(
+        DOMAIN, "get_rooms", {}, blocking=True, return_response=True
+    )
+    assert res["rooms"][0]["id"] == "13000000"
+    assert {h["device_id"] for h in res["rooms"][0]["heads"]} == {"a", "b"}
+
+
+async def test_service_get_schedule(setup):
+    hass, _, _ = setup
+    res = await hass.services.async_call(
+        DOMAIN, "get_schedule", {"target": _ROOM_TARGET}, blocking=True, return_response=True
+    )
+    assert res["target"] == _ROOM_TARGET and "mon" in res["days"]
+
+
+async def test_service_set_schedule_invalide(setup):
+    hass, _, fake = setup
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            "set_schedule",
+            {"target": _ROOM_TARGET, "days": _INVALID_DAYS},
+            blocking=True,
+            return_response=True,
+        )
+    assert fake.writes == []
+
+
+async def test_service_set_schedule_valide_et_non_admin(setup, hass_read_only_user):
+    hass, _, fake = setup
+    res = await hass.services.async_call(
+        DOMAIN,
+        "set_schedule",
+        {"target": _ROOM_TARGET, "days": _VALID_DAYS},
+        blocking=True,
+        return_response=True,
+    )
+    assert res["kind"] == "set_schedule" and any(w[0] == "set" for w in fake.writes)
+    fake.writes.clear()
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            "set_schedule",
+            {"target": _ROOM_TARGET, "days": _VALID_DAYS},
+            blocking=True,
+            return_response=True,
+            context=Context(user_id=hass_read_only_user.id),
+        )
+    assert fake.writes == []
+
+
+async def test_service_restore_puis_get_write_job(setup):
+    hass, _, _ = setup
+    job = await hass.services.async_call(
+        DOMAIN, "restore_schedule", {"target": _ROOM_TARGET}, blocking=True, return_response=True
+    )
+    got = await hass.services.async_call(
+        DOMAIN, "get_write_job", {"job_id": job["job_id"]}, blocking=True, return_response=True
+    )
+    assert got["job_id"] == job["job_id"] and job["kind"] == "restore"
+
+
+# --- Commandes WebSocket (handlers en direct) --------------------------------------------------
+
+
+class _FakeConn:
+    def __init__(self, is_admin=True):
+        self.user = SimpleNamespace(is_admin=is_admin)
+        self.results: dict = {}
+        self.errors: list = []
+        self.messages: list = []
+        self.subscriptions: dict = {}
+
+    def send_result(self, msg_id, result=None):
+        self.results[msg_id] = result
+
+    def send_error(self, msg_id, code, message):
+        self.errors.append((code, message))
+
+    def send_message(self, message):
+        self.messages.append(message)
+
+
+async def test_ws_rooms_validate_info(setup):
+    hass, _, _ = setup
+    conn = _FakeConn()
+    ws.ws_rooms(hass, conn, {"id": 1, "type": "danfoss_ally_cloud/rooms"})
+    assert conn.results[1]["rooms"][0]["id"] == "13000000"
+    ws.ws_schedule_validate(hass, conn, {"id": 2, "days": _INVALID_DAYS})
+    assert conn.results[2]["valid"] is False
+    ws.ws_info(hass, conn, {"id": 3})
+    await hass.async_block_till_done()
+    assert conn.results[3]["is_admin"] is True and conn.results[3]["version"]
+
+
+async def test_ws_schedule_get_set_restore_et_refus(setup):
+    hass, _, fake = setup
+    conn = _FakeConn(is_admin=True)
+    ws.ws_schedule_get(hass, conn, {"id": 4, "target": _ROOM_TARGET, "refresh": False})
+    await hass.async_block_till_done()
+    assert conn.results[4]["target"] == _ROOM_TARGET
+
+    ws.ws_schedule_set(hass, conn, {"id": 5, "target": _ROOM_TARGET, "days": _VALID_DAYS})
+    await hass.async_block_till_done()
+    assert conn.results[5]["kind"] == "set_schedule"
+
+    ws.ws_schedule_restore(hass, conn, {"id": 6, "target": _ROOM_TARGET})
+    await hass.async_block_till_done()
+    assert conn.results[6]["kind"] == "restore"
+
+    with pytest.raises(Unauthorized):
+        ws.ws_schedule_set(
+            hass, _FakeConn(is_admin=False), {"id": 7, "target": _ROOM_TARGET, "days": _VALID_DAYS}
+        )
+
+
+async def test_ws_jobs_subscribe(setup):
+    hass, _, _ = setup
+    conn = _FakeConn()
+    ws.ws_jobs_subscribe(hass, conn, {"id": 8, "type": "danfoss_ally_cloud/jobs/subscribe"})
+    assert 8 in conn.subscriptions and 8 in conn.results

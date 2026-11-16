@@ -15,10 +15,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime
 
 from . import schedule
 from ._tuya.http import ENDPOINTS, TuyaApiError, TuyaHttpClient, login
-from .const import RES_TYPE_GROUP
+from .const import RES_TYPE_DEVICE, RES_TYPE_GROUP
 from .decode import DanfossDevice, decoder
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,6 +47,19 @@ class CloudAuthError(CloudError):
 
 class CloudWriteError(CloudError):
     """Écriture refusée : valeur invalide, modèle non autorisé, ou refus du cloud."""
+
+
+class UnknownTargetError(CloudError):
+    """Cible (pièce ou tête) introuvable dans les maisons (contrat code `unknown_target`)."""
+
+
+class ScheduleValidationError(CloudWriteError):
+    """Programme invalide (R1) : refusé AVANT tout envoi. Porte les erreurs du contrat (§5.4)."""
+
+    def __init__(self, errors: list[dict[str, str]]) -> None:
+        self.errors = errors
+        codes = ", ".join(e.get("code", "?") for e in errors)
+        super().__init__(f"programme invalide : {codes}")
 
 
 def _is_session_error(err: TuyaApiError) -> bool:
@@ -396,6 +410,98 @@ class CloudClient:
         group_id, pid = resolved
         await self.async_set_group_setpoint(group_id, pid, dps, repush=repush)
         return str(group_id)
+
+    # --- Édition du programme hebdomadaire (contrat §3.2), bâtie sur les primitives ci-dessus ----
+
+    async def _resolve_target(self, target: dict) -> dict:
+        """Résout {type, id} en {res_id, res_type, pid, gw_id, name}.
+
+        Pièce : resType 2, gwId = group_id. Tête isolée : resType 1, gwId = meshId (forme rejouée en
+        réel ; le contrat §4.1 indique devId — divergence connue).
+        """
+        kind = target.get("type")
+        ident = str(target.get("id"))
+        if kind == "room":
+            for home in await self.async_get_homes():
+                for g in await self.async_list_groups(home["gid"]):
+                    if str(g["group_id"]) == ident:
+                        return {
+                            "res_id": ident,
+                            "res_type": RES_TYPE_GROUP,
+                            "pid": g.get("pid"),
+                            "gw_id": ident,
+                            "name": g.get("nom"),
+                        }
+        elif kind == "device":
+            for home in await self.async_get_homes():
+                raw = await self._request(
+                    "tuya.m.my.group.device.list", "1.0", None, extra_params={"gid": home["gid"]}
+                )
+                for d in raw or []:
+                    if isinstance(d, dict) and d.get("devId") == ident:
+                        dev = decoder(d)
+                        return {
+                            "res_id": ident,
+                            "res_type": RES_TYPE_DEVICE,
+                            "pid": dev.product_id,
+                            "gw_id": dev.mesh_id or ident,
+                            "name": dev.nom,
+                        }
+        raise UnknownTargetError(f"cible introuvable : {target!r}")
+
+    async def async_get_schedule(self, target: dict) -> dict:
+        """Programme hebdomadaire d'une cible, décodé (contrat §3.2). Lecture seule."""
+        res = await self._resolve_target(target)
+        data = await self.async_read_week_timer(
+            res["res_id"], res["pid"] or "", res_type=res["res_type"], gw_id=res["gw_id"]
+        )
+        return schedule.Schedule(
+            target={"type": str(target.get("type")), "id": str(target.get("id"))},
+            name=res.get("name"),
+            days=schedule.decode_week_timer(data),
+            read_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+        ).to_dict()
+
+    async def async_set_schedule_days(self, target: dict, days: dict) -> dict:
+        """Valide (R1) puis écrit les jours fournis (delete+create par jour, via write_week_day)."""
+        errors = schedule.validate_days(days)
+        if errors:
+            raise ScheduleValidationError(errors)
+        res = await self._resolve_target(target)
+        written: list[str] = []
+        for day, ranges in days.items():
+            if day not in schedule.DAYS:
+                continue
+            await self.async_write_week_day(
+                res["res_id"],
+                res["pid"] or "",
+                schedule.day_to_loop(day),
+                schedule.to_periods(ranges),
+                res_type=res["res_type"],
+                gw_id=res["gw_id"],
+            )
+            written.append(day)
+        return {"target": target, "days_written": written}
+
+    async def async_restore_schedule(self, target: dict) -> dict:
+        """Retour au programme (R4) : réécrit les SEPT jours, puis publie `at_home` EN DERNIER."""
+        res = await self._resolve_target(target)
+        current = await self.async_get_schedule(target)
+        days = current["days"]
+        for day in schedule.DAYS:
+            await self.async_write_week_day(
+                res["res_id"],
+                res["pid"] or "",
+                schedule.day_to_loop(day),
+                schedule.to_periods(days.get(day) or []),
+                res_type=res["res_type"],
+                gw_id=res["gw_id"],
+            )
+        if res["res_type"] == RES_TYPE_GROUP:
+            await self.async_group_publish(res["res_id"], {"2": "at_home"})
+        else:
+            await self.async_write_setting(res["res_id"], res["pid"] or "", {"2": "at_home"})
+        return {"target": target, "restored": True}
 
     async def async_validate(self) -> list[dict]:
         """Login + lecture de contrôle (maisons). Lève CloudAuthError/CloudError si échec."""
