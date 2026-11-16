@@ -19,6 +19,9 @@ from .const import (
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_ENABLE_LOCAL,
+    CONF_MQTT_BASE_TOPIC,
+    CONF_MQTT_MODE,
+    CONF_MQTT_SOURCE,
     CONF_PASSWORD,
     CONF_REGION,
     CONF_SCAN_INTERVAL,
@@ -26,12 +29,17 @@ from .const import (
     CONF_USERNAME,
     DATA_COORDINATOR,
     DATA_LOCAL,
+    DATA_MQTT,
     DEFAULT_LOCAL_SCAN_INTERVAL,
+    DEFAULT_MQTT_BASE_TOPIC,
+    DEFAULT_MQTT_MODE,
+    DEFAULT_MQTT_SOURCE,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     PLATFORMS,
 )
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
+from .mqtt_publisher import MqttPublisher
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,13 +67,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Repli local (optionnel) : best-effort, ne doit jamais empêcher le cloud de démarrer.
     local_coordinator = await _async_setup_local(hass, entry, coordinator)
 
+    # Publication MQTT (optionnelle).
+    publisher = await _async_setup_mqtt(hass, entry, coordinator)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         DATA_COORDINATOR: coordinator,
         DATA_LOCAL: local_coordinator,
+        DATA_MQTT: publisher,
     }
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
     return True
+
+
+async def _async_setup_mqtt(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: DanfossCoordinator
+) -> MqttPublisher | None:
+    """Démarre le publicateur MQTT si mqtt_mode != off. Best-effort (broker absent → no-op)."""
+    mode = entry.options.get(CONF_MQTT_MODE, DEFAULT_MQTT_MODE)
+    if mode == "off":
+        return None
+    publisher = MqttPublisher(
+        hass,
+        coordinator,
+        mode,
+        entry.options.get(CONF_MQTT_SOURCE, DEFAULT_MQTT_SOURCE),
+        entry.options.get(CONF_MQTT_BASE_TOPIC, DEFAULT_MQTT_BASE_TOPIC),
+    )
+    await publisher.async_start()
+    return publisher
 
 
 async def _async_setup_local(
@@ -95,6 +125,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unloaded:
         data = hass.data[DOMAIN].pop(entry.entry_id, None)
         if data:
+            publisher: MqttPublisher | None = data.get(DATA_MQTT)
+            if publisher is not None:
+                await publisher.async_stop()
             coordinator: DanfossCoordinator = data[DATA_COORDINATOR]
             await coordinator.client.async_close()
     return unloaded

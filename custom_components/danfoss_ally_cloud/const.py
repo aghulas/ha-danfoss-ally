@@ -11,6 +11,7 @@ PLATFORMS = ["climate", "sensor", "binary_sensor", "switch"]
 # Clés de hass.data[DOMAIN][entry_id].
 DATA_COORDINATOR = "coordinator"
 DATA_LOCAL = "local_coordinator"  # repli local (tunnel), None si enable_local désactivé
+DATA_MQTT = "mqtt_publisher"  # publicateur MQTT, None si mqtt_mode = off
 
 # Intervalle du relevé LOCAL (tunnel Zigbee) : lent, car ~8 s par tête. Distinct du polling cloud.
 DEFAULT_LOCAL_SCAN_INTERVAL = 900  # secondes
