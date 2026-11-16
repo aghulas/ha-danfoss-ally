@@ -1,8 +1,9 @@
-"""Couche d'accès Danfoss Ally.
+"""Couche d'accès Danfoss Ally — bibliothèque réutilisable, sans dépendance Home Assistant.
 
-À terme, extraire cette couche en bibliothèque installable (p. ex.
-`pydanfoss-cloud`) partagée avec le connecteur MCP, et la référencer dans
-manifest.json -> requirements. Pour l'amorçage, elle vit ici.
+Ce dossier EST la bibliothèque `pydanfoss-cloud` (cf. README.md ici) : le `pyproject.toml` du dépôt
+le package sous le nom `pydanfoss_cloud` sans déplacer les fichiers. L'intégration le « vend » par
+import relatif (`from .api import …`) pour rester autonome côté HACS ; le connecteur MCP pourra en
+dépendre via PyPI une fois publié, puis l'intégration basculera vers manifest.json -> requirements.
 
 Réutilisation (voir docs/reuse.md) :
   - client et signature de l'application  : ~/dev/danfoss-ally-signing-re

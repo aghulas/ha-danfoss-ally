@@ -13,3 +13,15 @@
 Note : le connecteur MCP garde sa logique préparer→confirmer (propre au MCP).
 Dans l'intégration HA, la sûreté d'écriture passe par la validation des valeurs
 et la rédaction des diagnostics, pas par un jeton de confirmation.
+
+## Extraction en bibliothèque (v0.6)
+
+La couche `custom_components/danfoss_ally_cloud/api/` est désormais **sans dépendance Home
+Assistant** et packagée sous le nom **`pydanfoss-cloud`** par le `pyproject.toml` du dépôt
+(`package-dir` pointant sur ce dossier, source unique, sans déplacement). Voir
+`custom_components/danfoss_ally_cloud/api/README.md`.
+
+- L'intégration continue de « vendre » ce code (import relatif) → installation HACS autonome.
+- Le connecteur MCP pourra remplacer sa copie (`tuya/`, `local.py`, `modeles.py`) par une dépendance
+  `pydanfoss-cloud` une fois la bibliothèque **publiée sur PyPI** (repo/compte à décider par Rémi).
+- Ensuite seulement, l'intégration référencera la version dans `manifest.json -> requirements`.

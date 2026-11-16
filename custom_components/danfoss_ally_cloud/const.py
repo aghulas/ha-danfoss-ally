@@ -1,6 +1,29 @@
-"""Constantes de l'intégration Danfoss Ally (Cloud)."""
+"""Constantes de l'intégration Danfoss Ally (Cloud).
+
+Les constantes APPAREIL / PROTOCOLE (codes DP, bornes de consigne, modèles autorisés, attribut
+Zigbee) vivent dans la couche réutilisable `api/const.py` (future bibliothèque pydanfoss-cloud) et
+sont ré-exportées ici pour le reste de l'intégration. Ce fichier ne garde que le propre de HA
+(domaine, plateformes, clés de données, options de configuration).
+"""
 
 from __future__ import annotations
+
+from .api.const import (  # noqa: F401 - ré-export pour l'intégration (device/protocole)
+    DP_CHILD_LOCK,
+    DP_HEAT_DEMAND,
+    DP_MANUAL_SETPOINT,
+    DP_PREHEAT,
+    DP_SETPOINT,
+    DP_TEMP_SET,
+    DP_UPPER_TEMP,
+    DP_WINDOW_DETECT,
+    SETPOINT_MAX,
+    SETPOINT_MIN,
+    SETPOINT_STEP,
+    WRITE_VERIFIED_MODELS,
+    WRITE_VERIFIED_PRODUCTS,
+    ZB_ATTR_PROGRAMMING_MODE,
+)
 
 DOMAIN = "danfoss_ally_cloud"
 
@@ -38,40 +61,3 @@ DEFAULT_SCAN_INTERVAL = 90  # secondes
 DEFAULT_MQTT_MODE = "off"
 DEFAULT_MQTT_SOURCE = "cloud"
 DEFAULT_MQTT_BASE_TOPIC = "danfoss_ally_cloud"
-
-# Codes DP (noms officiels : voir danfoss-app-capture/dp_schema_officiel.md).
-# Source de vérité, à ne pas deviner. Rappels des pièges connus :
-#   DP 16  = temp_set (consigne EFFECTIVE, dixièmes de °C) — lue comme consigne en v0.1
-#   DP 171 = OccupiedSetpoint (échelle à CONFIRMER en réel : 171 non fiable tant que non vérifié)
-#   DP 18  = upper_temp (BORNE HAUTE, pas la consigne)
-#   DP 114 = consigne du mode manuel
-#   DP 1   = pré-chauffage (côté cloud : ne change que le cache passerelle)
-#   DP 30  = verrouillage enfant
-#   DP 116 = détection de fenêtre
-#   DP 162 = demande de chaleur (miroir cloud DP 138)
-DP_SETPOINT = 171
-DP_UPPER_TEMP = 18
-DP_MANUAL_SETPOINT = 114
-DP_PREHEAT = 1
-DP_CHILD_LOCK = 30
-DP_WINDOW_DETECT = 116
-DP_HEAT_DEMAND = 162
-
-# Le vrai levier du pré-chauffage est l'attribut Zigbee standard, accessible
-# UNIQUEMENT par le tunnel local (voir api/local/tunnel.py).
-ZB_ATTR_PROGRAMMING_MODE = 0x0025  # bit0 programme, bit1 pré-chauffage
-
-# Modèles sur lesquels une écriture a été vérifiée en réel (à étendre install
-# par install : c'est l'un des buts de la diffusion publique).
-WRITE_VERIFIED_MODELS = ("radiator thermostat", "icon2 rt")
-
-# Produits (productId Tuya) sur lesquels le MÉCANISME d'écriture voie 1a est câblé
-# (tuya.m.custom.wkf.settings.change). ⚠ Porté des captures du MCP ; la confirmation
-# EN RÉEL (effet observé sur la tête) reste à faire, install par install.
-WRITE_VERIFIED_PRODUCTS = ("03wvrwpv",)  # tête thermostatique Danfoss Ally
-
-# Consigne (écriture) : DP 16 temp_set, dixièmes de °C. Bornes et pas du schéma produit.
-DP_TEMP_SET = 16
-SETPOINT_MIN = 5.0
-SETPOINT_MAX = 35.0
-SETPOINT_STEP = 0.5
