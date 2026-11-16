@@ -11,6 +11,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.typing import ConfigType
 
 from .api import CloudClient, async_fetch_gateway_keys
 from .api.local.manager import LocalTunnelManager
@@ -39,9 +40,20 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
+from .frontend import async_register_frontend, async_unregister_frontend
 from .mqtt_publisher import MqttPublisher
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Mise en place à l'échelle de l'intégration (une fois par instance).
+
+    Sert l'interface embarquée et déclare sa ressource Lovelace ici — jamais dans
+    `async_setup_entry` (contrat §6). Best-effort : n'empêche pas le démarrage.
+    """
+    await async_register_frontend(hass)
+    return True
 
 
 def _client_from_entry(entry: ConfigEntry) -> CloudClient:
@@ -136,3 +148,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Recharger l'entrée quand les options changent (MQTT, local, intervalle)."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Au retrait de la DERNIÈRE entrée : nettoyer la ressource Lovelace (contrat §6).
+
+    On ne nettoie pas au simple déchargement/rechargement (qui appelle seulement
+    `async_unload_entry`), mais seulement quand plus aucune entrée ne subsiste.
+    """
+    if not hass.config_entries.async_entries(DOMAIN):
+        await async_unregister_frontend(hass)

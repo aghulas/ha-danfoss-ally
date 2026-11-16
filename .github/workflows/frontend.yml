@@ -1,0 +1,36 @@
+name: Frontend
+on: [push, pull_request]
+
+# Reconstruit le bundle versionné de l'interface embarquée de façon DÉTERMINISTE
+# et échoue si le fichier commité
+# (custom_components/danfoss_ally_cloud/frontend/danfoss-ally-cloud.js) n'est pas
+# à jour. Déterminisme : Node épinglé (.nvmrc), dépendances épinglées (npm ci sur
+# package-lock.json), sortie non minifiée. La sortie de Rollup/esbuild dépend de
+# la version des outils (verrouillée), pas de la version de Node ni de la
+# plateforme.
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # Commande de build EXACTE (cf. frontend/README). La sortie va dans
+      # custom_components/danfoss_ally_cloud/frontend/danfoss-ally-cloud.js.
+      - run: npm run build
+      - name: Vérifier que le bundle versionné est à jour
+        run: |
+          if ! git diff --quiet -- ../custom_components/danfoss_ally_cloud/frontend/danfoss-ally-cloud.js; then
+            echo "::error::Le bundle versionné n'est pas à jour. Lancez 'npm --prefix frontend ci && npm --prefix frontend run build' puis committez le fichier."
+            git --no-pager diff -- ../custom_components/danfoss_ally_cloud/frontend/danfoss-ally-cloud.js | head -50
+            exit 1
+          fi
