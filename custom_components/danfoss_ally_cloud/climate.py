@@ -123,6 +123,6 @@ class DanfossClimate(DanfossEntity, ClimateEntity):
             return
         valeur = encode_consigne(temp, self.min_temp, self.max_temp, SETPOINT_STEP)
         await self.coordinator.client.async_write_setting(
-            dev.id, dev.product_id, {str(DP_TEMP_SET): valeur}
+            dev.id, dev.product_id or "", {str(DP_TEMP_SET): valeur}
         )
         await self.coordinator.async_request_refresh()

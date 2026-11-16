@@ -143,8 +143,9 @@ def _online(appareil: dict[str, Any]) -> bool:
 def decoder(appareil: dict[str, Any]) -> DanfossDevice:
     """Appareil brut (``tuya.m.my.group.device.list``) -> DanfossDevice normalisé."""
     dps: dict[str, Any] = {str(k): v for k, v in (appareil.get("dps") or {}).items()}
+    dev_id: str = appareil.get("devId") or ""
     d = DanfossDevice(
-        id=appareil.get("devId"),
+        id=dev_id,
         nom=(appareil.get("name") or "").strip(),
         categorie=categorie(appareil.get("category")),
         product_id=appareil.get("productId"),

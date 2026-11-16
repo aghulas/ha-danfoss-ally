@@ -100,7 +100,7 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
         if dev is None or not ecriture_autorisee(dev):
             return
         await self.coordinator.client.async_write_setting(
-            dev.id, dev.product_id, {str(self.entity_description.dp): etat}
+            dev.id, dev.product_id or "", {str(self.entity_description.dp): etat}
         )
         await self.coordinator.async_request_refresh()
 

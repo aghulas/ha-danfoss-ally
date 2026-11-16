@@ -42,7 +42,21 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 disallow_untyped_defs = false
 
+# Paquets sans stubs exploitables hors du setup mypy de Home Assistant core : on vérifie NOTRE
+# code, pas ces dépendances (homeassistant, voluptuous, pycryptodome, tinytuya, requests).
+[[tool.mypy.overrides]]
+module = [
+  "homeassistant.*",
+  "voluptuous",
+  "voluptuous.*",
+  "Crypto.*",
+  "tinytuya",
+  "requests",
+  "requests.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "-q"
+addopts = "-q --cov=custom_components/danfoss_ally_cloud --cov-report=term-missing --cov-fail-under=66"
 pythonpath = "."
