@@ -356,24 +356,19 @@ class CloudClient:
                 {**base, "loops": loops, "periods": json.dumps(periods)},
             )
 
-    async def async_set_room_setpoint(self, dev_id: str, dps: dict, *, repush: bool = True) -> str:
-        """Écrit une consigne DURABLE pour la pièce d'une tête (voie 1a « vraie »).
+    async def async_set_group_setpoint(
+        self, group_id: str | int, pid: str | None, dps: dict, *, repush: bool = True
+    ) -> None:
+        """Consigne DURABLE sur une PIÈCE dont on connaît déjà le groupe (voie 1a « vraie »).
 
-        1. résout la pièce (groupe) de la tête — refuse si la tête n'est pas groupée ;
-        2. publie ``dps`` (ex. {"118": 60} confort, {"109": 60, "119": 60} réduit) sur le groupe ;
-        3. si ``repush``, réécrit UN jour du programme à l'identique pour que les têtes reprennent
-           la nouvelle consigne dans leurs transitions (sinon elles gardent l'ancienne).
+        1. publie ``dps`` (ex. {"118": 60} confort, {"109": 60, "119": 60} réduit) sur le groupe ;
+        2. si ``repush`` et ``pid`` connu, réécrit UN jour du programme à l'identique pour que les
+           têtes reprennent la nouvelle consigne dans leurs transitions (sinon elles gardent
+           l'ancienne).
 
         ⚠ Effet de pièce : toutes les têtes du groupe sont concernées, et le ré-envoi touche la
         vraie prog de chauffe. À valider en réel avant tout usage (voir CLAUDE.md, mémoires).
-        Renvoie l'identifiant du groupe écrit.
         """
-        resolved = await self.async_resolve_group(dev_id)
-        if resolved is None:
-            raise CloudWriteError(
-                f"tête {dev_id} non groupée : consigne voie-1a non prouvée hors pièce."
-            )
-        group_id, pid = resolved
         await self.async_group_publish(group_id, dps)
         if repush and pid:
             data = await self.async_read_week_timer(group_id, pid)
@@ -385,6 +380,21 @@ class CloudClient:
                     jour["loops"],
                     schedule.confort_periods(jour.get("loopData")),
                 )
+
+    async def async_set_room_setpoint(self, dev_id: str, dps: dict, *, repush: bool = True) -> str:
+        """Consigne DURABLE pour la pièce d'une tête, en résolvant d'abord son groupe.
+
+        Résout la pièce (groupe) de la tête — refuse si la tête n'est pas groupée — puis délègue à
+        ``async_set_group_setpoint``. Renvoie l'identifiant du groupe écrit. Le climate de pièce,
+        qui connaît déjà son groupe, appelle directement ``async_set_group_setpoint``.
+        """
+        resolved = await self.async_resolve_group(dev_id)
+        if resolved is None:
+            raise CloudWriteError(
+                f"tête {dev_id} non groupée : consigne voie-1a non prouvée hors pièce."
+            )
+        group_id, pid = resolved
+        await self.async_set_group_setpoint(group_id, pid, dps, repush=repush)
         return str(group_id)
 
     async def async_validate(self) -> list[dict]:

@@ -138,12 +138,16 @@ class DanfossPreheat(CoordinatorEntity[DanfossLocalCoordinator], SwitchEntity):
     @property
     def device_info(self) -> DeviceInfo:
         dev = self._dev
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers={(DOMAIN, self._device_id)},
             name=(dev.nom if dev and dev.nom else self._device_id),
             manufacturer="Danfoss",
             model=(dev.product_id if dev else None),
         )
+        group_id = self._cloud.group_of(self._device_id)
+        if group_id is not None:
+            info["via_device"] = (DOMAIN, f"group_{group_id}")
+        return info
 
     @property
     def available(self) -> bool:

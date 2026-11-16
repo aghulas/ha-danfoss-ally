@@ -242,3 +242,24 @@ async def test_async_set_room_setpoint_sans_repush():
         await _client().async_set_room_setpoint("dev-1", {"118": 60}, repush=False)
     apis = [a for a, *_ in fake.calls]
     assert "tuya.m.custom.wkf.week.timer.list" not in apis
+
+
+async def test_async_set_group_setpoint_direct_sans_resolution():
+    # Le climate de pièce connaît déjà son groupe : publish + repush, SANS résoudre par une tête.
+    fake = FakeHttp(_groupe_responses())
+    with patch(_HTTP, return_value=fake):
+        await _client().async_set_group_setpoint("90000001", "03wvrwpv", {"109": 60, "119": 60})
+    apis = [a for a, *_ in fake.calls]
+    assert "m.life.my.group.device.relation.list" not in apis  # pas de résolution
+    publish = next(b for a, _, b, _ in fake.calls if a == "s.m.dev.group.dp.publish")
+    assert publish == {"dps": '{"109":60,"119":60}', "groupId": 90000001}
+    assert apis.count("tuya.m.custom.wkf.week.timer.create") == 1
+
+
+async def test_async_set_group_setpoint_sans_pid_ne_reecrit_pas():
+    fake = FakeHttp(_groupe_responses())
+    with patch(_HTTP, return_value=fake):
+        await _client().async_set_group_setpoint("90000001", None, {"118": 60})
+    apis = [a for a, *_ in fake.calls]
+    assert "s.m.dev.group.dp.publish" in apis
+    assert "tuya.m.custom.wkf.week.timer.list" not in apis  # pid inconnu → pas de re-push

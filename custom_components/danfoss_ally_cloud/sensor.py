@@ -15,7 +15,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, EntityCategory
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -39,6 +39,15 @@ def _defaut(dev: DanfossDevice) -> str:
 
 
 SENSORS: tuple[DanfossSensorDescription, ...] = (
+    DanfossSensorDescription(
+        # Température mesurée par la tête : capteur propre à CHAQUE tête (le climate est désormais
+        # au niveau pièce, la température individuelle doit rester visible par tête).
+        key="temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value=lambda d: d.temperature,
+    ),
     DanfossSensorDescription(
         key="batterie",
         device_class=SensorDeviceClass.BATTERY,
