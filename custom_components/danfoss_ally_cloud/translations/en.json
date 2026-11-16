@@ -46,6 +46,10 @@
     "binary_sensor": {
       "en_ligne": { "name": "Online" },
       "fenetre": { "name": "Window" }
+    },
+    "switch": {
+      "verrou_enfant": { "name": "Child lock" },
+      "detection_fenetre": { "name": "Open window detection" }
     }
   }
 }

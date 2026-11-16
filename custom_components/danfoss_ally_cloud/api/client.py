@@ -13,6 +13,7 @@ SECRETS : sign_key, sid, ecode, chKey et le mot de passe ne sont JAMAIS journali
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 from ._tuya.http import ENDPOINTS, TuyaApiError, TuyaHttpClient, login
@@ -39,6 +40,10 @@ class CloudError(RuntimeError):
 
 class CloudAuthError(CloudError):
     """Identifiants ou secrets d'installation refusés (login impossible)."""
+
+
+class CloudWriteError(CloudError):
+    """Écriture refusée : valeur invalide, modèle non autorisé, ou refus du cloud."""
 
 
 def _is_session_error(err: TuyaApiError) -> bool:
@@ -167,6 +172,28 @@ class CloudClient:
                     seen.add(dev.id)
                     devices.append(dev)
         return devices
+
+    async def async_write_setting(self, dev_id: str, pid: str, dps: dict) -> object:
+        """Écrit des DP de réglage sur une TÊTE (tuya.m.custom.wkf.settings.change, resType 1).
+
+        Mécanisme prouvé par capture (voir danfoss-ally-mcp) pour les DP de l'écran « Setting »
+        (verrou enfant, détection fenêtre, consigne…). `dps` = {str(dp): valeur}. Une tête GROUPÉE
+        en pièce se règle normalement par sa pièce (groupe) — non géré en v0.2.
+
+        ⚠ L'effet réel sur la tête reste à confirmer en réel (certains réglages par cette voie
+        n'avaient pas atteint toutes les têtes isolées lors des essais du MCP).
+        """
+        if not dev_id or not pid:
+            raise CloudWriteError("devId/pid requis pour l'écriture.")
+        body = {
+            "devId": dev_id,
+            "gwId": dev_id,
+            "pid": pid,
+            "resId": dev_id,
+            "resType": 1,
+            "settings": json.dumps(dps, separators=(",", ":")),
+        }
+        return await self._request("tuya.m.custom.wkf.settings.change", "1.0", body)
 
     async def async_validate(self) -> list[dict]:
         """Login + lecture de contrôle (maisons). Lève CloudAuthError/CloudError si échec."""

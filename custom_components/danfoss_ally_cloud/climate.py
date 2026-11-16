@@ -1,9 +1,11 @@
 """Plateforme climate : une tête Danfoss = un thermostat.
 
-v0.1 : LECTURE SEULE. Expose température courante et consigne effective (DP 16). L'écriture
-(consignes, préréglages) viendra en v0.2, par le canal qui respecte le programme : les modes
-at_home / leaving_home écrits par le cloud passent la tête en MANUEL au lieu du programme
-(voir docs/architecture.md). Aucune écriture tant que ce n'est pas validé en réel.
+Lecture : température courante et consigne effective (DP 16). Écriture (v0.2) : consigne via
+tuya.m.custom.wkf.settings.change, UNIQUEMENT pour les produits du garde-fou
+(WRITE_VERIFIED_PRODUCTS) et validée avant envoi. Les modes at_home / leaving_home du cloud passent
+la tête en
+MANUEL au lieu du programme (voir docs/architecture.md) : on n'écrit donc que la consigne, pas ces
+modes. ⚠ Effet réel de l'écriture de consigne à confirmer en réel.
 """
 
 from __future__ import annotations
@@ -15,11 +17,12 @@ from homeassistant.components.climate import (
     HVACMode,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DATA_COORDINATOR, DOMAIN
+from .api import ecriture_autorisee, encode_consigne
+from .const import DATA_COORDINATOR, DOMAIN, DP_TEMP_SET, SETPOINT_STEP
 from .coordinator import DanfossCoordinator
 from .entity import DanfossEntity
 
@@ -49,13 +52,21 @@ class DanfossClimate(DanfossEntity, ClimateEntity):
     _attr_name = None  # entité principale de l'appareil
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT]
-    _attr_supported_features = ClimateEntityFeature(0)  # lecture seule
+    _attr_target_temperature_step = SETPOINT_STEP
     _attr_min_temp = 5.0
     _attr_max_temp = 35.0
 
     @property
     def unique_id(self) -> str:
         return self._device_id
+
+    @property
+    def supported_features(self) -> ClimateEntityFeature:
+        # Écriture de consigne seulement pour les produits du garde-fou (sinon lecture seule).
+        dev = self.device
+        if dev is not None and ecriture_autorisee(dev):
+            return ClimateEntityFeature.TARGET_TEMPERATURE
+        return ClimateEntityFeature(0)
 
     @property
     def current_temperature(self) -> float | None:
@@ -101,3 +112,17 @@ class DanfossClimate(DanfossEntity, ClimateEntity):
         if dev.consignes:
             attrs["consignes"] = dev.consignes
         return attrs
+
+    async def async_set_temperature(self, **kwargs) -> None:
+        """Écrit la consigne (DP 16), validée et bornée. Refuse si le modèle n'est pas autorisé."""
+        dev = self.device
+        if dev is None or not ecriture_autorisee(dev):
+            return
+        temp = kwargs.get(ATTR_TEMPERATURE)
+        if temp is None:
+            return
+        valeur = encode_consigne(temp, self.min_temp, self.max_temp, SETPOINT_STEP)
+        await self.coordinator.client.async_write_setting(
+            dev.id, dev.product_id, {str(DP_TEMP_SET): valeur}
+        )
+        await self.coordinator.async_request_refresh()

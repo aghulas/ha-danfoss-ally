@@ -46,6 +46,10 @@
     "binary_sensor": {
       "en_ligne": { "name": "En ligne" },
       "fenetre": { "name": "Fenêtre" }
+    },
+    "switch": {
+      "verrou_enfant": { "name": "Verrouillage enfant" },
+      "detection_fenetre": { "name": "Détection de fenêtre" }
     }
   }
 }

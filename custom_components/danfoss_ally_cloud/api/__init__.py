@@ -12,13 +12,17 @@ Réutilisation (voir docs/reuse.md) :
 
 from __future__ import annotations
 
-from .client import CloudAuthError, CloudClient, CloudError
+from .client import CloudAuthError, CloudClient, CloudError, CloudWriteError
 from .decode import DanfossDevice, decoder
+from .writes import ecriture_autorisee, encode_consigne
 
 __all__ = [
     "CloudAuthError",
     "CloudClient",
     "CloudError",
+    "CloudWriteError",
     "DanfossDevice",
     "decoder",
+    "ecriture_autorisee",
+    "encode_consigne",
 ]

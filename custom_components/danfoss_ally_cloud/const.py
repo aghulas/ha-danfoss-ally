@@ -4,9 +4,9 @@ from __future__ import annotations
 
 DOMAIN = "danfoss_ally_cloud"
 
-# Plateformes exposées. v0.1 = lecture seule (climate + capteurs). number/switch
-# (écritures) s'activeront en v0.2 une fois les écritures validées en réel.
-PLATFORMS = ["climate", "sensor", "binary_sensor"]
+# Plateformes exposées. v0.2 : climate (consigne) + capteurs + switch (verrou enfant,
+# détection fenêtre). number viendra avec d'autres réglages numériques (borne haute…).
+PLATFORMS = ["climate", "sensor", "binary_sensor", "switch"]
 
 # Clé de hass.data[DOMAIN][entry_id] -> coordinateur.
 DATA_COORDINATOR = "coordinator"
@@ -59,3 +59,14 @@ ZB_ATTR_PROGRAMMING_MODE = 0x0025  # bit0 programme, bit1 pré-chauffage
 # Modèles sur lesquels une écriture a été vérifiée en réel (à étendre install
 # par install : c'est l'un des buts de la diffusion publique).
 WRITE_VERIFIED_MODELS = ("radiator thermostat", "icon2 rt")
+
+# Produits (productId Tuya) sur lesquels le MÉCANISME d'écriture voie 1a est câblé
+# (tuya.m.custom.wkf.settings.change). ⚠ Porté des captures du MCP ; la confirmation
+# EN RÉEL (effet observé sur la tête) reste à faire, install par install.
+WRITE_VERIFIED_PRODUCTS = ("03wvrwpv",)  # tête thermostatique Danfoss Ally
+
+# Consigne (écriture) : DP 16 temp_set, dixièmes de °C. Bornes et pas du schéma produit.
+DP_TEMP_SET = 16
+SETPOINT_MIN = 5.0
+SETPOINT_MAX = 35.0
+SETPOINT_STEP = 0.5
