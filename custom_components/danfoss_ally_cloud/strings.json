@@ -3,17 +3,21 @@
     "step": {
       "user": {
         "title": "Danfoss Ally (Cloud)",
-        "description": "Connectez-vous avec le compte de l'application Danfoss Ally / Smart Life. Aucune application développeur ni clé API n'est requise.",
+        "description": "Connectez-vous avec le compte de l'application Danfoss Ally / Smart Life. Aucune application développeur ni clé API n'est requise. Les secrets d'installation (clé de signature, identifiant d'appareil, clé de canal) sont capturés une fois sur l'installation (voir la documentation).",
         "data": {
-          "username": "Identifiant (e-mail ou téléphone)",
+          "username": "Identifiant (e-mail)",
           "password": "Mot de passe",
-          "region": "Région (eu, us, cn, in)"
+          "country_code": "Indicatif pays (ex. 33 pour la France)",
+          "region": "Datacenter (eu, us, cn, in)",
+          "sign_key": "Clé de signature (sign_key)",
+          "device_id": "Identifiant d'appareil (deviceId)",
+          "ch_key": "Clé de canal (chKey)"
         }
       }
     },
     "error": {
       "cannot_connect": "Connexion impossible",
-      "invalid_auth": "Identifiants invalides",
+      "invalid_auth": "Identifiants ou secrets d'installation invalides",
       "unknown": "Erreur inattendue"
     },
     "abort": {
@@ -32,6 +36,21 @@
           "mqtt_base_topic": "Préfixe de topic MQTT"
         }
       }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "ouverture_vanne": { "name": "Ouverture de vanne" },
+      "defaut": { "name": "Code défaut" }
+    },
+    "binary_sensor": {
+      "en_ligne": { "name": "En ligne" },
+      "fenetre": { "name": "Fenêtre" }
+    },
+    "switch": {
+      "verrou_enfant": { "name": "Verrouillage enfant" },
+      "detection_fenetre": { "name": "Détection de fenêtre" },
+      "pre_chauffage": { "name": "Pré-chauffage" }
     }
   }
 }

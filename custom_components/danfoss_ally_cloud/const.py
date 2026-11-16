@@ -1,21 +1,59 @@
-"""Constantes de l'intégration Danfoss Ally (Cloud)."""
+"""Constantes de l'intégration Danfoss Ally (Cloud).
+
+Les constantes APPAREIL / PROTOCOLE (codes DP, bornes de consigne, modèles autorisés, attribut
+Zigbee) vivent dans la couche réutilisable `api/const.py` (future bibliothèque pydanfoss-cloud) et
+sont ré-exportées ici pour le reste de l'intégration. Ce fichier ne garde que le propre de HA
+(domaine, plateformes, clés de données, options de configuration).
+"""
 
 from __future__ import annotations
 
+from .api.const import (  # noqa: F401 - ré-export pour l'intégration (device/protocole)
+    DP_CHILD_LOCK,
+    DP_HEAT_DEMAND,
+    DP_MANUAL_SETPOINT,
+    DP_PREHEAT,
+    DP_SETPOINT,
+    DP_TEMP_SET,
+    DP_UPPER_TEMP,
+    DP_WINDOW_DETECT,
+    SETPOINT_MAX,
+    SETPOINT_MIN,
+    SETPOINT_STEP,
+    WRITE_VERIFIED_MODELS,
+    WRITE_VERIFIED_PRODUCTS,
+    ZB_ATTR_PROGRAMMING_MODE,
+)
+
 DOMAIN = "danfoss_ally_cloud"
 
-# Plateformes exposées. On démarre avec climate + capteurs ; switch/number
-# s'activent au fur et à mesure que les écritures sont validées.
-PLATFORMS = ["climate", "sensor", "binary_sensor", "number", "switch"]
+# Plateformes exposées. v0.2 : climate (consigne) + capteurs + switch (verrou enfant,
+# détection fenêtre). number viendra avec d'autres réglages numériques (borne haute…).
+PLATFORMS = ["climate", "sensor", "binary_sensor", "switch"]
 
-# --- Options de configuration (config_flow / options_flow) ---
+# Clés de hass.data[DOMAIN][entry_id].
+DATA_COORDINATOR = "coordinator"
+DATA_LOCAL = "local_coordinator"  # repli local (tunnel), None si enable_local désactivé
+DATA_MQTT = "mqtt_publisher"  # publicateur MQTT, None si mqtt_mode = off
+
+# Intervalle du relevé LOCAL (tunnel Zigbee) : lent, car ~8 s par tête. Distinct du polling cloud.
+DEFAULT_LOCAL_SCAN_INTERVAL = 900  # secondes
+
+# --- Identifiants et secrets d'installation (config_flow / options_flow) ---
+# username/password/country_code : identifiants du compte de l'app (login voie 1a).
+# sign_key/device_id/ch_key : matériel d'INSTALLATION capturé une fois (voir README),
+# stable, indispensable à la signature et au chiffrement. SECRETS : jamais journalisés.
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
-CONF_REGION = "region"
+CONF_COUNTRY_CODE = "country_code"  # indicatif pays, ex. "33" (France)
+CONF_REGION = "region"  # datacenter : "eu" | "us" | "cn" | "in"
+CONF_SIGN_KEY = "sign_key"
+CONF_DEVICE_ID = "device_id"
+CONF_CH_KEY = "ch_key"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_ENABLE_LOCAL = "enable_local"
-CONF_MQTT_MODE = "mqtt_mode"        # "off" | "discovery" | "zigbee2mqtt"
-CONF_MQTT_SOURCE = "mqtt_source"    # "cloud" | "local"
+CONF_MQTT_MODE = "mqtt_mode"  # "off" | "discovery" | "zigbee2mqtt"
+CONF_MQTT_SOURCE = "mqtt_source"  # "cloud" | "local"
 CONF_MQTT_BASE_TOPIC = "mqtt_base_topic"
 
 # Défauts conservateurs : le quota et la sécurité du compte priment.
@@ -23,28 +61,3 @@ DEFAULT_SCAN_INTERVAL = 90  # secondes
 DEFAULT_MQTT_MODE = "off"
 DEFAULT_MQTT_SOURCE = "cloud"
 DEFAULT_MQTT_BASE_TOPIC = "danfoss_ally_cloud"
-
-# Codes DP (noms officiels : voir danfoss-app-capture/dp_schema_officiel.md).
-# Source de vérité, à ne pas deviner. Rappels des pièges connus :
-#   DP 171 = OccupiedSetpoint (consigne en cours, centièmes)
-#   DP 18  = upper_temp (BORNE HAUTE, pas la consigne)
-#   DP 114 = consigne du mode manuel
-#   DP 1   = pré-chauffage (côté cloud : ne change que le cache passerelle)
-#   DP 30  = verrouillage enfant
-#   DP 116 = détection de fenêtre
-#   DP 162 = demande de chaleur (miroir cloud DP 138)
-DP_SETPOINT = 171
-DP_UPPER_TEMP = 18
-DP_MANUAL_SETPOINT = 114
-DP_PREHEAT = 1
-DP_CHILD_LOCK = 30
-DP_WINDOW_DETECT = 116
-DP_HEAT_DEMAND = 162
-
-# Le vrai levier du pré-chauffage est l'attribut Zigbee standard, accessible
-# UNIQUEMENT par le tunnel local (voir api/local/tunnel.py).
-ZB_ATTR_PROGRAMMING_MODE = 0x0025  # bit0 programme, bit1 pré-chauffage
-
-# Modèles sur lesquels une écriture a été vérifiée en réel (à étendre install
-# par install : c'est l'un des buts de la diffusion publique).
-WRITE_VERIFIED_MODELS = ("radiator thermostat", "icon2 rt")

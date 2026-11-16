@@ -3,17 +3,21 @@
     "step": {
       "user": {
         "title": "Danfoss Ally (Cloud)",
-        "description": "Sign in with your Danfoss Ally / Smart Life app account. No developer application or API key is required.",
+        "description": "Sign in with your Danfoss Ally / Smart Life app account. No developer app or API key is required. The installation secrets (sign key, device id, channel key) are captured once on the installation (see the documentation).",
         "data": {
-          "username": "Username (e-mail or phone)",
+          "username": "Username (email)",
           "password": "Password",
-          "region": "Region (eu, us, cn, in)"
+          "country_code": "Country calling code (e.g. 33 for France)",
+          "region": "Datacenter (eu, us, cn, in)",
+          "sign_key": "Sign key (sign_key)",
+          "device_id": "Device id (deviceId)",
+          "ch_key": "Channel key (chKey)"
         }
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect",
-      "invalid_auth": "Invalid credentials",
+      "cannot_connect": "Cannot connect",
+      "invalid_auth": "Invalid credentials or installation secrets",
       "unknown": "Unexpected error"
     },
     "abort": {
@@ -26,12 +30,27 @@
         "title": "Options",
         "data": {
           "scan_interval": "Cloud polling interval (seconds)",
-          "enable_local": "Enable local Zigbee tunnel (gateways) for writes the cloud gets wrong",
-          "mqtt_mode": "MQTT publication: off, discovery (auto HA entities), zigbee2mqtt (z2m-compatible topics)",
+          "enable_local": "Enable the local Zigbee tunnel (gateways) for writes the cloud misses",
+          "mqtt_mode": "MQTT publishing: off, discovery (auto HA entities), zigbee2mqtt (z2m-compatible topics)",
           "mqtt_source": "Source of published values: cloud or local",
           "mqtt_base_topic": "MQTT topic prefix"
         }
       }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "ouverture_vanne": { "name": "Valve opening" },
+      "defaut": { "name": "Fault code" }
+    },
+    "binary_sensor": {
+      "en_ligne": { "name": "Online" },
+      "fenetre": { "name": "Window" }
+    },
+    "switch": {
+      "verrou_enfant": { "name": "Child lock" },
+      "detection_fenetre": { "name": "Open window detection" },
+      "pre_chauffage": { "name": "Pre-heating" }
     }
   }
 }

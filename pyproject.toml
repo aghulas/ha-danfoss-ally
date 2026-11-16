@@ -1,3 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# Bibliothèque réutilisable extraite de l'intégration (voie 1a Danfoss Ally).
+# Source UNIQUE : le dossier custom_components/danfoss_ally_cloud/api (que l'intégration « vend »
+# pour le runtime HACS). Packagée ici sous le nom pydanfoss_cloud, sans déplacer les fichiers :
+# le connecteur MCP pourra en dépendre (pip install pydanfoss-cloud) une fois publiée sur PyPI,
+# et l'intégration continuera de la vendre tant que la publication n'est pas faite.
+[project]
+name = "pydanfoss-cloud"
+version = "0.1.0"
+description = "Accès à l'API cloud non officielle Danfoss Ally (voie 1a) : client, décodage DP, écritures gardées, clés passerelles, tunnel Zigbee local."
+readme = "custom_components/danfoss_ally_cloud/api/README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "aghulas" }]
+dependencies = ["pycryptodome", "requests"]
+
+[project.optional-dependencies]
+local = ["tinytuya"]
+
+[project.urls]
+Homepage = "https://github.com/aghulas/ha-danfoss-ally"
+
+[tool.setuptools]
+packages = ["pydanfoss_cloud", "pydanfoss_cloud._tuya", "pydanfoss_cloud.local"]
+
+[tool.setuptools.package-dir]
+pydanfoss_cloud = "custom_components/danfoss_ally_cloud/api"
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100
@@ -14,3 +45,4 @@ disallow_untyped_defs = false
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = "-q"
+pythonpath = "."

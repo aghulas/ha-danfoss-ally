@@ -1,3 +1,7 @@
 # Dépendances d'exécution de l'intégration. À synchroniser avec
 # manifest.json -> requirements une fois la couche api/ extraite en lib.
+# Pile Tuya voie 1a (signature HMAC + chiffrement AES-GCM/RSA, HTTP).
+pycryptodome
+requests
+# tunnel Zigbee local (DP 198/199), utilisé à partir de la v0.3.
 tinytuya
