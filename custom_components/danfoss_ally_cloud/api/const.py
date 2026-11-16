@@ -16,11 +16,27 @@ from __future__ import annotations
 DP_TEMP_SET = 16
 DP_SETPOINT = 171
 DP_UPPER_TEMP = 18
-DP_MANUAL_SETPOINT = 114
+DP_MANUAL_SETPOINT = 114  # manual_mode_fast
+DP_AT_HOME_SETPOINT = 118  # at_home_setting (période « confort » du programme)
+DP_LEAVING_HOME_SETPOINT = 119  # leaving_home_setting (période « réduit »)
+DP_PAUSE_SETPOINT = 120  # pause_setting
+DP_HOLIDAY_SETPOINT = 121  # holiday_setting (vacances)
 DP_PREHEAT = 1
 DP_CHILD_LOCK = 30
 DP_WINDOW_DETECT = 116
 DP_HEAT_DEMAND = 162
+
+# Écriture de consigne : mode courant (DP 2) -> DP du réglage à écrire.
+# Prouvé en réel : écrire le DP16 temp_set NE TIENT PAS sur une tête sur programme (l'horaire le
+# réécrit). Le levier durable est la consigne du RÉGLAGE DU MODE ACTIF (temp_set suit ensuite).
+MODE_SETPOINT_DP = {
+    "at_home": DP_AT_HOME_SETPOINT,
+    "leaving_home": DP_LEAVING_HOME_SETPOINT,
+    "pause": DP_PAUSE_SETPOINT,
+    "holiday": DP_HOLIDAY_SETPOINT,
+    "holiday_sat": DP_HOLIDAY_SETPOINT,
+    "manual": DP_MANUAL_SETPOINT,
+}
 
 # Le vrai levier du pré-chauffage est l'attribut Zigbee standard (tunnel local uniquement).
 ZB_ATTR_PROGRAMMING_MODE = 0x0025  # bit 0 programme, bit 1 pré-chauffage
