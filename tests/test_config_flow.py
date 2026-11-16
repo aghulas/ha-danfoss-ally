@@ -8,7 +8,12 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.danfoss_ally_cloud.api.client import CloudAuthError, CloudError
-from custom_components.danfoss_ally_cloud.const import DOMAIN
+from custom_components.danfoss_ally_cloud.const import (
+    CONF_ENABLE_LOCAL,
+    CONF_MQTT_MODE,
+    CONF_SCAN_INTERVAL,
+    DOMAIN,
+)
 
 from .common import ENTRY_DATA, FakeCloudClient
 
@@ -40,8 +45,40 @@ async def test_user_cannot_connect(hass: HomeAssistant):
     assert result["errors"] == {"base": "cannot_connect"}
 
 
+async def test_user_unknown_error(hass: HomeAssistant):
+    # Toute exception inattendue -> "unknown" (robustesse du config flow).
+    result = await _submit(hass, FakeCloudClient(validate_exc=ValueError("imprévu")))
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "unknown"}
+
+
 async def test_already_configured(hass: HomeAssistant):
     MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, unique_id="compte@exemple.fr").add_to_hass(hass)
     result = await _submit(hass, FakeCloudClient())
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "already_configured"
+
+
+async def test_options_flow(hass: HomeAssistant):
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=ENTRY_DATA, unique_id="compte@exemple.fr", options={}
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCAN_INTERVAL: 120,
+            CONF_ENABLE_LOCAL: True,
+            CONF_MQTT_MODE: "discovery",
+            "mqtt_source": "cloud",
+            "mqtt_base_topic": "danfoss_ally_cloud",
+        },
+    )
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_SCAN_INTERVAL] == 120
+    assert entry.options[CONF_ENABLE_LOCAL] is True
+    assert entry.options[CONF_MQTT_MODE] == "discovery"
