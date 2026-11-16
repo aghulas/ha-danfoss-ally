@@ -122,3 +122,20 @@ def test_trame_ecrire_attributs_type_inconnu():
 def test_plages_confort():
     tr = [{"h": "00:00", "c": 17.0}, {"h": "06:00", "c": 21.0}, {"h": "22:00", "c": 17.0}]
     assert tunnel.plages(tr) == [{"debut": "06:00", "fin": "22:00", "consigne": 21.0}]
+
+
+def test_nouveau_mode_prechauffage():
+    assert tunnel.nouveau_mode_prechauffage(0x01, True) == 0x03  # programme -> + pré-chauffage
+    assert tunnel.nouveau_mode_prechauffage(0x03, False) == 0x01  # retire le pré-chauffage
+    assert tunnel.nouveau_mode_prechauffage(0x03, True) == 0x03  # déjà actif
+    assert tunnel.nouveau_mode_prechauffage(0x01, False) == 0x01  # déjà inactif
+
+
+def test_ecrire_attributs_via_doublure():
+    # Réponse « write attributes response » (cmd 0x04, statut 0 = accepté).
+    reponse = tunnel.entete(tunnel.CLUSTER_THERMOSTAT) + bytes([0x00, 0x40, 0x04, 0x00])
+    lien = _FakeLien("node-xyz", reponse)
+    statut = tunnel.ecrire_attributs(
+        lien, "dev-1", "node-xyz", [(0x0025, 0x30, 3)], fabricant=False
+    )
+    assert statut == 0

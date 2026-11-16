@@ -352,3 +352,43 @@ def lire_programme(lien: Any, dev_id: str, node_id: str) -> dict[str, list[dict[
         if tr is not None:
             prog[j] = tr
     return prog
+
+
+def lire_mode_programmation(lien: Any, dev_id: str, node_id: str, **kw: Any) -> int | None:
+    """Valeur brute 0x0025 (bit 0 programme, bit 1 pré-chauffage). None sans réponse."""
+    a = lire_attributs(lien, dev_id, node_id, ATTRIBUTS_STD, False, **kw)
+    return None if a is None else a.get("mode_programmation")
+
+
+def nouveau_mode_prechauffage(mode_actuel: int, actif: bool) -> int:
+    """Nouvelle valeur 0x0025 : (dés)active le bit pré-chauffage (0x02), bit programme préservé."""
+    return (mode_actuel | 0x02) if actif else (mode_actuel & ~0x02)
+
+
+def ecrire_attributs(
+    lien: Any,
+    dev_id: str,
+    node_id: str,
+    enregistrements: list[tuple[int, int, int]],
+    fabricant: bool,
+) -> int | None:
+    """Écrit des attributs par le tunnel. Renvoie le 1er statut (0 = accepté), None sans réponse."""
+
+    def accepte(f: dict[str, Any]) -> Any:
+        if f["specifique"] or f["commande"] != 0x04 or bool(f["fabricant"]) != fabricant:
+            return None
+        return f["charge"][0] if f["charge"] else None
+
+    trame = trame_ecrire_attributs(enregistrements, fabricant)
+    return demander(lien, dev_id, node_id, trame, accepte, duree=10, essais=1)
+
+
+def ecrire_prechauffage(
+    lien: Any, dev_id: str, node_id: str, actif: bool, mode_actuel: int
+) -> int | None:
+    """Active/désactive le pré-chauffage réel (0x0025 bit 1), bit programme préservé.
+
+    ⚠ Mécanisme d'écriture d'attribut non confirmé en réel pour 0x0025 : à valider sur l'install.
+    """
+    nouveau = nouveau_mode_prechauffage(mode_actuel, actif)
+    return ecrire_attributs(lien, dev_id, node_id, [(0x0025, 0x30, nouveau)], fabricant=False)

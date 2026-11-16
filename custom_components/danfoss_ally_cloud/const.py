@@ -8,8 +8,12 @@ DOMAIN = "danfoss_ally_cloud"
 # détection fenêtre). number viendra avec d'autres réglages numériques (borne haute…).
 PLATFORMS = ["climate", "sensor", "binary_sensor", "switch"]
 
-# Clé de hass.data[DOMAIN][entry_id] -> coordinateur.
+# Clés de hass.data[DOMAIN][entry_id].
 DATA_COORDINATOR = "coordinator"
+DATA_LOCAL = "local_coordinator"  # repli local (tunnel), None si enable_local désactivé
+
+# Intervalle du relevé LOCAL (tunnel Zigbee) : lent, car ~8 s par tête. Distinct du polling cloud.
+DEFAULT_LOCAL_SCAN_INTERVAL = 900  # secondes
 
 # --- Identifiants et secrets d'installation (config_flow / options_flow) ---
 # username/password/country_code : identifiants du compte de l'app (login voie 1a).

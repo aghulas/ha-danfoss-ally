@@ -49,7 +49,8 @@
     },
     "switch": {
       "verrou_enfant": { "name": "Verrouillage enfant" },
-      "detection_fenetre": { "name": "Détection de fenêtre" }
+      "detection_fenetre": { "name": "Détection de fenêtre" },
+      "pre_chauffage": { "name": "Pré-chauffage" }
     }
   }
 }
