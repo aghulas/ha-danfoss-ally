@@ -51,6 +51,12 @@ apparaît directement dans le **sélecteur de cartes** (« Ajouter une carte »)
 
 ![Carte Programme Danfoss Ally](docs/images/schedule-card.png)
 
+La carte affiche, en lecture, pour la pièce choisie : son nom, les consignes **confort** et
+**réduit**, la **grille des sept jours** (plages de confort positionnées sur 24 h), l'**état des
+têtes** (en ligne, programme actif, incohérente, en montage — icônes et infobulles), un bouton
+**« actualiser »** et la **date de dernière lecture**. Thème clair / sombre par les variables de
+Home Assistant, utilisable au clavier, textes traduits `en` / `fr`. L'édition viendra plus tard.
+
 Comment ça marche :
 
 - l'intégration sert son interface à l'URL `/danfoss_ally_cloud/frontend/` et déclare la ressource
@@ -99,5 +105,5 @@ synthétiques, sur http://localhost:5173/demo/).
 
 **v0.1 — lecture seule cloud** : chaque tête apparaît comme un thermostat (température, consigne) ;
 capteurs batterie, ouverture de vanne, code défaut ; capteurs binaires en ligne / fenêtre. Pas
-encore d'écriture. Socle de l'interface embarquée en place (carte minimale `danfoss-ally-schedule-card`).
-Voir `docs/roadmap.md`.
+encore d'écriture. Interface embarquée : carte `danfoss-ally-schedule-card` en **lecture**
+(consignes, grille hebdomadaire, état des têtes, actualisation). Voir `docs/roadmap.md`.

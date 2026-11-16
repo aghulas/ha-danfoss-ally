@@ -33,6 +33,29 @@ export interface Room {
   setback: number | null;
 }
 
+/** Jours de la semaine, lundi d'abord (contrat §3). */
+export type DayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+/** Plage de confort d'un jour : heures `HH:MM` sur 24 h (contrat §3.2). */
+export interface TimeRange {
+  start: string;
+  end: string;
+}
+
+/** Programme hebdomadaire d'une cible (contrat §3.2). */
+export interface Schedule {
+  target: Target;
+  name: string;
+  comfort: number | null;
+  setback: number | null;
+  /** Toujours les sept jours ; liste vide = jour entièrement en réduit. */
+  days: Record<DayKey, TimeRange[]>;
+  max_transitions_per_day: number;
+  source: string;
+  /** Horodatage ISO de la dernière lecture (contrat §3.2). */
+  read_at: string | null;
+}
+
 /** Réponse de `danfoss_ally_cloud/info` (contrat §5.3). */
 export interface Info {
   version: string;

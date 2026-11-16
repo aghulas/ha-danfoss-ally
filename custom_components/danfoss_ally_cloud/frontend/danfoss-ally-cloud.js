@@ -263,7 +263,7 @@ y$1.elementStyles = [], y$1.shadowRootOptions = { mode: "open" }, y$1[d$1("eleme
  * SPDX-License-Identifier: BSD-3-Clause
  */
 const t$2 = globalThis, i$1 = (t2) => t2, s$1 = t$2.trustedTypes, e = s$1 ? s$1.createPolicy("lit-html", { createHTML: (t2) => t2 }) : void 0, h = "$lit$", o$2 = `lit$${Math.random().toFixed(9).slice(2)}$`, n$1 = "?" + o$2, r$2 = `<${n$1}>`, l = document, c = () => l.createComment(""), a = (t2) => null === t2 || "object" != typeof t2 && "function" != typeof t2, u = Array.isArray, d = (t2) => u(t2) || "function" == typeof t2?.[Symbol.iterator], f = "[ 	\n\f\r]", v = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g, _ = /-->/g, m = />/g, p = RegExp(`>|${f}(?:([^\\s"'>=/]+)(${f}*=${f}*(?:[^ 	
-\f\r"'\`<>=]|("|')|))|$)`, "g"), g = /'/g, $ = /"/g, y2 = /^(?:script|style|textarea|title)$/i, x = (t2) => (i2, ...s2) => ({ _$litType$: t2, strings: i2, values: s2 }), b = x(1), E = Symbol.for("lit-noChange"), A = Symbol.for("lit-nothing"), C = /* @__PURE__ */ new WeakMap(), P = l.createTreeWalker(l, 129);
+\f\r"'\`<>=]|("|')|))|$)`, "g"), g = /'/g, $ = /"/g, y2 = /^(?:script|style|textarea|title)$/i, x = (t2) => (i2, ...s2) => ({ _$litType$: t2, strings: i2, values: s2 }), b = x(1), w = x(2), E = Symbol.for("lit-noChange"), A = Symbol.for("lit-nothing"), C = /* @__PURE__ */ new WeakMap(), P = l.createTreeWalker(l, 129);
 function V(t2, i2) {
   if (!u(t2) || !t2.hasOwnProperty("raw")) throw Error("invalid template strings array");
   return void 0 !== e ? e.createHTML(i2) : i2;
@@ -579,7 +579,31 @@ const STRINGS = {
     reload: "Reload",
     pick_room: "Room",
     rooms_unavailable: "Room list unavailable (the integration may not expose it yet).",
-    read_only: "Read-only (not an administrator)."
+    read_only: "Read-only (not an administrator).",
+    comfort: "Comfort",
+    setback: "Setback",
+    refresh: "Refresh",
+    last_read: "Last read {when}",
+    never_read: "Not read yet",
+    schedule_unavailable: "Schedule unavailable (not yet exposed by the integration).",
+    setback_all_day: "Setback all day",
+    heads_heading: "Thermostats",
+    heads_none: "No thermostat in this room.",
+    head_online: "Online",
+    head_offline: "Offline",
+    head_schedule_on: "Schedule active",
+    head_schedule_off: "Not following the schedule",
+    head_inconsistent: "Inconsistent (left in manual mode)",
+    head_mounting: "Mounting mode (not regulating)",
+    day_mon: "Mon",
+    day_tue: "Tue",
+    day_wed: "Wed",
+    day_thu: "Thu",
+    day_fri: "Fri",
+    day_sat: "Sat",
+    day_sun: "Sun",
+    range_label: "Comfort {start}–{end}",
+    degree: "{value} °C"
   },
   fr: {
     card_name: "Danfoss Ally — Programme",
@@ -591,7 +615,31 @@ const STRINGS = {
     reload: "Recharger",
     pick_room: "Pièce",
     rooms_unavailable: "Liste des pièces indisponible (l'intégration ne l'expose peut-être pas encore).",
-    read_only: "Lecture seule (pas administrateur)."
+    read_only: "Lecture seule (pas administrateur).",
+    comfort: "Confort",
+    setback: "Réduit",
+    refresh: "Actualiser",
+    last_read: "Dernière lecture {when}",
+    never_read: "Pas encore lu",
+    schedule_unavailable: "Programme indisponible (pas encore exposé par l'intégration).",
+    setback_all_day: "Réduit toute la journée",
+    heads_heading: "Têtes",
+    heads_none: "Aucune tête dans cette pièce.",
+    head_online: "En ligne",
+    head_offline: "Hors ligne",
+    head_schedule_on: "Programme actif",
+    head_schedule_off: "Ne suit pas le programme",
+    head_inconsistent: "Incohérente (restée en manuel)",
+    head_mounting: "Mode montage (ne régule pas)",
+    day_mon: "Lun",
+    day_tue: "Mar",
+    day_wed: "Mer",
+    day_thu: "Jeu",
+    day_fri: "Ven",
+    day_sat: "Sam",
+    day_sun: "Dim",
+    range_label: "Confort {start}–{end}",
+    degree: "{value} °C"
   }
 };
 function lang(hass) {
@@ -605,6 +653,21 @@ function t(hass, key, vars = {}) {
     text = text.replace(`{${name}}`, String(value));
   }
   return text;
+}
+const DAY_LABEL_KEYS = {
+  mon: "day_mon",
+  tue: "day_tue",
+  wed: "day_wed",
+  thu: "day_thu",
+  fri: "day_fri",
+  sat: "day_sat",
+  sun: "day_sun"
+};
+function dayLabel(hass, day) {
+  return t(hass, DAY_LABEL_KEYS[day]);
+}
+function language(hass) {
+  return lang(hass);
 }
 async function fetchInfo(hass) {
   try {
@@ -628,6 +691,17 @@ function pickRoom(rooms, roomId) {
     return void 0;
   }
   return rooms.find((room) => room.id === roomId);
+}
+async function fetchSchedule(hass, target, refresh = false) {
+  try {
+    return await hass.callWS({
+      type: "danfoss_ally_cloud/schedule/get",
+      target,
+      refresh
+    });
+  } catch {
+    return null;
+  }
 }
 var __defProp$1 = Object.defineProperty;
 var __getOwnPropDesc$1 = Object.getOwnPropertyDescriptor;
@@ -733,6 +807,54 @@ __decorateClass$1([
 DanfossAllyScheduleCardEditor = __decorateClass$1([
   t$1("danfoss-ally-schedule-card-editor")
 ], DanfossAllyScheduleCardEditor);
+const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const MINUTES_PER_DAY = 24 * 60;
+function parseHHMM(value) {
+  const m2 = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!m2) {
+    return null;
+  }
+  const hours = Number(m2[1]);
+  const minutes = Number(m2[2]);
+  if (hours > 23 || minutes > 59) {
+    return null;
+  }
+  return hours * 60 + minutes;
+}
+function dayBars(ranges) {
+  const bars = [];
+  for (const range of ranges) {
+    const start = parseHHMM(range.start);
+    const end = parseHHMM(range.end);
+    if (start === null || end === null || end <= start) {
+      continue;
+    }
+    bars.push({
+      start: range.start,
+      end: range.end,
+      leftPct: start / MINUTES_PER_DAY * 100,
+      widthPct: (end - start) / MINUTES_PER_DAY * 100
+    });
+  }
+  bars.sort((a2, b2) => a2.leftPct - b2.leftPct);
+  return bars;
+}
+function isSetbackOnly(ranges) {
+  return dayBars(ranges).length === 0;
+}
+function formatReadAt(iso, lang2) {
+  if (!iso) {
+    return null;
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return new Intl.DateTimeFormat(lang2, {
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(date);
+}
 const CARD_VERSION = "0.1.0";
 function needsReload(cardVersion, serverVersion) {
   if (!serverVersion) {
@@ -755,7 +877,9 @@ let DanfossAllyScheduleCard = class extends i {
     super(...arguments);
     this._rooms = [];
     this._info = null;
+    this._schedule = null;
     this._loaded = false;
+    this._refreshing = false;
   }
   static getConfigElement() {
     return document.createElement("danfoss-ally-schedule-card-editor");
@@ -770,7 +894,7 @@ let DanfossAllyScheduleCard = class extends i {
     this._config = config;
   }
   getCardSize() {
-    return 3;
+    return 6;
   }
   updated(changed) {
     if (changed.has("hass") && this.hass && !this._loaded) {
@@ -778,45 +902,191 @@ let DanfossAllyScheduleCard = class extends i {
       void this._load();
     }
   }
+  get _target() {
+    const id = this._config?.room_id;
+    return id ? { type: "room", id } : void 0;
+  }
   async _load() {
     if (!this.hass) {
       return;
     }
-    const [info, rooms] = await Promise.all([
+    const target = this._target;
+    const [info, rooms, schedule] = await Promise.all([
       fetchInfo(this.hass),
-      fetchRooms(this.hass)
+      fetchRooms(this.hass),
+      target ? fetchSchedule(this.hass, target) : Promise.resolve(null)
     ]);
     this._info = info;
     this._rooms = rooms;
+    this._schedule = schedule;
+  }
+  async _refresh() {
+    const target = this._target;
+    if (!this.hass || !target || this._refreshing) {
+      return;
+    }
+    this._refreshing = true;
+    try {
+      const schedule = await fetchSchedule(this.hass, target, true);
+      if (schedule) {
+        this._schedule = schedule;
+      }
+    } finally {
+      this._refreshing = false;
+    }
   }
   _reload() {
     globalThis.location?.reload();
   }
   render() {
     const room = pickRoom(this._rooms, this._config?.room_id);
-    const title = this._roomTitle(room);
     const showReload = needsReload(CARD_VERSION, this._info?.version);
     const readOnly = this._info !== null && !this._info.is_admin;
     return b`
-      <ha-card header="Danfoss Ally">
+      <ha-card>
         <div class="content">
           ${showReload ? this._renderReloadBanner() : A}
-          <div class="room">${title}</div>
-          ${this._rooms.length === 0 ? b`<div class="hint">${t(this.hass, "rooms_unavailable")}</div>` : A}
+          <div class="room">${this._roomTitle(room)}</div>
           ${readOnly ? b`<div class="hint">${t(this.hass, "read_only")}</div>` : A}
-          <div class="version">${t(this.hass, "version", { version: CARD_VERSION })}</div>
+          ${this._renderBody(room)}
         </div>
       </ha-card>
+    `;
+  }
+  _renderBody(room) {
+    if (this._rooms.length === 0 && !this._config?.room_id) {
+      return b`<div class="hint">${t(this.hass, "rooms_unavailable")}</div>`;
+    }
+    const schedule = this._schedule;
+    const comfort = schedule?.comfort ?? room?.comfort ?? null;
+    const setback = schedule?.setback ?? room?.setback ?? null;
+    return b`
+      ${this._renderSetpoints(comfort, setback)}
+      ${schedule ? this._renderGrid(schedule) : b`<div class="hint">${t(this.hass, "schedule_unavailable")}</div>`}
+      ${this._renderHeads(room)}
+      ${this._renderFooter(schedule)}
     `;
   }
   _roomTitle(room) {
     if (room) {
       return room.name;
     }
+    if (this._schedule?.name) {
+      return this._schedule.name;
+    }
     if (this._config?.room_id) {
       return t(this.hass, "unknown_room", { id: this._config.room_id });
     }
     return t(this.hass, "no_room");
+  }
+  _renderSetpoints(comfort, setback) {
+    const fmt = (v2) => v2 === null ? "—" : t(this.hass, "degree", { value: v2 });
+    return b`
+      <div class="setpoints">
+        <span class="chip comfort">
+          <span class="swatch comfort"></span>${t(this.hass, "comfort")} ${fmt(comfort)}
+        </span>
+        <span class="chip setback">
+          <span class="swatch setback"></span>${t(this.hass, "setback")} ${fmt(setback)}
+        </span>
+      </div>
+    `;
+  }
+  _renderGrid(schedule) {
+    return b`
+      <div class="grid">
+        <div class="scale" aria-hidden="true">
+          <span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span>
+        </div>
+        ${DAY_KEYS.map((day) => this._renderDay(day, schedule.days[day] ?? []))}
+      </div>
+    `;
+  }
+  _renderDay(day, ranges) {
+    const bars = dayBars(ranges);
+    const label = this._dayAria(day, bars, isSetbackOnly(ranges));
+    return b`
+      <div class="day">
+        <span class="day-label">${dayLabel(this.hass, day)}</span>
+        <div class="track" role="img" aria-label=${label}>
+          ${bars.map(
+      (bar) => b`
+              <div
+                class="bar"
+                style="left:${bar.leftPct}%;width:${bar.widthPct}%"
+                title=${t(this.hass, "range_label", { start: bar.start, end: bar.end })}
+              ></div>
+            `
+    )}
+        </div>
+      </div>
+    `;
+  }
+  _dayAria(day, bars, setbackOnly) {
+    const name = dayLabel(this.hass, day);
+    if (setbackOnly) {
+      return `${name} — ${t(this.hass, "setback_all_day")}`;
+    }
+    const parts = bars.map(
+      (bar) => t(this.hass, "range_label", { start: bar.start, end: bar.end })
+    );
+    return `${name} — ${parts.join(", ")}`;
+  }
+  _renderHeads(room) {
+    const heads = room?.heads ?? [];
+    return b`
+      <div class="heads">
+        <div class="heads-title">${t(this.hass, "heads_heading")}</div>
+        ${heads.length === 0 ? b`<div class="hint">${t(this.hass, "heads_none")}</div>` : b`<div class="heads-list">
+              ${heads.map((head) => this._renderHead(head))}
+            </div>`}
+      </div>
+    `;
+  }
+  _renderHead(head) {
+    return b`
+      <div class="head">
+        <span class="head-name">${head.name}</span>
+        <span class="badges">
+          ${this._badge(
+      head.online ? "ok" : "off",
+      head.online ? ICON_WIFI : ICON_WIFI_OFF,
+      t(this.hass, head.online ? "head_online" : "head_offline")
+    )}
+          ${head.schedule_active !== null ? this._badge(
+      head.schedule_active ? "ok" : "muted",
+      head.schedule_active ? ICON_CHECK : ICON_MINUS,
+      t(this.hass, head.schedule_active ? "head_schedule_on" : "head_schedule_off")
+    ) : A}
+          ${head.inconsistent ? this._badge("warn", ICON_ALERT, t(this.hass, "head_inconsistent")) : A}
+          ${head.mounting ? this._badge("muted", ICON_WRENCH, t(this.hass, "head_mounting")) : A}
+        </span>
+      </div>
+    `;
+  }
+  _badge(kind, icon, label) {
+    return b`
+      <span class="badge ${kind}" title=${label} role="img" aria-label=${label}>${icon}</span>
+    `;
+  }
+  _renderFooter(schedule) {
+    const when = formatReadAt(schedule?.read_at, language(this.hass));
+    const lastRead = when ? t(this.hass, "last_read", { when }) : t(this.hass, "never_read");
+    const canRefresh = Boolean(this.hass && this._target);
+    return b`
+      <div class="footer">
+        <button
+          class="refresh"
+          @click=${this._refresh}
+          ?disabled=${!canRefresh || this._refreshing}
+          aria-label=${t(this.hass, "refresh")}
+        >
+          ${ICON_REFRESH}<span>${t(this.hass, "refresh")}</span>
+        </button>
+        <span class="read-at">${lastRead}</span>
+        <span class="version">${t(this.hass, "version", { version: CARD_VERSION })}</span>
+      </div>
+    `;
   }
   _renderReloadBanner() {
     return b`
@@ -838,23 +1108,188 @@ DanfossAllyScheduleCard.styles = i$3`
       font-size: 1.4rem;
       font-weight: 500;
       color: var(--primary-text-color);
+      padding-top: 16px;
     }
     .hint {
       margin-top: 8px;
       color: var(--secondary-text-color);
       font-size: 0.9rem;
     }
-    .version {
-      margin-top: 12px;
+    .setpoints {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 14px;
+      font-size: 0.9rem;
+      background: var(--secondary-background-color, #f0f0f0);
+      color: var(--primary-text-color);
+    }
+    .swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+    }
+    .swatch.comfort,
+    .bar {
+      background: var(--danfoss-comfort-color, var(--primary-color, #03a9f4));
+    }
+    .swatch.setback {
+      background: var(--danfoss-setback-color, var(--disabled-text-color, #9e9e9e));
+    }
+    .grid {
+      margin: 8px 0 4px;
+    }
+    .scale {
+      display: flex;
+      justify-content: space-between;
+      margin: 0 0 4px calc(2.6rem + 8px);
+      color: var(--secondary-text-color);
+      font-size: 0.7rem;
+    }
+    .day {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 3px 0;
+    }
+    .day-label {
+      flex: 0 0 2.6rem;
+      font-size: 0.8rem;
+      color: var(--secondary-text-color);
+    }
+    .track {
+      position: relative;
+      flex: 1 1 auto;
+      height: 16px;
+      border-radius: 4px;
+      background: var(--danfoss-track-color, var(--divider-color, #e0e0e0));
+      background-image: linear-gradient(
+        to right,
+        transparent 0,
+        transparent calc(25% - 1px),
+        rgba(127, 127, 127, 0.35) calc(25% - 1px),
+        rgba(127, 127, 127, 0.35) 25%
+      );
+      background-size: 25% 100%;
+      overflow: hidden;
+    }
+    .bar {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      border-radius: 3px;
+      min-width: 2px;
+    }
+    .heads {
+      margin-top: 14px;
+    }
+    .heads-title {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--secondary-text-color);
+      margin-bottom: 6px;
+    }
+    .heads-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .head-name {
+      font-size: 0.9rem;
+      color: var(--primary-text-color);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .badges {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      flex: 0 0 auto;
+    }
+    .badge {
+      display: inline-flex;
+      width: 20px;
+      height: 20px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+    }
+    .badge svg {
+      width: 15px;
+      height: 15px;
+      fill: currentColor;
+    }
+    .badge.ok {
+      color: var(--success-color, #2e7d32);
+    }
+    .badge.warn {
+      color: var(--warning-color, #ffa600);
+    }
+    .badge.off,
+    .badge.muted {
+      color: var(--disabled-text-color, #9e9e9e);
+    }
+    .footer {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      margin-top: 16px;
+    }
+    .refresh {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-radius: 16px;
+      padding: 5px 12px;
+      background: var(--card-background-color, #fff);
+      color: var(--primary-text-color);
+      font: inherit;
+      font-size: 0.85rem;
+    }
+    .refresh:hover {
+      background: var(--secondary-background-color, #f0f0f0);
+    }
+    .refresh:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .refresh svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+    .read-at {
       color: var(--secondary-text-color);
       font-size: 0.8rem;
+    }
+    .version {
+      margin-left: auto;
+      color: var(--secondary-text-color);
+      font-size: 0.75rem;
     }
     .reload {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      margin-bottom: 12px;
+      margin-top: 12px;
       padding: 8px 12px;
       border-radius: 8px;
       background: var(--warning-color, #ffa600);
@@ -884,10 +1319,23 @@ __decorateClass([
 ], DanfossAllyScheduleCard.prototype, "_info", 2);
 __decorateClass([
   r()
+], DanfossAllyScheduleCard.prototype, "_schedule", 2);
+__decorateClass([
+  r()
 ], DanfossAllyScheduleCard.prototype, "_loaded", 2);
+__decorateClass([
+  r()
+], DanfossAllyScheduleCard.prototype, "_refreshing", 2);
 DanfossAllyScheduleCard = __decorateClass([
   t$1("danfoss-ally-schedule-card")
 ], DanfossAllyScheduleCard);
+const ICON_CHECK = w`<svg viewBox="0 0 24 24"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.42z" /></svg>`;
+const ICON_MINUS = w`<svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14z" /></svg>`;
+const ICON_ALERT = w`<svg viewBox="0 0 24 24"><path d="M13 14h-2V9h2m0 9h-2v-2h2M1 21h22L12 2z" /></svg>`;
+const ICON_WRENCH = w`<svg viewBox="0 0 24 24"><path d="M22.7 19 13.6 9.9c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z" /></svg>`;
+const ICON_WIFI = w`<svg viewBox="0 0 24 24"><path d="M12 21 2 9c5.5-5 14.5-5 20 0zm0-3.5 3.5-4.2a5.3 5.3 0 0 0-7 0z" /></svg>`;
+const ICON_WIFI_OFF = w`<svg viewBox="0 0 24 24"><path d="M2.3 4.3 1 5.6l2.3 2.3C2.8 8.3 2.4 8.6 2 9l10 12 3.3-4L18 19.7l1.3-1.4zM12 21ZM20.6 8.3A14 14 0 0 0 9.9 5.8l9.1 9.1 2.9-3.6c-.4-.3-.8-.7-1.3-1z" /></svg>`;
+const ICON_REFRESH = w`<svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z" /></svg>`;
 const CARD_TYPE = "danfoss-ally-schedule-card";
 window.customCards = window.customCards ?? [];
 if (!window.customCards.some((card) => card.type === CARD_TYPE)) {

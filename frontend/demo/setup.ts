@@ -8,7 +8,7 @@
 import "../src/main";
 import type { DanfossAllyScheduleCard } from "../src/schedule-card";
 import type { DanfossAllyScheduleCardEditor } from "../src/schedule-card-editor";
-import type { HassLike, Info, Room } from "../src/types";
+import type { HassLike, Info, Room, Schedule } from "../src/types";
 
 // `ha-card` factice : la démo n'a pas les composants de Home Assistant. Défini
 // globalement, il est aussi « upgradé » à l'intérieur du shadow DOM de la carte,
@@ -110,6 +110,46 @@ const ROOMS: Room[] = [
   },
 ];
 
+// Programmes d'essai synthétiques (contrat §3.2). Heures HH:MM, jours mon..sun.
+const SCHEDULES: Record<string, Schedule> = {
+  "13000000": {
+    target: { type: "room", id: "13000000" },
+    name: "Salle 1",
+    comfort: 21.0,
+    setback: 14.0,
+    days: {
+      mon: [{ start: "08:30", end: "12:00" }, { start: "13:30", end: "17:30" }],
+      tue: [{ start: "08:30", end: "17:30" }],
+      wed: [{ start: "08:30", end: "12:00" }],
+      thu: [{ start: "08:30", end: "17:30" }],
+      fri: [{ start: "08:30", end: "16:00" }],
+      sat: [],
+      sun: [],
+    },
+    max_transitions_per_day: 6,
+    source: "cloud",
+    read_at: "2026-11-16T15:36:00+01:00",
+  },
+  "13000001": {
+    target: { type: "room", id: "13000001" },
+    name: "Salle 2",
+    comfort: 20.5,
+    setback: 15.0,
+    days: {
+      mon: [{ start: "07:00", end: "19:00" }],
+      tue: [{ start: "07:00", end: "19:00" }],
+      wed: [{ start: "07:00", end: "19:00" }],
+      thu: [{ start: "07:00", end: "19:00" }],
+      fri: [{ start: "07:00", end: "19:00" }],
+      sat: [{ start: "09:00", end: "12:00" }],
+      sun: [],
+    },
+    max_transitions_per_day: 6,
+    source: "cloud",
+    read_at: "2026-11-16T15:36:00+01:00",
+  },
+};
+
 const INFO: Info = { version: "0.1.0", local_enabled: false, is_admin: true };
 
 // Pour voir la bannière de rechargement : mettre une version différente de celle
@@ -124,6 +164,17 @@ const fakeHass: HassLike = {
     }
     if (msg.type === "danfoss_ally_cloud/rooms") {
       return { rooms: ROOMS } as unknown as T;
+    }
+    if (msg.type === "danfoss_ally_cloud/schedule/get") {
+      const target = msg.target as { id?: string } | undefined;
+      const schedule = target?.id ? SCHEDULES[target.id] : undefined;
+      if (!schedule) {
+        throw new Error("pièce inconnue");
+      }
+      // Sur un « actualiser » (refresh), met à jour l'horodatage de lecture.
+      return (
+        msg.refresh ? { ...schedule, read_at: new Date().toISOString() } : schedule
+      ) as unknown as T;
     }
     throw new Error(`commande non simulée : ${String(msg.type)}`);
   },
