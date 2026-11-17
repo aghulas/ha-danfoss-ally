@@ -1,8 +1,8 @@
-"""Intégration Danfoss Ally (Cloud).
+"""Danfoss Ally (Cloud) integration.
 
-Point d'entrée : met en place le client cloud (API cloud voie 1a), le coordinateur de
-rafraîchissement, et — à terme — le tunnel local et le publicateur MQTT. Cloud-first ; repli
-local pour les opérations que le cloud rate (voir docs/architecture.md). v0.1 : lecture cloud seule.
+Entry point: sets up the cloud client (path-1a cloud API), the refresh coordinator, and -
+eventually - the local tunnel and the MQTT publisher. Cloud-first; local fallback for the
+operations the cloud misses (see docs/architecture.md). v0.1: cloud read only.
 """
 
 from __future__ import annotations
@@ -53,11 +53,11 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Mise en place à l'échelle de l'intégration (une fois par instance).
+    """Integration-wide setup (once per instance).
 
-    Enregistre les actions et les commandes WebSocket, sert l'interface embarquée et
-    déclare sa ressource Lovelace ici — jamais dans `async_setup_entry` (contrat §6).
-    Best-effort : n'empêche pas le démarrage.
+    Registers the actions and WebSocket commands, serves the embedded frontend and declares its
+    Lovelace resource here - never in `async_setup_entry` (contract §6). Best-effort: does not
+    prevent startup.
     """
     async_register_services(hass)
     async_register_ws(hass)
@@ -79,16 +79,16 @@ def _client_from_entry(entry: ConfigEntry) -> CloudClient:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Configurer une entrée (un compte Danfoss Ally)."""
+    """Set up an entry (one Danfoss Ally account)."""
     client = _client_from_entry(entry)
     scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     coordinator = DanfossCoordinator(hass, client, scan_interval)
     await coordinator.async_config_entry_first_refresh()
 
-    # Repli local (optionnel) : best-effort, ne doit jamais empêcher le cloud de démarrer.
+    # Local fallback (optional): best-effort, must never prevent the cloud from starting.
     local_coordinator = await _async_setup_local(hass, entry, coordinator)
 
-    # Publication MQTT (optionnelle).
+    # MQTT publishing (optional).
     publisher = await _async_setup_mqtt(hass, entry, coordinator)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
@@ -98,6 +98,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_JOBS: JobManager(),
         DATA_SCHEDULES: {},
     }
+    await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
     _cleanup_orphaned_head_climates(hass, entry, coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
@@ -107,7 +108,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_setup_mqtt(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: DanfossCoordinator
 ) -> MqttPublisher | None:
-    """Démarre le publicateur MQTT si mqtt_mode != off. Best-effort (broker absent → no-op)."""
+    """Start the MQTT publisher if mqtt_mode != off. Best-effort (no broker -> no-op)."""
     mode = entry.options.get(CONF_MQTT_MODE, DEFAULT_MQTT_MODE)
     if mode == "off":
         return None
@@ -125,26 +126,26 @@ async def _async_setup_mqtt(
 async def _async_setup_local(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: DanfossCoordinator
 ) -> DanfossLocalCoordinator | None:
-    """Prépare le tunnel local si l'option est active. Best-effort : renvoie None en cas d'échec."""
+    """Prepare the local tunnel if the option is on. Best-effort: returns None on failure."""
     if not entry.options.get(CONF_ENABLE_LOCAL):
         return None
     try:
         gateways = await async_fetch_gateway_keys(coordinator.client)
     except Exception as err:  # noqa: BLE001 - le repli local ne bloque jamais le cloud
-        _LOGGER.warning("Repli local indisponible (récupération des clés) : %s", err)
+        _LOGGER.warning("Local fallback unavailable (key fetch): %s", err)
         return None
     if not gateways:
-        _LOGGER.warning("Repli local activé mais aucune passerelle avec clé locale trouvée.")
+        _LOGGER.warning("Local fallback enabled but no gateway with a local key found.")
         return None
     manager = LocalTunnelManager(gateways)
     local = DanfossLocalCoordinator(hass, manager, coordinator, DEFAULT_LOCAL_SCAN_INTERVAL)
-    # Premier relevé non bloquant : une passerelle injoignable ne doit pas empêcher le démarrage.
+    # Non-blocking first survey: an unreachable gateway must not prevent startup.
     await local.async_refresh()
     return local
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Décharger une entrée (fermer session, tunnel, publicateur MQTT)."""
+    """Unload an entry (close session, tunnel, MQTT publisher)."""
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         data = hass.data[DOMAIN].pop(entry.entry_id, None)
@@ -157,15 +158,42 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unloaded
 
 
+# Entity unique_id slugs were anglicised in the English-base release. The slug is the trailing
+# segment of ``{id}_{slug}``; this migration renames existing entities so histories, automations and
+# dashboards survive the rename. Longest suffixes first so "_fenetre" never matches
+# "_detection_fenetre". Idempotent: new suffixes match none of the old ones.
+_UNIQUE_ID_SUFFIX_MIGRATION: tuple[tuple[str, str], ...] = (
+    ("_detection_fenetre", "_window_detection"),
+    ("_consigne_confort", "_comfort_setpoint"),
+    ("_consigne_reduit", "_setback_setpoint"),
+    ("_ouverture_vanne", "_valve_opening"),
+    ("_verrou_enfant", "_child_lock"),
+    ("_pre_chauffage", "_preheat"),
+    ("_en_ligne", "_online"),
+    ("_batterie", "_battery"),
+    ("_fenetre", "_window"),
+    ("_defaut", "_fault"),
+)
+
+
+def _migrate_unique_id(entity_entry: er.RegistryEntry) -> dict[str, str] | None:
+    """Map an old French-slug unique_id to its English equivalent (else leave it unchanged)."""
+    uid = entity_entry.unique_id
+    for old, new in _UNIQUE_ID_SUFFIX_MIGRATION:
+        if uid.endswith(old):
+            return {"new_unique_id": uid[: -len(old)] + new}
+    return None
+
+
 def _cleanup_orphaned_head_climates(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: DanfossCoordinator
 ) -> None:
-    """Retire les anciens climate PAR TÊTE désormais remplacés par le climate de PIÈCE.
+    """Remove the old PER-HEAD climates now replaced by the PER-ROOM climate.
 
-    Conservateur : ne supprime QUE des entités ``climate`` de CETTE entrée dont l'unique_id est l'id
-    d'une tête maintenant groupée (ancien modèle « un climate par tête »). Les têtes isolées gardent
-    leur climate (lecture seule), et rien d'autre n'est touché — mieux vaut laisser une entité
-    orpheline que supprimer de travers une entité personnalisée par l'utilisateur.
+    Conservative: removes ONLY ``climate`` entities of THIS entry whose unique_id is the id of a
+    now-grouped head (old "one climate per head" model). Isolated heads keep their climate
+    (read-only), and nothing else is touched - better to leave an orphan entity than to wrongly
+    delete a user-customised one.
     """
     registry = er.async_get(hass)
     for head_id in coordinator.grouped_ids:
@@ -174,20 +202,20 @@ def _cleanup_orphaned_head_climates(
             continue
         entity = registry.async_get(ent_id)
         if entity is not None and entity.config_entry_id == entry.entry_id:
-            _LOGGER.debug("Retrait de l'ancien climate par tête %s (pièce %s)", ent_id, head_id)
+            _LOGGER.debug("Removing old per-head climate %s (room %s)", ent_id, head_id)
             registry.async_remove(ent_id)
 
 
 async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Recharger l'entrée quand les options changent (MQTT, local, intervalle)."""
+    """Reload the entry when options change (MQTT, local, interval)."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Au retrait de la DERNIÈRE entrée : nettoyer la ressource Lovelace (contrat §6).
+    """On removal of the LAST entry: clean up the Lovelace resource (contract §6).
 
-    On ne nettoie pas au simple déchargement/rechargement (qui appelle seulement
-    `async_unload_entry`), mais seulement quand plus aucune entrée ne subsiste.
+    We do not clean up on a simple unload/reload (which only calls `async_unload_entry`), but only
+    when no entry remains.
     """
     if not hass.config_entries.async_entries(DOMAIN):
         await async_unregister_frontend(hass)

@@ -40,37 +40,37 @@
  },
  "entity": {
   "sensor": {
-   "ouverture_vanne": {
+   "valve_opening": {
     "name": "Ouverture de vanne"
    },
-   "defaut": {
+   "fault": {
     "name": "Code défaut"
    }
   },
   "binary_sensor": {
-   "en_ligne": {
+   "online": {
     "name": "En ligne"
    },
-   "fenetre": {
+   "window": {
     "name": "Fenêtre"
    }
   },
   "switch": {
-   "verrou_enfant": {
+   "child_lock": {
     "name": "Verrouillage enfant"
    },
-   "detection_fenetre": {
+   "window_detection": {
     "name": "Détection de fenêtre"
    },
-   "pre_chauffage": {
+   "preheat": {
     "name": "Pré-chauffage"
    }
   },
   "number": {
-   "consigne_confort": {
+   "comfort_setpoint": {
     "name": "Consigne confort"
    },
-   "consigne_reduit": {
+   "setback_setpoint": {
     "name": "Consigne réduit"
    }
   }

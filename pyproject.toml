@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 # et l'intégration continuera de la vendre tant que la publication n'est pas faite.
 [project]
 name = "pydanfoss-cloud"
-version = "0.1.0"
+version = "0.2.0"
 description = "Accès à l'API cloud non officielle Danfoss Ally (voie 1a) : client, décodage DP, écritures gardées, clés passerelles, tunnel Zigbee local."
 readme = "custom_components/danfoss_ally_cloud/api/README.md"
 requires-python = ">=3.11"

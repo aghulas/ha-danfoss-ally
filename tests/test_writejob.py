@@ -1,11 +1,11 @@
-"""Tests de la file des lots d'écriture (WriteJob) — pur, sans Home Assistant."""
+"""Write-job queue tests (WriteJob) - pure, no Home Assistant."""
 
 from custom_components.danfoss_ally_cloud import writejob as wj
 
 _TARGET = {"type": "room", "id": "13000000"}
 
 
-def test_create_statut_sent_et_tetes_pending():
+def test_create_status_sent_and_heads_pending():
     mgr = wj.JobManager()
     job = mgr.create("set_schedule", _TARGET, ["a", "b"])
     assert job.status == wj.LOT_SENT
@@ -29,7 +29,7 @@ def test_applied_partial_unverified():
 def test_fail_force_failed():
     mgr = wj.JobManager()
     job = mgr.create("set_schedule", _TARGET, ["a"])
-    mgr.fail(job, "cloud refusé")
+    mgr.fail(job, "cloud refused")
     assert job.status == wj.LOT_FAILED and job.heads[0].status == wj.HEAD_UNVERIFIED
 
 

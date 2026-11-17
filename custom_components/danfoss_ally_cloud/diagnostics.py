@@ -1,8 +1,8 @@
-"""Diagnostics avec rédaction stricte.
+"""Diagnostics with strict redaction.
 
-Ne JAMAIS exposer : mot de passe, matériel de session (sid/ecode), clé de signature, chKey,
-identifiants d'appareil réels (devId/nodeId/meshId). Responsabilité critique pour une intégration
-publique. Les valeurs décodées (températures, batterie…) sont conservées, mais pas les ids.
+NEVER expose: password, session material (sid/ecode), signing key, chKey, real device identifiers
+(devId/nodeId/meshId). A critical responsibility for a public integration. Decoded values
+(temperatures, battery...) are kept, but not the ids.
 """
 
 from __future__ import annotations
@@ -17,8 +17,9 @@ from homeassistant.core import HomeAssistant
 from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import DanfossCoordinator
 
-# Clés de l'entrée à rédiger (secrets de compte, session et installation).
+# Entry keys to redact (account, session and installation secrets).
 TO_REDACT = {
+    "username",  # account email (personal data)
     "password",
     "sign_key",
     "ch_key",
@@ -34,7 +35,7 @@ TO_REDACT = {
     "localKey",
     "uid",
 }
-# Champs d'appareil qui identifient le matériel réel (à rédiger).
+# Device fields that identify the real hardware (to redact).
 DEVICE_REDACT = {"id", "node_id", "mesh_id", "dps"}
 
 
@@ -46,6 +47,6 @@ async def async_get_config_entry_diagnostics(
     return {
         "entry": async_redact_data(dict(entry.data), TO_REDACT),
         "options": dict(entry.options),
-        "nombre_appareils": len(coordinator.data),
-        "appareils": devices,
+        "device_count": len(coordinator.data),
+        "devices": devices,
     }

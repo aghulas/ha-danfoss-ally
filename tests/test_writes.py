@@ -1,4 +1,4 @@
-"""Tests de la sûreté d'écriture et des payloads (données synthétiques, client mocké)."""
+"""Write-safety and payload tests (synthetic data, mocked client)."""
 
 from unittest.mock import AsyncMock, MagicMock
 
@@ -7,8 +7,8 @@ import pytest
 from custom_components.danfoss_ally_cloud.api import (
     CloudWriteError,
     DanfossDevice,
-    ecriture_autorisee,
-    encode_consigne,
+    encode_setpoint,
+    write_allowed,
 )
 from custom_components.danfoss_ally_cloud.switch import SWITCHES, DanfossSwitch
 
@@ -16,12 +16,12 @@ from custom_components.danfoss_ally_cloud.switch import SWITCHES, DanfossSwitch
 def _dev(product_id="03wvrwpv", mode="at_home"):
     return DanfossDevice(
         id="dev-synth-1",
-        nom="Salon",
-        categorie="tete",
+        name="Salon",
+        category="head",
         product_id=product_id,
-        en_ligne=True,
+        online=True,
         temperature=20.0,
-        consigne=20.0,
+        setpoint=20.0,
         mode=mode,
     )
 
@@ -35,25 +35,25 @@ def _coord(dev):
 
 
 def test_ecriture_autorisee():
-    assert ecriture_autorisee(_dev("03wvrwpv")) is True
-    assert ecriture_autorisee(_dev("autre")) is False
-    assert ecriture_autorisee(_dev(None)) is False
+    assert write_allowed(_dev("03wvrwpv")) is True
+    assert write_allowed(_dev("autre")) is False
+    assert write_allowed(_dev(None)) is False
 
 
-def test_encode_consigne_arrondi_et_bornes():
-    assert encode_consigne(21.0, 5.0, 35.0) == 210
-    assert encode_consigne(21.2, 5.0, 35.0) == 210  # arrondi au pas 0,5
-    assert encode_consigne(21.3, 5.0, 35.0) == 215
+def test_encode_setpoint_rounding_and_bounds():
+    assert encode_setpoint(21.0, 5.0, 35.0) == 210
+    assert encode_setpoint(21.2, 5.0, 35.0) == 210  # arrondi au pas 0,5
+    assert encode_setpoint(21.3, 5.0, 35.0) == 215
     with pytest.raises(CloudWriteError):
-        encode_consigne(40.0, 5.0, 35.0)
+        encode_setpoint(40.0, 5.0, 35.0)
     with pytest.raises(CloudWriteError):
-        encode_consigne("chaud", 5.0, 35.0)
+        encode_setpoint("chaud", 5.0, 35.0)
 
 
 async def test_switch_verrou_enfant_envoie_dp30():
     dev = _dev()
     coord = _coord(dev)
-    desc = next(d for d in SWITCHES if d.key == "verrou_enfant")
+    desc = next(d for d in SWITCHES if d.key == "child_lock")
     ent = DanfossSwitch(coord, dev.id, desc)
     await ent.async_turn_on()
     coord.client.async_write_setting.assert_awaited_once_with(dev.id, dev.product_id, {"30": True})

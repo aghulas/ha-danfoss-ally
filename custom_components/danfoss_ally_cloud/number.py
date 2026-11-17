@@ -1,14 +1,14 @@
-"""Nombres : consignes de pièce (confort et réduit).
+"""Numbers: room setpoints (comfort and setback).
 
-Par PIÈCE (groupe Danfoss), deux entités ``number`` règlent la consigne DURABLE **confort** (DP 118)
-ou **réduit** (DP 109 + 119) via ``client.async_set_group_setpoint`` : publication groupe puis
-réécriture d'un jour du programme (R3), exactement le chemin du thermostat de pièce, validé en réel
-le 17/11/2026. À la différence du thermostat (qui écrit la consigne du mode courant), ces nombres
-visent directement confort ou réduit, quel que soit le mode.
+Per ROOM (Danfoss group), two ``number`` entities set the DURABLE **comfort** (DP 118) or
+**setback** (DP 109 + 119) setpoint via ``client.async_set_group_setpoint``: group publish then a
+one-day schedule rewrite (R3), exactly the room thermostat's path, verified on real hardware on
+2026-11-17. Unlike the thermostat (which writes the current mode's setpoint), these numbers target
+comfort or setback directly, whatever the mode.
 
-Exposées seulement pour les produits vérifiés (``WRITE_VERIFIED_PRODUCTS``) : ailleurs, aucune
-méthode d'écriture voie-1a n'est prouvée, donc pas d'entité (plutôt que mensongère). Vacances
-et bornes restent hors contrat tant que leur écriture n'est pas prouvée (contrat §7).
+Exposed only for verified products (``WRITE_VERIFIED_PRODUCTS``): elsewhere no path-1a write method
+is proven, so no entity (rather than a lying one). Holiday and bounds stay out of contract until
+their write is proven (contract §7).
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import CloudError, encode_consigne
+from .api import CloudError, encode_setpoint
 from .api.rooms import RoomState
 from .const import (
     DATA_COORDINATOR,
@@ -44,23 +44,23 @@ from .coordinator import DanfossCoordinator
 
 @dataclass(frozen=True, kw_only=True)
 class RoomSetpointDescription(NumberEntityDescription):
-    """Décrit une consigne de pièce : clé de lecture + DP(s) d'écriture."""
+    """Describes a room setpoint: read key + write DP(s)."""
 
-    consigne: str  # clé dans RoomState.consignes : "confort" | "reduit"
-    mode_key: str  # clé dans MODE_GROUP_SETPOINT_DP : "at_home" (confort) | "leaving_home" (réduit)
+    setpoint: str  # key in RoomState.setpoints: "comfort" | "setback"
+    mode_key: str  # key in MODE_GROUP_SETPOINT_DP: "at_home" (comfort) | "leaving_home" (setback)
 
 
 SETPOINTS: tuple[RoomSetpointDescription, ...] = (
     RoomSetpointDescription(
-        key="consigne_confort",
-        translation_key="consigne_confort",
-        consigne="confort",
+        key="comfort_setpoint",
+        translation_key="comfort_setpoint",
+        setpoint="comfort",
         mode_key="at_home",
     ),
     RoomSetpointDescription(
-        key="consigne_reduit",
-        translation_key="consigne_reduit",
-        consigne="reduit",
+        key="setback_setpoint",
+        translation_key="setback_setpoint",
+        setpoint="setback",
         mode_key="leaving_home",
     ),
 )
@@ -78,7 +78,7 @@ async def async_setup_entry(
 
 
 class DanfossRoomSetpoint(CoordinatorEntity[DanfossCoordinator], NumberEntity):
-    """Consigne confort ou réduit d'une PIÈCE (écriture durable voie-1a, R3)."""
+    """Comfort or setback setpoint of a ROOM (durable path-1a write, R3)."""
 
     _attr_has_entity_name = True
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
@@ -101,45 +101,47 @@ class DanfossRoomSetpoint(CoordinatorEntity[DanfossCoordinator], NumberEntity):
     @property
     def available(self) -> bool:
         room = self.room
-        return bool(super().available and room is not None and room.en_ligne)
+        return bool(super().available and room is not None and room.online)
 
     @property
     def device_info(self) -> DeviceInfo:
         room = self.room
         return DeviceInfo(
             identifiers={(DOMAIN, f"group_{self._group_id}")},
-            name=(room.nom if room and room.nom else self._group_id),
+            name=(room.name if room and room.name else self._group_id),
             manufacturer="Danfoss",
-            model="Pièce Danfoss Ally (groupe)",
+            model="Danfoss Ally room (group)",
         )
 
     @property
     def native_min_value(self) -> float:
         room = self.room
-        return room.borne_basse if room and room.borne_basse is not None else SETPOINT_MIN
+        return room.min_setpoint if room and room.min_setpoint is not None else SETPOINT_MIN
 
     @property
     def native_max_value(self) -> float:
         room = self.room
-        return room.borne_haute if room and room.borne_haute is not None else SETPOINT_MAX
+        return room.max_setpoint if room and room.max_setpoint is not None else SETPOINT_MAX
 
     @property
     def native_value(self) -> float | None:
         room = self.room
         if room is None:
             return None
-        return room.consignes.get(self.entity_description.consigne)
+        return room.setpoints.get(self.entity_description.setpoint)
 
     async def async_set_native_value(self, value: float) -> None:
-        """Publie la consigne confort/réduit sur le groupe puis réécrit le programme (R3)."""
+        """Publish the comfort/setback setpoint on the group then rewrite the schedule (R3)."""
         room = self.room
         if room is None or room.pid not in WRITE_VERIFIED_PRODUCTS:
-            raise HomeAssistantError("écriture de consigne indisponible pour cette pièce")
+            raise HomeAssistantError("setpoint write unavailable for this room")
         dps_nums = MODE_GROUP_SETPOINT_DP[self.entity_description.mode_key]
-        valeur = encode_consigne(value, self.native_min_value, self.native_max_value, SETPOINT_STEP)
-        dps = {str(dp): valeur for dp in dps_nums}
+        encoded = encode_setpoint(
+            value, self.native_min_value, self.native_max_value, SETPOINT_STEP
+        )
+        dps = {str(dp): encoded for dp in dps_nums}
         try:
             await self.coordinator.client.async_set_group_setpoint(self._group_id, room.pid, dps)
         except CloudError as err:
-            raise HomeAssistantError(f"écriture de consigne refusée : {err}") from err
+            raise HomeAssistantError(f"setpoint write refused: {err}") from err
         await self.coordinator.async_request_refresh()

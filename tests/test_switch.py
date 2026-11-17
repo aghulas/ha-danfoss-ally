@@ -1,7 +1,7 @@
-"""Tests des entités switch (coordinateur canard, sans démarrer Home Assistant).
+"""Switch entity tests (fake coordinator, without starting Home Assistant).
 
-async_setup_entry et l'écriture pré-chauffage (self.hass.async_add_executor_job) relèvent du
-harnais hass et sont couverts ailleurs ; ici on teste la logique d'état et l'écriture gardée.
+async_setup_entry and the preheat write (self.hass.async_add_executor_job) belong to the hass
+harness and are covered elsewhere; here we test the state logic and the guarded write.
 """
 
 from custom_components.danfoss_ally_cloud import switch as switch_mod
@@ -11,7 +11,7 @@ from custom_components.danfoss_ally_cloud.switch import (
     DanfossSwitch,
 )
 
-from .common import tete
+from .common import head
 
 
 class _FakeCloudCoord:
@@ -44,11 +44,11 @@ class _FakeClient:
 
 
 def _verrou_desc():
-    return next(d for d in SWITCHES if d.key == "verrou_enfant")
+    return next(d for d in SWITCHES if d.key == "child_lock")
 
 
 async def test_switch_is_on_et_available():
-    dev = tete(verrouillage=True)
+    dev = head(child_lock=True)
     coord = _FakeCloudCoord({dev.id: dev})
     sw = DanfossSwitch(coord, dev.id, _verrou_desc())
     assert sw.is_on is True
@@ -63,7 +63,7 @@ async def test_switch_is_on_none_si_absent():
 
 
 async def test_switch_turn_on_ecrit_et_rafraichit():
-    dev = tete(verrouillage=False)
+    dev = head(child_lock=False)
     client = _FakeClient()
     coord = _FakeCloudCoord({dev.id: dev}, client=client)
     sw = DanfossSwitch(coord, dev.id, _verrou_desc())
@@ -73,7 +73,7 @@ async def test_switch_turn_on_ecrit_et_rafraichit():
 
 
 async def test_switch_turn_off():
-    dev = tete(verrouillage=True)
+    dev = head(child_lock=True)
     client = _FakeClient()
     coord = _FakeCloudCoord({dev.id: dev}, client=client)
     sw = DanfossSwitch(coord, dev.id, _verrou_desc())
@@ -81,7 +81,7 @@ async def test_switch_turn_off():
     assert client.calls[-1] == (dev.id, dev.product_id, {"30": False})
 
 
-async def test_switch_turn_on_sans_appareil_ne_fait_rien():
+async def test_switch_turn_on_without_device_does_nothing():
     client = _FakeClient()
     coord = _FakeCloudCoord({}, client=client)
     sw = DanfossSwitch(coord, "absent", _verrou_desc())
@@ -90,7 +90,7 @@ async def test_switch_turn_on_sans_appareil_ne_fait_rien():
 
 
 def test_preheat_is_on_et_available():
-    dev = tete()
+    dev = head()
     cloud = _FakeCloudCoord({dev.id: dev})
     local = _FakeLocalCoord({dev.id: True})
     ph = DanfossPreheat(local, cloud, dev.id)
@@ -99,29 +99,29 @@ def test_preheat_is_on_et_available():
     assert ph.device_info["model"] == dev.product_id
 
 
-def test_preheat_indisponible_sans_valeur_locale():
-    dev = tete()
+def test_preheat_unavailable_without_local_value():
+    dev = head()
     cloud = _FakeCloudCoord({dev.id: dev})
-    local = _FakeLocalCoord({})  # pas encore de relevé fiable
+    local = _FakeLocalCoord({})  # no reliable survey yet
     ph = DanfossPreheat(local, cloud, dev.id)
     assert ph.available is False
     assert ph.is_on is None
 
 
-def test_preheat_indisponible_si_tete_hors_ligne():
-    dev = tete(en_ligne=False)
+def test_preheat_unavailable_if_head_offline():
+    dev = head(online=False)
     cloud = _FakeCloudCoord({dev.id: dev})
     local = _FakeLocalCoord({dev.id: False})
     ph = DanfossPreheat(local, cloud, dev.id)
     assert ph.available is False
 
 
-def test_switches_catalogue_non_vide():
-    assert {d.key for d in switch_mod.SWITCHES} == {"verrou_enfant", "detection_fenetre"}
+def test_switches_catalog_not_empty():
+    assert {d.key for d in switch_mod.SWITCHES} == {"child_lock", "window_detection"}
 
 
-async def test_preheat_ecrire_sans_appareil_ne_fait_rien():
-    # Tête disparue du cache cloud : l'écriture (turn_on) sort avant toute I/O, sans hass.
+async def test_preheat_write_without_device_does_nothing():
+    # Head gone from the cloud cache: the write (turn_on) returns before any I/O, without hass.
     cloud = _FakeCloudCoord({})
     local = _FakeLocalCoord({})
     ph = DanfossPreheat(local, cloud, "absent")

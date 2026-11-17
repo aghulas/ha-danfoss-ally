@@ -1,14 +1,15 @@
-"""Couche d'accès Danfoss Ally — bibliothèque réutilisable, sans dépendance Home Assistant.
+"""Danfoss Ally access layer - reusable library, with no Home Assistant dependency.
 
-Ce dossier EST la bibliothèque `pydanfoss-cloud` (cf. README.md ici) : le `pyproject.toml` du dépôt
-le package sous le nom `pydanfoss_cloud` sans déplacer les fichiers. L'intégration le « vend » par
-import relatif (`from .api import …`) pour rester autonome côté HACS ; le connecteur MCP pourra en
-dépendre via PyPI une fois publié, puis l'intégration basculera vers manifest.json -> requirements.
+This folder IS the `pydanfoss-cloud` library (see README.md here): the repo's `pyproject.toml`
+packages it under the name `pydanfoss_cloud` without moving the files. The integration "vendors" it
+by relative import (`from .api import …`) to stay self-contained for HACS; the MCP connector can
+depend on it via PyPI once published, then the integration will switch to manifest.json ->
+requirements.
 
-Réutilisation (voir docs/reuse.md) :
-  - client et signature de l'application  : ~/dev/danfoss-ally-signing-re
-  - récupération des clés, DP    : ~/dev/danfoss-ally-mcp (tuya/pilote_tuya.py)
-  - tunnel Zigbee DP 198/199     : ~/dev/danfoss-ally-mcp (local.py)
+Reuse (see docs/reuse.md):
+  - client and app signature     : ~/dev/danfoss-ally-signing-re
+  - key fetching, DPs            : ~/dev/danfoss-ally-mcp (tuya/pilote_tuya.py)
+  - Zigbee tunnel DP 198/199     : ~/dev/danfoss-ally-mcp (local.py)
 """
 
 from __future__ import annotations
@@ -22,10 +23,10 @@ from .client import (
     ScheduleValidationError,
     UnknownTargetError,
 )
-from .decode import DanfossDevice, decoder, decoder_operation, etat_tete
+from .decode import DanfossDevice, decode_device, decode_operation, head_state
 from .keys import GatewayKey, async_fetch_gateway_keys
 from .schedule import Schedule, count_transitions, validate_days
-from .writes import ecriture_autorisee, encode_consigne
+from .writes import encode_setpoint, write_allowed
 
 __all__ = [
     "CloudAuthError",
@@ -39,11 +40,11 @@ __all__ = [
     "UnknownTargetError",
     "async_fetch_gateway_keys",
     "count_transitions",
-    "decoder",
-    "decoder_operation",
-    "ecriture_autorisee",
-    "encode_consigne",
-    "etat_tete",
+    "decode_device",
+    "decode_operation",
+    "encode_setpoint",
+    "head_state",
     "schedule",
     "validate_days",
+    "write_allowed",
 ]

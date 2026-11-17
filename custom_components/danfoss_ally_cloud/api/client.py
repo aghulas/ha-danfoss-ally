@@ -1,13 +1,13 @@
-"""Client de l'API cloud (non publique, celle de l'application) Danfoss Ally — voie 1a.
+"""Client for the Danfoss Ally cloud API (the non-public one, used by the app) - path 1a.
 
-Enveloppe asynchrone de la pile Tuya vendue (``_tuya``). Auth par compte de l'app (login
-email/mot de passe) + matériel d'installation capturé une fois (sign_key, deviceId, chKey).
-Expose : login, liste des maisons, liste des têtes décodées. Lecture seule pour la v0.1.
+Async wrapper around the vendored Tuya stack (``_tuya``). Auth via the app account (email/password
+login) + installation material captured once (sign_key, deviceId, chKey). Exposes: login, list of
+homes, list of decoded heads. Read-only for v0.1.
 
-La ré-authentification est robuste : Tuya peut invalider la session quand l'app se reconnecte ;
-sur une erreur de session, on relogge une fois puis on rejoue la requête.
+Re-authentication is robust: Tuya can invalidate the session when the app reconnects; on a session
+error we log in once more then replay the request.
 
-SECRETS : sign_key, sid, ecode, chKey et le mot de passe ne sont JAMAIS journalisés.
+SECRETS: sign_key, sid, ecode, chKey and the password are NEVER logged.
 """
 
 from __future__ import annotations
@@ -20,11 +20,11 @@ from datetime import datetime
 from . import schedule
 from ._tuya.http import ENDPOINTS, TuyaApiError, TuyaHttpClient, login
 from .const import RES_TYPE_DEVICE, RES_TYPE_GROUP
-from .decode import DanfossDevice, decoder
+from .decode import DanfossDevice, decode_device
 
 _LOGGER = logging.getLogger(__name__)
 
-# Codes d'erreur Tuya qui signalent une session à renouveler.
+# Tuya error codes that signal a session to renew.
 _SESSION_ERRORS = frozenset(
     {
         "SIGN_INVALID",
@@ -38,28 +38,28 @@ _SESSION_ERRORS = frozenset(
 
 
 class CloudError(RuntimeError):
-    """Erreur du canal cloud voie 1a (login refusé, session, refus du cloud)."""
+    """Error on the path-1a cloud channel (login refused, session, cloud refusal)."""
 
 
 class CloudAuthError(CloudError):
-    """Identifiants ou secrets d'installation refusés (login impossible)."""
+    """Credentials or installation secrets refused (login impossible)."""
 
 
 class CloudWriteError(CloudError):
-    """Écriture refusée : valeur invalide, modèle non autorisé, ou refus du cloud."""
+    """Write refused: invalid value, model not allowed, or cloud refusal."""
 
 
 class UnknownTargetError(CloudError):
-    """Cible (pièce ou tête) introuvable dans les maisons (contrat code `unknown_target`)."""
+    """Target (room or head) not found in the homes (contract code `unknown_target`)."""
 
 
 class ScheduleValidationError(CloudWriteError):
-    """Programme invalide (R1) : refusé AVANT tout envoi. Porte les erreurs du contrat (§5.4)."""
+    """Invalid schedule (R1): refused BEFORE any send. Carries the contract errors (§5.4)."""
 
     def __init__(self, errors: list[dict[str, str]]) -> None:
         self.errors = errors
         codes = ", ".join(e.get("code", "?") for e in errors)
-        super().__init__(f"programme invalide : {codes}")
+        super().__init__(f"invalid schedule: {codes}")
 
 
 def _is_session_error(err: TuyaApiError) -> bool:
@@ -71,7 +71,7 @@ def _is_session_error(err: TuyaApiError) -> bool:
 
 
 class CloudClient:
-    """Accès cloud via l'API de l'application mobile (voie 1a)."""
+    """Cloud access via the mobile app's API (path 1a)."""
 
     def __init__(
         self,
@@ -100,7 +100,7 @@ class CloudClient:
 
     @property
     def session(self) -> dict[str, str | None]:
-        """Matériel de session courant (sid/ecode) — à persister dans l'entrée HA."""
+        """Current session material (sid/ecode) - to persist in the HA entry."""
         return {"sid": self._sid, "ecode": self._ecode}
 
     def _build_client(self) -> TuyaHttpClient:
@@ -125,13 +125,13 @@ class CloudClient:
         )
 
     async def async_login(self) -> None:
-        """Ouvre une session (login email/mot de passe) et prépare le client HTTP."""
+        """Open a session (email/password login) and prepare the HTTP client."""
         try:
             res = await asyncio.to_thread(self._login_sync)
         except TuyaApiError as err:
-            raise CloudAuthError(f"login refusé : {err.code} {err.msg}") from err
+            raise CloudAuthError(f"login refused: {err.code} {err.msg}") from err
         if not res.get("sid") or not res.get("ecode"):
-            raise CloudAuthError("login sans sid/ecode : identifiants ou secrets invalides.")
+            raise CloudAuthError("login without sid/ecode: invalid credentials or secrets.")
         self._sid = res["sid"]
         self._ecode = res["ecode"]
         if self._client is not None:
@@ -146,11 +146,11 @@ class CloudClient:
                 await self.async_login()
 
     async def _request_once(self, api: str, version: str, body, extra_params):
-        """Un seul essai de requête ``m.*`` dans l'executor, sous verrou.
+        """A single attempt of an ``m.*`` request in the executor, under the lock.
 
-        Laisse remonter ``TuyaApiError`` brut : l'orchestration (re-login + rejeu) se fait
-        HORS du verrou, car ``asyncio.Lock`` n'est pas réentrant (un rejeu sous verrou
-        tenu se bloquerait indéfiniment).
+        Lets ``TuyaApiError`` propagate raw: the orchestration (re-login + replay) happens
+        OUTSIDE the lock, because ``asyncio.Lock`` is not reentrant (a replay while holding the
+        lock would deadlock forever).
         """
         async with self._lock:
             await self._ensure_client()
@@ -161,48 +161,48 @@ class CloudClient:
             )
 
     async def _request(self, api: str, version: str, body=None, extra_params=None):
-        """Requête ``m.*`` avec re-login unique sur erreur de session, puis rejeu."""
+        """``m.*`` request with a single re-login on a session error, then replay."""
         try:
             return await self._request_once(api, version, body, extra_params)
         except TuyaApiError as err:
             if not _is_session_error(err):
-                raise CloudError(f"cloud Tuya : {err.code} {err.msg}") from err
-            _LOGGER.debug("session cloud invalide (%s) : re-login", err.code)
+                raise CloudError(f"Tuya cloud: {err.code} {err.msg}") from err
+            _LOGGER.debug("invalid cloud session (%s): re-login", err.code)
             await self.async_login()
             try:
                 return await self._request_once(api, version, body, extra_params)
             except TuyaApiError as err2:
-                raise CloudError(f"cloud Tuya : {err2.code} {err2.msg}") from err2
+                raise CloudError(f"Tuya cloud: {err2.code} {err2.msg}") from err2
 
     async def async_get_homes(self) -> list[dict]:
-        """Liste des maisons du compte (tuya.m.location.list). Renvoie [{gid, nom}]."""
+        """List of the account's homes (tuya.m.location.list). Returns [{gid, name}]."""
         r = await self._request("tuya.m.location.list", "2.0", None)
         out: list[dict] = []
         for h in r if isinstance(r, list) else []:
             gid = h.get("groupId") or h.get("gid") or h.get("homeId")
             if gid is not None:
-                out.append({"gid": gid, "nom": h.get("name")})
+                out.append({"gid": gid, "name": h.get("name")})
         return out
 
     async def async_list_devices(self) -> list[DanfossDevice]:
-        """Toutes les têtes (et autres sous-appareils) des maisons du compte, décodées."""
+        """All heads (and other sub-devices) of the account's homes, decoded."""
         devices: list[DanfossDevice] = []
         seen: set[str] = set()
         for home in await self.async_get_homes():
             raw = await self._request(
                 "tuya.m.my.group.device.list", "1.0", None, extra_params={"gid": home["gid"]}
             )
-            for appareil in raw if isinstance(raw, list) else []:
-                dev = decoder(appareil)
+            for device in raw if isinstance(raw, list) else []:
+                dev = decode_device(device)
                 if dev.id and dev.id not in seen:
                     seen.add(dev.id)
                     devices.append(dev)
         return devices
 
     async def async_list_raw(self) -> list[dict]:
-        """Appareils bruts de toutes les maisons (devId, name, category, localKey, meshId, nodeId).
+        """Raw devices of all homes (devId, name, category, localKey, meshId, nodeId).
 
-        Utile au repli local : la localKey des passerelles est dans le champ `localKey` (voie 1a).
+        Useful for the local fallback: the gateways' localKey is in the `localKey` field (path 1a).
         """
         out: list[dict] = []
         seen: set[str] = set()
@@ -218,27 +218,27 @@ class CloudClient:
         return out
 
     async def async_device_meta(self, dev_id: str) -> dict:
-        """Méta d'une passerelle (smartlife.m.device.get v4.0 → meta) : lan_ip, canal Zigbee."""
+        """Gateway meta (smartlife.m.device.get v4.0 -> meta): lan_ip, Zigbee channel."""
         r = await self._request("smartlife.m.device.get", "4.0", {"devId": dev_id})
         meta = (r.get("meta") or {}) if isinstance(r, dict) else {}
         return {
-            "nom": r.get("name") if isinstance(r, dict) else None,
+            "name": r.get("name") if isinstance(r, dict) else None,
             "lan_ip": meta.get("lan_ip"),
-            "canal": meta.get("zigChannel"),
+            "channel": meta.get("zigChannel"),
         }
 
     async def async_write_setting(self, dev_id: str, pid: str, dps: dict) -> object:
-        """Écrit des DP de réglage sur une TÊTE (tuya.m.custom.wkf.settings.change, resType 1).
+        """Write setting DPs on a HEAD (tuya.m.custom.wkf.settings.change, resType 1).
 
-        Mécanisme prouvé par capture (voir danfoss-ally-mcp) pour les DP de l'écran « Setting »
-        (verrou enfant, détection fenêtre, consigne…). `dps` = {str(dp): valeur}. Une tête GROUPÉE
-        en pièce se règle normalement par sa pièce (groupe) — non géré en v0.2.
+        Mechanism proven by capture (see danfoss-ally-mcp) for the "Setting" screen DPs (child lock,
+        window detection, setpoint...). `dps` = {str(dp): value}. A head GROUPED into a room is
+        normally set through its room (group) - not handled in v0.2.
 
-        ⚠ L'effet réel sur la tête reste à confirmer en réel (certains réglages par cette voie
-        n'avaient pas atteint toutes les têtes isolées lors des essais du MCP).
+        ⚠ The real effect on the head is still to confirm on real hardware (some settings via this
+        path had not reached every isolated head in the MCP trials).
         """
         if not dev_id or not pid:
-            raise CloudWriteError("devId/pid requis pour l'écriture.")
+            raise CloudWriteError("devId/pid required for the write.")
         body = {
             "devId": dev_id,
             "gwId": dev_id,
@@ -249,15 +249,15 @@ class CloudClient:
         }
         return await self._request("tuya.m.custom.wkf.settings.change", "1.0", body)
 
-    # --- Écriture de consigne DURABLE au niveau PIÈCE (groupe), voie 1a « vraie » ---------------
-    # Remplace l'approche fausse de PR #8 (DP du mode sur la tête). Voir api/const.py
-    # (MODE_GROUP_SETPOINT_DP) : publier la consigne sur le GROUPE, puis réécrire un jour du
-    # programme pour que les têtes reprennent la valeur dans leurs transitions.
+    # --- DURABLE setpoint write at ROOM level (group), the "real" path 1a ------------------------
+    # Replaces the wrong approach of PR #8 (mode DP on the head). See api/const.py
+    # (MODE_GROUP_SETPOINT_DP): publish the setpoint on the GROUP, then rewrite one schedule day so
+    # the heads pick up the value in their transitions.
 
     async def async_list_groups(self, gid: str | int) -> list[dict]:
-        """Pièces (groupes Tuya) d'une maison (m.life.my.group.device.group.list v4.3).
+        """Rooms (Tuya groups) of a home (m.life.my.group.device.group.list v4.3).
 
-        Renvoie [{group_id, nom, nb_tetes, pid}]. Une pièce multi-têtes se pilote par son GROUPE.
+        Returns [{group_id, name, head_count, pid}]. A multi-head room is driven by its GROUP.
         """
         r = await self._request("m.life.my.group.device.group.list", "4.3", {"gid": gid})
         out: list[dict] = []
@@ -267,18 +267,18 @@ class CloudClient:
                 out.append(
                     {
                         "group_id": gid5,
-                        "nom": g.get("name"),
-                        "nb_tetes": g.get("deviceNum"),
+                        "name": g.get("name"),
+                        "head_count": g.get("deviceNum"),
                         "pid": g.get("productId"),
                     }
                 )
         return out
 
     async def async_group_members(self, gid: str | int) -> dict[str, list[str]]:
-        """Têtes membres de chaque pièce (m.life.my.group.device.relation.list v3.2).
+        """Member heads of each room (m.life.my.group.device.relation.list v3.2).
 
-        Renvoie {group_id (str): [devId, ...]} : clé « 5 » = groupes-programme (type 5), leurs
-        enfants « 6 » = têtes membres.
+        Returns {group_id (str): [devId, ...]}: key "5" = schedule groups (type 5), their children
+        "6" = member heads.
         """
         rel = await self._request("m.life.my.group.device.relation.list", "3.2", {"gid": gid})
         out: dict[str, list[str]] = {}
@@ -289,10 +289,10 @@ class CloudClient:
         return out
 
     async def async_resolve_group(self, dev_id: str) -> tuple[str, str | None] | None:
-        """Trouve la pièce (groupe) d'une tête : (group_id, pid), ou None si non groupée.
+        """Find a head's room (group): (group_id, pid), or None if not grouped.
 
-        Une tête NON groupée n'a pas de méthode de consigne voie-1a prouvée (le connecteur passe
-        alors par l'API officielle Danfoss) : l'appelant doit refuser plutôt que mentir.
+        An UNGROUPED head has no proven path-1a setpoint method (the connector then goes through the
+        official Danfoss API): the caller must refuse rather than lie.
         """
         for home in await self.async_get_homes():
             gid = home["gid"]
@@ -312,7 +312,7 @@ class CloudClient:
         return None
 
     async def async_group_publish(self, group_id: str | int, dps: dict) -> object:
-        """Publie des DP sur une PIÈCE (groupe) : s.m.dev.group.dp.publish {dps, groupId}."""
+        """Publish DPs on a ROOM (group): s.m.dev.group.dp.publish {dps, groupId}."""
         return await self._request(
             "s.m.dev.group.dp.publish",
             "1.0",
@@ -327,7 +327,7 @@ class CloudClient:
         res_type: int = RES_TYPE_GROUP,
         gw_id: str | int | None = None,
     ) -> list[dict]:
-        """Programme hebdomadaire brut (tuya.m.custom.wkf.week.timer.list) : [{loops, loopData}]."""
+        """Raw weekly schedule (tuya.m.custom.wkf.week.timer.list): [{loops, loopData}]."""
         body = {
             "devId": str(res_id),
             "gwId": str(gw_id or res_id),
@@ -349,10 +349,10 @@ class CloudClient:
         res_type: int = RES_TYPE_GROUP,
         gw_id: str | int | None = None,
     ) -> None:
-        """Réécrit UN jour du programme : delete puis create.
+        """Rewrite ONE schedule day: delete then create.
 
-        ``periods`` = fenêtres de confort « HH:MM ». ``loops`` = masque d'un seul jour (bit 0 =
-        dimanche). ``periods`` vide = jour éteint (pas de create). Deux appels v1.0, corps
+        ``periods`` = comfort windows "HH:MM". ``loops`` = single-day mask (bit 0 = Sunday).
+        Empty ``periods`` = day off (no create). Two v1.0 calls, body
         {devId, gwId, loops, pid, resId, resType}.
         """
         base = {
@@ -373,51 +373,50 @@ class CloudClient:
     async def async_set_group_setpoint(
         self, group_id: str | int, pid: str | None, dps: dict, *, repush: bool = True
     ) -> None:
-        """Consigne DURABLE sur une PIÈCE dont on connaît déjà le groupe (voie 1a « vraie »).
+        """DURABLE setpoint on a ROOM whose group is already known (the "real" path 1a).
 
-        1. publie ``dps`` (ex. {"118": 60} confort, {"109": 60, "119": 60} réduit) sur le groupe ;
-        2. si ``repush`` et ``pid`` connu, réécrit UN jour du programme à l'identique pour que les
-           têtes reprennent la nouvelle consigne dans leurs transitions (sinon elles gardent
-           l'ancienne).
+        1. publish ``dps`` (e.g. {"118": 60} comfort, {"109": 60, "119": 60} setback) on the group;
+        2. if ``repush`` and ``pid`` known, rewrite ONE schedule day verbatim so the heads pick up
+           the new setpoint in their transitions (otherwise they keep the old one).
 
-        ⚠ Effet de pièce : toutes les têtes du groupe sont concernées, et le ré-envoi touche la
-        vraie prog de chauffe. À valider en réel avant tout usage (voir CLAUDE.md, mémoires).
+        ⚠ Room-wide effect: all heads of the group are affected, and the re-send touches the real
+        heating schedule. To validate on real hardware before any use (see CLAUDE.md, memories).
         """
         await self.async_group_publish(group_id, dps)
         if repush and pid:
             data = await self.async_read_week_timer(group_id, pid)
-            jour = schedule.premier_jour_confort(data)
-            if jour is not None:
+            day = schedule.first_comfort_day(data)
+            if day is not None:
                 await self.async_write_week_day(
                     group_id,
                     pid,
-                    jour["loops"],
-                    schedule.confort_periods(jour.get("loopData")),
+                    day["loops"],
+                    schedule.comfort_periods(day.get("loopData")),
                 )
 
     async def async_set_room_setpoint(self, dev_id: str, dps: dict, *, repush: bool = True) -> str:
-        """Consigne DURABLE pour la pièce d'une tête, en résolvant d'abord son groupe.
+        """DURABLE setpoint for a head's room, resolving its group first.
 
-        Résout la pièce (groupe) de la tête — refuse si la tête n'est pas groupée — puis délègue à
-        ``async_set_group_setpoint``. Renvoie l'identifiant du groupe écrit. Le climate de pièce,
-        qui connaît déjà son groupe, appelle directement ``async_set_group_setpoint``.
+        Resolves the head's room (group) - refuses if the head is not grouped - then delegates to
+        ``async_set_group_setpoint``. Returns the written group's id. The room climate, which
+        already knows its group, calls ``async_set_group_setpoint`` directly.
         """
         resolved = await self.async_resolve_group(dev_id)
         if resolved is None:
             raise CloudWriteError(
-                f"tête {dev_id} non groupée : consigne voie-1a non prouvée hors pièce."
+                f"head {dev_id} not grouped: path-1a setpoint not proven outside a room."
             )
         group_id, pid = resolved
         await self.async_set_group_setpoint(group_id, pid, dps, repush=repush)
         return str(group_id)
 
-    # --- Édition du programme hebdomadaire (contrat §3.2), bâtie sur les primitives ci-dessus ----
+    # --- Weekly schedule editing (contract §3.2), built on the primitives above ------------------
 
     async def _resolve_target(self, target: dict) -> dict:
-        """Résout {type, id} en {res_id, res_type, pid, gw_id, name}.
+        """Resolve {type, id} into {res_id, res_type, pid, gw_id, name}.
 
-        Pièce : resType 2, gwId = group_id. Tête isolée : resType 1, gwId = meshId (forme rejouée en
-        réel ; le contrat §4.1 indique devId — divergence connue).
+        Room: resType 2, gwId = group_id. Isolated head: resType 1, gwId = meshId (form replayed on
+        real hardware; contract §4.1 says devId - known divergence).
         """
         kind = target.get("type")
         ident = str(target.get("id"))
@@ -430,7 +429,7 @@ class CloudClient:
                             "res_type": RES_TYPE_GROUP,
                             "pid": g.get("pid"),
                             "gw_id": ident,
-                            "name": g.get("nom"),
+                            "name": g.get("name"),
                         }
         elif kind == "device":
             for home in await self.async_get_homes():
@@ -439,18 +438,18 @@ class CloudClient:
                 )
                 for d in raw or []:
                     if isinstance(d, dict) and d.get("devId") == ident:
-                        dev = decoder(d)
+                        dev = decode_device(d)
                         return {
                             "res_id": ident,
                             "res_type": RES_TYPE_DEVICE,
                             "pid": dev.product_id,
                             "gw_id": dev.mesh_id or ident,
-                            "name": dev.nom,
+                            "name": dev.name,
                         }
-        raise UnknownTargetError(f"cible introuvable : {target!r}")
+        raise UnknownTargetError(f"target not found: {target!r}")
 
     async def async_get_schedule(self, target: dict) -> dict:
-        """Programme hebdomadaire d'une cible, décodé (contrat §3.2). Lecture seule."""
+        """Weekly schedule of a target, decoded (contract §3.2). Read-only."""
         res = await self._resolve_target(target)
         data = await self.async_read_week_timer(
             res["res_id"], res["pid"] or "", res_type=res["res_type"], gw_id=res["gw_id"]
@@ -463,7 +462,7 @@ class CloudClient:
         ).to_dict()
 
     async def async_set_schedule_days(self, target: dict, days: dict) -> dict:
-        """Valide (R1) puis écrit les jours fournis (delete+create par jour, via write_week_day)."""
+        """Validate (R1) then write the given days (delete+create per day, via write_week_day)."""
         errors = schedule.validate_days(days)
         if errors:
             raise ScheduleValidationError(errors)
@@ -484,7 +483,7 @@ class CloudClient:
         return {"target": target, "days_written": written}
 
     async def async_restore_schedule(self, target: dict) -> dict:
-        """Retour au programme (R4) : réécrit les SEPT jours, puis publie `at_home` EN DERNIER."""
+        """Back to schedule (R4): rewrite all SEVEN days, then publish `at_home` LAST."""
         res = await self._resolve_target(target)
         current = await self.async_get_schedule(target)
         days = current["days"]
@@ -504,7 +503,7 @@ class CloudClient:
         return {"target": target, "restored": True}
 
     async def async_validate(self) -> list[dict]:
-        """Login + lecture de contrôle (maisons). Lève CloudAuthError/CloudError si échec."""
+        """Login + a control read (homes). Raises CloudAuthError/CloudError on failure."""
         await self.async_login()
         return await self.async_get_homes()
 

@@ -1,8 +1,8 @@
 """Mise en place runtime : repli local + publication MQTT + rechargement (harnais hass).
 
 Couvre les branches de __init__ (local/MQTT), la branche locale de switch.async_setup_entry
-(création du switch pré-chauffage) et son écriture. Tout est doublé : ni réseau, ni tinytuya,
-ni broker réel.
+(creation of the preheat switch) and its write. Everything is doubled: no network, no tinytuya,
+no real broker.
 """
 
 from unittest.mock import AsyncMock, patch
@@ -22,7 +22,7 @@ from custom_components.danfoss_ally_cloud.const import (
     DOMAIN,
 )
 
-from .common import ENTRY_DATA, FakeCloudClient, tete
+from .common import ENTRY_DATA, FakeCloudClient, head
 from .test_coordinator_local import FakeManager
 
 _GW = {"gw-1": GatewayKey("gw-1", "GW", "cle-synth", ip="10.0.0.1")}
@@ -58,20 +58,20 @@ async def _setup(hass: HomeAssistant, fake: FakeCloudClient, manager: FakeManage
 
 
 async def test_setup_local_et_mqtt(hass: HomeAssistant, mqtt_double):
-    fake = FakeCloudClient(devices=[tete()])
-    manager = FakeManager(releve={"dev-1": True})
+    fake = FakeCloudClient(devices=[head()])
+    manager = FakeManager(survey={"dev-1": True})
     entry = await _setup(hass, fake, manager)
 
     data = hass.data[DOMAIN][entry.entry_id]
     assert data[DATA_LOCAL] is not None  # coordinateur local en place
-    assert data[DATA_MQTT] is not None  # publicateur MQTT démarré
-    assert mqtt_double.await_count > 0  # a publié (broker simulé présent)
+    assert data[DATA_MQTT] is not None  # MQTT publisher started
+    assert mqtt_double.await_count > 0  # published (simulated broker present)
 
-    # Le switch pré-chauffage est créé (tête rattachée à une passerelle connue) et vaut ON.
+    # The preheat switch is created (head attached to a known gateway) and is ON.
     etat = hass.states.get("switch.salon_pre_heating")
     assert etat is not None and etat.state == "on"
 
-    # Écriture du pré-chauffage via le service HA : passe par le manager.
+    # Preheat write via the HA service: goes through the manager.
     await hass.services.async_call(
         "switch", "turn_off", {"entity_id": "switch.salon_pre_heating"}, blocking=True
     )
@@ -82,9 +82,9 @@ async def test_setup_local_et_mqtt(hass: HomeAssistant, mqtt_double):
     assert fake.closed is True
 
 
-async def test_local_sans_passerelle_rend_none(hass: HomeAssistant):
-    """enable_local sans passerelle à clé : repli local = None, le cloud démarre quand même."""
-    fake = FakeCloudClient(devices=[tete()])
+async def test_local_without_gateway_returns_none(hass: HomeAssistant):
+    """enable_local with no keyed gateway: local fallback = None, the cloud starts anyway."""
+    fake = FakeCloudClient(devices=[head()])
     entry = MockConfigEntry(
         domain=DOMAIN,
         data=ENTRY_DATA,
@@ -105,8 +105,8 @@ async def test_local_sans_passerelle_rend_none(hass: HomeAssistant):
 
 
 async def test_local_echec_recuperation_cles(hass: HomeAssistant):
-    """Une erreur de récupération des clés ne doit pas empêcher le cloud de démarrer."""
-    fake = FakeCloudClient(devices=[tete()])
+    """A key-fetch error must not prevent the cloud from starting."""
+    fake = FakeCloudClient(devices=[head()])
     entry = MockConfigEntry(
         domain=DOMAIN,
         data=ENTRY_DATA,
@@ -127,8 +127,8 @@ async def test_local_echec_recuperation_cles(hass: HomeAssistant):
 
 
 async def test_update_options_recharge(hass: HomeAssistant, mqtt_double):
-    fake = FakeCloudClient(devices=[tete()])
-    manager = FakeManager(releve={"dev-1": True})
+    fake = FakeCloudClient(devices=[head()])
+    manager = FakeManager(survey={"dev-1": True})
     entry = await _setup(hass, fake, manager)
     with (
         patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=fake),
@@ -140,5 +140,5 @@ async def test_update_options_recharge(hass: HomeAssistant, mqtt_double):
     ):
         await integration._async_update_options(hass, entry)
         await hass.async_block_till_done()
-    # L'entrée est toujours en place après rechargement.
+    # The entry is still in place after reload.
     assert entry.entry_id in hass.data[DOMAIN]

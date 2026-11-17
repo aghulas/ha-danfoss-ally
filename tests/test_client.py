@@ -1,4 +1,4 @@
-"""Tests du client cloud (logique pure, sans réseau)."""
+"""Cloud client tests (pure logic, no network)."""
 
 from custom_components.danfoss_ally_cloud.api import client
 from custom_components.danfoss_ally_cloud.api._tuya.http import TuyaApiError
@@ -23,6 +23,6 @@ def test_region_endpoint():
     assert c.session == {"sid": "s", "ecode": "e"}
 
 
-def test_region_defaut_eu():
+def test_region_default_eu():
     c = client.CloudClient("u", "p", "33", "sk", "dev", "chk", region="zz")
     assert "tuyaeu" in c._endpoint

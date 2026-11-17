@@ -1,4 +1,4 @@
-"""Tests du CloudClient (async) avec une doublure de TuyaHttpClient (sans réseau)."""
+"""CloudClient (async) tests with a TuyaHttpClient double (no network)."""
 
 from unittest.mock import patch
 
@@ -36,7 +36,7 @@ class FakeHttp:
         pass
 
 
-def _tete_raw(dev_id="dev-1"):
+def _head_raw(dev_id="dev-1"):
     return {
         "devId": dev_id,
         "name": "Salon",
@@ -57,21 +57,21 @@ async def test_async_get_homes():
     fake = FakeHttp({"tuya.m.location.list": [{"groupId": 1, "name": "Maison"}]})
     with patch(_HTTP, return_value=fake):
         homes = await _client().async_get_homes()
-    assert homes == [{"gid": 1, "nom": "Maison"}]
+    assert homes == [{"gid": 1, "name": "Maison"}]
 
 
 async def test_async_list_devices_decode():
     fake = FakeHttp(
         {
             "tuya.m.location.list": [{"groupId": 1}],
-            "tuya.m.my.group.device.list": [_tete_raw("dev-1"), _tete_raw("dev-1")],
+            "tuya.m.my.group.device.list": [_head_raw("dev-1"), _head_raw("dev-1")],
         }
     )
     with patch(_HTTP, return_value=fake):
         devices = await _client().async_list_devices()
-    assert len(devices) == 1  # dédoublonné par id
+    assert len(devices) == 1  # deduplicated by id
     assert devices[0].temperature == 21.0
-    assert devices[0].est_tete
+    assert devices[0].is_head
 
 
 async def test_async_write_setting_payload():
@@ -100,7 +100,7 @@ async def test_async_login_sets_session():
     assert c.session == {"sid": "S2", "ecode": "E2"}
 
 
-async def test_async_login_refus():
+async def test_async_login_refused():
     with patch(_LOGIN, return_value={"sid": None, "ecode": None}), pytest.raises(CloudAuthError):
         await _client(sid=None, ecode=None).async_login()
 
@@ -108,14 +108,14 @@ async def test_async_login_refus():
 async def test_relogin_sur_session_expiree():
     fake = FakeHttp(
         {"tuya.m.location.list": [{"groupId": 7, "name": "M"}]},
-        raise_once=TuyaApiError("APP_SESSION_EXPIRED", "expirée", {}),
+        raise_once=TuyaApiError("APP_SESSION_EXPIRED", "expired", {}),
     )
     with (
         patch(_HTTP, return_value=fake),
         patch(_LOGIN, return_value={"sid": "S3", "ecode": "E3"}) as login_mock,
     ):
         homes = await _client().async_get_homes()
-    assert homes == [{"gid": 7, "nom": "M"}]
+    assert homes == [{"gid": 7, "name": "M"}]
     login_mock.assert_called_once()  # re-login unique
 
 
@@ -142,13 +142,13 @@ def test_is_session_error_divers():
     assert not client_mod._is_session_error(TuyaApiError("OTHER", "", {}))
 
 
-# --- Consigne durable au niveau PIÈCE (voie 1a) -------------------------------------------------
+# --- Durable setpoint at ROOM level (path 1a) ------------------------------------------------
 
 
 def _groupe_responses(
     *, home_gid=1, group_id=90000001, membre="dev-1", pid="03wvrwpv", programme=None
 ):
-    """Jeu de réponses FakeHttp pour la découverte + l'écriture de consigne de pièce."""
+    """FakeHttp response set for discovery + the room setpoint write."""
     if programme is None:
         programme = [
             {"loops": "1000000", "loopData": []},  # dimanche vide
@@ -163,7 +163,7 @@ def _groupe_responses(
             "5": [{"id": group_id, "children": {"6": [{"id": membre}]}}]
         },
         "m.life.my.group.device.group.list": [
-            {"id": group_id, "name": "Pièce", "deviceNum": 2, "productId": pid}
+            {"id": group_id, "name": "Room", "deviceNum": 2, "productId": pid}
         ],
         "s.m.dev.group.dp.publish": {"result": True},
         "tuya.m.custom.wkf.week.timer.list": {"data": programme},
@@ -178,7 +178,7 @@ async def test_async_list_groups_et_members():
         c = _client()
         groups = await c.async_list_groups(1)
         members = await c.async_group_members(1)
-    assert groups == [{"group_id": 90000001, "nom": "Pièce", "nb_tetes": 2, "pid": "03wvrwpv"}]
+    assert groups == [{"group_id": 90000001, "name": "Room", "head_count": 2, "pid": "03wvrwpv"}]
     assert members == {"90000001": ["dev-1"]}
 
 
@@ -204,24 +204,24 @@ async def test_async_group_publish_payload():
     assert body == {"dps": '{"118":60}', "groupId": 90000001}
 
 
-async def test_async_set_room_setpoint_publie_puis_reecrit_le_programme():
+async def test_async_set_room_setpoint_publishes_then_rewrites_schedule():
     fake = FakeHttp(_groupe_responses())
     with patch(_HTTP, return_value=fake):
         group_id = await _client().async_set_room_setpoint("dev-1", {"118": 60})
     assert group_id == "90000001"
     apis = [a for a, *_ in fake.calls]
     assert "s.m.dev.group.dp.publish" in apis
-    # un seul jour ré-écrit : delete puis create
+    # a single day rewritten: delete then create
     assert apis.count("tuya.m.custom.wkf.week.timer.delete") == 1
     assert apis.count("tuya.m.custom.wkf.week.timer.create") == 1
     create = next(b for a, _, b, _ in fake.calls if a == "tuya.m.custom.wkf.week.timer.create")
-    assert create["loops"] == "0100000"  # le jour confort trouvé
+    assert create["loops"] == "0100000"  # the comfort day found
     assert create["periods"] == '[{"startTime": "08:30", "endTime": "17:30"}]'
-    assert create["resType"] == 2  # niveau pièce
+    assert create["resType"] == 2  # room level
 
 
-async def test_async_set_room_setpoint_sans_jour_confort_ne_reecrit_pas():
-    prog = [{"loops": "1000000", "loopData": []}]  # aucune fenêtre de confort
+async def test_async_set_room_setpoint_no_comfort_day_does_not_rewrite():
+    prog = [{"loops": "1000000", "loopData": []}]  # no comfort window
     fake = FakeHttp(_groupe_responses(programme=prog))
     with patch(_HTTP, return_value=fake):
         await _client().async_set_room_setpoint("dev-1", {"118": 60})
@@ -230,13 +230,13 @@ async def test_async_set_room_setpoint_sans_jour_confort_ne_reecrit_pas():
     assert "tuya.m.custom.wkf.week.timer.create" not in apis
 
 
-async def test_async_set_room_setpoint_tete_non_groupee():
+async def test_async_set_room_setpoint_ungrouped_head():
     fake = FakeHttp(_groupe_responses())
     with patch(_HTTP, return_value=fake), pytest.raises(CloudWriteError):
         await _client().async_set_room_setpoint("inconnue", {"118": 60})
 
 
-async def test_async_set_room_setpoint_sans_repush():
+async def test_async_set_room_setpoint_without_repush():
     fake = FakeHttp(_groupe_responses())
     with patch(_HTTP, return_value=fake):
         await _client().async_set_room_setpoint("dev-1", {"118": 60}, repush=False)
@@ -244,19 +244,19 @@ async def test_async_set_room_setpoint_sans_repush():
     assert "tuya.m.custom.wkf.week.timer.list" not in apis
 
 
-async def test_async_set_group_setpoint_direct_sans_resolution():
-    # Le climate de pièce connaît déjà son groupe : publish + repush, SANS résoudre par une tête.
+async def test_async_set_group_setpoint_direct_without_resolution():
+    # The room climate already knows its group: publish + repush, WITHOUT resolving via a head.
     fake = FakeHttp(_groupe_responses())
     with patch(_HTTP, return_value=fake):
         await _client().async_set_group_setpoint("90000001", "03wvrwpv", {"109": 60, "119": 60})
     apis = [a for a, *_ in fake.calls]
-    assert "m.life.my.group.device.relation.list" not in apis  # pas de résolution
+    assert "m.life.my.group.device.relation.list" not in apis  # no resolution
     publish = next(b for a, _, b, _ in fake.calls if a == "s.m.dev.group.dp.publish")
     assert publish == {"dps": '{"109":60,"119":60}', "groupId": 90000001}
     assert apis.count("tuya.m.custom.wkf.week.timer.create") == 1
 
 
-async def test_async_set_group_setpoint_sans_pid_ne_reecrit_pas():
+async def test_async_set_group_setpoint_without_pid_does_not_rewrite():
     fake = FakeHttp(_groupe_responses())
     with patch(_HTTP, return_value=fake):
         await _client().async_set_group_setpoint("90000001", None, {"118": 60})

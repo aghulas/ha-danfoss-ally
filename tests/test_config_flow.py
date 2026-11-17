@@ -1,4 +1,4 @@
-"""Tests du config flow (harnais hass, client mocké)."""
+"""Config flow tests (hass harness, mocked client)."""
 
 from unittest.mock import patch
 
@@ -40,14 +40,14 @@ async def test_user_invalid_auth(hass: HomeAssistant):
 
 
 async def test_user_cannot_connect(hass: HomeAssistant):
-    result = await _submit(hass, FakeCloudClient(validate_exc=CloudError("réseau")))
+    result = await _submit(hass, FakeCloudClient(validate_exc=CloudError("network")))
     assert result["type"] == FlowResultType.FORM
     assert result["errors"] == {"base": "cannot_connect"}
 
 
 async def test_user_unknown_error(hass: HomeAssistant):
     # Toute exception inattendue -> "unknown" (robustesse du config flow).
-    result = await _submit(hass, FakeCloudClient(validate_exc=ValueError("imprévu")))
+    result = await _submit(hass, FakeCloudClient(validate_exc=ValueError("unexpected")))
     assert result["type"] == FlowResultType.FORM
     assert result["errors"] == {"base": "unknown"}
 

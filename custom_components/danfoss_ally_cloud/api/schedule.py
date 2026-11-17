@@ -1,16 +1,16 @@
-"""Programme hebdomadaire des têtes/pièces Danfoss (voie 1a) : décodage et aide au ré-envoi.
+"""Weekly schedule of Danfoss heads/rooms (path 1a): decoding and re-send helpers.
 
-Fonctions pures, sans dépendance Home Assistant ni réseau (couche réutilisable). Le programme se
-lit par ``tuya.m.custom.wkf.week.timer.list`` sous la forme ``{"data": [{loops, loopData}]}`` :
+Pure functions, with no Home Assistant or network dependency (reusable layer). The schedule is read
+via ``tuya.m.custom.wkf.week.timer.list`` as ``{"data": [{loops, loopData}]}``:
 
-- ``loops`` : masque 7 bits, bit 0 (à gauche) = DIMANCHE (``"0100000"`` = lundi).
-- ``loopData`` : fenêtres de la journée, ``{startTime, endTime, mode}`` où startTime/endTime sont
-  des MINUTES depuis minuit et ``mode`` vaut ``at_home`` (confort) ou ``leaving_home`` (réduit).
+- ``loops``: 7-bit mask, bit 0 (leftmost) = SUNDAY (``"0100000"`` = Monday).
+- ``loopData``: windows of the day, ``{startTime, endTime, mode}`` where startTime/endTime are
+  MINUTES since midnight and ``mode`` is ``at_home`` (comfort) or ``leaving_home`` (setback).
 
-L'écriture (``week.timer.create``) attend au contraire des ``periods`` ``[{startTime, endTime}]`` en
-texte ``"HH:MM"``, et ne porte que les fenêtres de CONFORT (le réduit est la ligne de base hors
-fenêtres). Ces aides convertissent l'un vers l'autre pour RÉ-ENVOYER un jour à l'identique, ce qui
-suffit à faire reprendre aux têtes la nouvelle consigne sans toucher à l'horaire.
+Writing (``week.timer.create``) instead expects ``periods`` ``[{startTime, endTime}]`` as
+``"HH:MM"`` text, and carries only the COMFORT windows (setback is the baseline outside the
+windows). These helpers convert one to the other to RE-SEND a day verbatim, which is enough to make
+the heads pick up the new setpoint without touching the schedule.
 """
 
 from __future__ import annotations
@@ -18,56 +18,64 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-JOURS = ("dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi")
+_WEEKDAYS_SUN_FIRST = (
+    "sunday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+)
 
 
 def hhmm(minutes: int) -> str:
-    """Minutes depuis minuit -> « HH:MM »."""
+    """Minutes since midnight -> "HH:MM"."""
     m = int(minutes)
     return f"{m // 60:02d}:{m % 60:02d}"
 
 
-def jour_du_loop(loops: str) -> str:
-    """Masque ``loops`` d'un jour unique -> nom du jour (bit 0 = dimanche)."""
+def day_from_loop(loops: str) -> str:
+    """Single-day ``loops`` mask -> day name (bit 0 = Sunday)."""
     pos = (loops or "").find("1")
-    return JOURS[pos] if 0 <= pos < len(JOURS) else (loops or "")
+    return _WEEKDAYS_SUN_FIRST[pos] if 0 <= pos < len(_WEEKDAYS_SUN_FIRST) else (loops or "")
 
 
-def confort_periods(loop_data: list[dict[str, Any]] | None) -> list[dict[str, str]]:
-    """Fenêtres de CONFORT d'un jour -> ``periods`` ``[{startTime, endTime}]`` en « HH:MM ».
+def comfort_periods(loop_data: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    """COMFORT windows of a day -> ``periods`` ``[{startTime, endTime}]`` as "HH:MM".
 
-    Ne retient que les fenêtres de confort (``mode`` ``at_home`` ou absent) : ce sont les seules que
-    ``week.timer.create`` porte. Les entrées « réduit » explicites sont ignorées (c'est la ligne de
-    base). Les horaires sont convertis minutes -> « HH:MM ».
+    Keeps only the comfort windows (``mode`` ``at_home`` or absent): those are the only ones
+    ``week.timer.create`` carries. Explicit "setback" entries are ignored (they are the baseline).
+    Times are converted minutes -> "HH:MM".
     """
     out: list[dict[str, str]] = []
-    for fenetre in loop_data or []:
-        if fenetre.get("mode") not in (None, "at_home"):
+    for window in loop_data or []:
+        if window.get("mode") not in (None, "at_home"):
             continue
         out.append(
             {
-                "startTime": hhmm(fenetre["startTime"]),
-                "endTime": hhmm(fenetre["endTime"]),
+                "startTime": hhmm(window["startTime"]),
+                "endTime": hhmm(window["endTime"]),
             }
         )
     return out
 
 
-def premier_jour_confort(data: list[dict[str, Any]] | None) -> dict[str, Any] | None:
-    """Première entrée de ``data`` ayant au moins une fenêtre de confort (sinon ``None``).
+def first_comfort_day(data: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """First ``data`` entry with at least one comfort window (else ``None``).
 
-    Ré-envoyer ce seul jour à l'identique suffit : le cloud renvoie alors toute la semaine aux têtes
-    avec les consignes du moment (constaté le 16/11/2026).
+    Re-sending just this one day verbatim is enough: the cloud then pushes the whole week to the
+    heads with the setpoints of the moment (observed on 2026-11-16).
     """
     for entry in data or []:
-        if confort_periods(entry.get("loopData")):
+        if comfort_periods(entry.get("loopData")):
             return entry
     return None
 
 
 # ================================================================================================
-# Couche « contrat » (docs/contrat-interface.md §3.2) : jours anglais mon..sun, plages
-# {start, end} en « HH:MM », validation R1 et modèle Schedule. S'appuie sur les aides ci-dessus.
+# "Contract" layer (docs/interface-contract.md §3.2): English days mon..sun, {start, end} slots
+# as "HH:MM", R1 validation and the Schedule model. Built on the helpers above.
 # ================================================================================================
 
 DAYS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -85,15 +93,15 @@ ERR_TOO_MANY = "too_many_transitions"
 
 
 def day_to_loop(day: str) -> str:
-    """Nom de jour anglais (``mon``…``sun``) -> masque ``loops`` d'un jour (dimanche en premier)."""
+    """English day name (``mon``..``sun``) -> single-day ``loops`` mask (Sunday first)."""
     try:
         return _LOOP[day]
     except KeyError as err:
-        raise ValueError(f"jour inconnu : {day!r}") from err
+        raise ValueError(f"unknown day: {day!r}") from err
 
 
 def loop_to_days(loops: str) -> list[str]:
-    """Masque ``loops`` -> liste des jours anglais qu'il porte (un ou plusieurs bits à 1)."""
+    """``loops`` mask -> list of English days it carries (one or more bits set)."""
     return [
         _DAY_ORDER_SUN_FIRST[i]
         for i, c in enumerate(loops or "")
@@ -107,7 +115,7 @@ def _to_minutes(hhmm_str: str) -> int:
 
 
 def valid_hhmm(value: object) -> bool:
-    """Vrai si ``value`` est une chaîne ``HH:MM`` 00:00–23:59."""
+    """True if ``value`` is a "HH:MM" string in 00:00-23:59."""
     if not isinstance(value, str):
         return False
     h, sep, m = value.partition(":")
@@ -123,14 +131,14 @@ def valid_hhmm(value: object) -> bool:
 
 
 def decode_week_timer(data: object) -> dict[str, list[dict[str, str]]]:
-    """Réponse brute ``[{loops, loopData}]`` -> ``{jour_en: [{start, end}]}`` (les sept jours)."""
+    """Raw ``[{loops, loopData}]`` response -> ``{en_day: [{start, end}]}`` (all seven days)."""
     out: dict[str, list[dict[str, str]]] = {d: [] for d in DAYS}
     for entry in data if isinstance(data, list) else []:
         if not isinstance(entry, dict):
             continue
         ranges = [
             {"start": p["startTime"], "end": p["endTime"]}
-            for p in confort_periods(entry.get("loopData"))
+            for p in comfort_periods(entry.get("loopData"))
         ]
         for day in loop_to_days(entry.get("loops", "")):
             out[day] = ranges
@@ -138,7 +146,7 @@ def decode_week_timer(data: object) -> dict[str, list[dict[str, str]]]:
 
 
 def count_transitions(ranges: list[dict[str, str]]) -> tuple[int, bool]:
-    """Transitions qu'un jour demande (hors 00:00) : (nombre, minuit_implicite). Cf. R1."""
+    """Transitions a day needs (excluding 00:00): (count, implicit_midnight). See R1."""
     ranges = ranges or []
     starts = {r["start"] for r in ranges}
     n = 0
@@ -151,7 +159,7 @@ def count_transitions(ranges: list[dict[str, str]]) -> tuple[int, bool]:
 
 
 def transitions_per_day(days: dict[str, list[dict[str, str]]]) -> dict[str, int]:
-    """Décompte de transitions (R1, hors minuit) par jour fourni — pour l'affichage « n / 6 »."""
+    """Transition count (R1, excluding midnight) per given day - for the "n / 6" display."""
     out: dict[str, int] = {}
     for day, ranges in days.items():
         if all(valid_hhmm(r.get("start")) and valid_hhmm(r.get("end")) for r in ranges):
@@ -160,13 +168,13 @@ def transitions_per_day(days: dict[str, list[dict[str, str]]]) -> dict[str, int]
 
 
 def validate_day(day: str, ranges: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Erreurs (contrat §5.4) d'un jour. Vide = valide. S'arrête à la première étape en échec."""
+    """Errors (contract §5.4) of a day. Empty = valid. Stops at the first failing step."""
     errors: list[dict[str, str]] = []
     for r in ranges:
         for value in (r.get("start"), r.get("end")):
             if not valid_hhmm(value):
                 errors.append(
-                    {"code": ERR_INVALID_TIME, "message": f"heure invalide : {value!r}", "day": day}
+                    {"code": ERR_INVALID_TIME, "message": f"invalid time: {value!r}", "day": day}
                 )
     if errors:
         return errors
@@ -175,7 +183,7 @@ def validate_day(day: str, ranges: list[dict[str, str]]) -> list[dict[str, str]]
             errors.append(
                 {
                     "code": ERR_EMPTY_OR_REVERSED,
-                    "message": f"plage vide ou inversée : {r['start']}–{r['end']}",
+                    "message": f"empty or reversed slot: {r['start']}-{r['end']}",
                     "day": day,
                 }
             )
@@ -188,8 +196,7 @@ def validate_day(day: str, ranges: list[dict[str, str]]) -> list[dict[str, str]]
                 {
                     "code": ERR_OVERLAP,
                     "message": (
-                        f"plages qui se chevauchent : {a['start']}–{a['end']} "
-                        f"et {b['start']}–{b['end']}"
+                        f"overlapping slots: {a['start']}-{a['end']} and {b['start']}-{b['end']}"
                     ),
                     "day": day,
                 }
@@ -202,8 +209,8 @@ def validate_day(day: str, ranges: list[dict[str, str]]) -> list[dict[str, str]]
             {
                 "code": ERR_TOO_MANY,
                 "message": (
-                    f"trop de plages : {n} transitions, la tête en garde "
-                    f"{MAX_TRANSITIONS_PER_DAY} au plus (3 plages séparées)"
+                    f"too many slots: {n} transitions, the head keeps "
+                    f"{MAX_TRANSITIONS_PER_DAY} at most (3 separate slots)"
                 ),
                 "day": day,
             }
@@ -212,7 +219,7 @@ def validate_day(day: str, ranges: list[dict[str, str]]) -> list[dict[str, str]]
 
 
 def validate_days(days: dict[str, list[dict[str, str]]]) -> list[dict[str, str]]:
-    """Erreurs de tous les jours fournis (contrat §5.4). Vide = valide."""
+    """Errors of all given days (contract §5.4). Empty = valid."""
     errors: list[dict[str, str]] = []
     for day, ranges in days.items():
         errors.extend(validate_day(day, ranges))
@@ -220,14 +227,14 @@ def validate_days(days: dict[str, list[dict[str, str]]]) -> list[dict[str, str]]
 
 
 def to_periods(ranges: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Plages {start, end} -> ``periods`` ``[{startTime, endTime}]`` triées (write_week_day)."""
+    """{start, end} slots -> sorted ``periods`` ``[{startTime, endTime}]`` (write_week_day)."""
     ordered = sorted(ranges, key=lambda r: _to_minutes(r["start"]))
     return [{"startTime": r["start"], "endTime": r["end"]} for r in ordered]
 
 
 @dataclass
 class Schedule:
-    """Programme hebdomadaire d'une cible (contrat §3.2)."""
+    """Weekly schedule of a target (contract §3.2)."""
 
     target: dict[str, str]
     name: str | None = None

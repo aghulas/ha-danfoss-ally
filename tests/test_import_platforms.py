@@ -1,4 +1,4 @@
-"""Vérifie que les modules de plateforme s'importent (dépendances HA présentes)."""
+"""Checks that the platform modules import (HA dependencies present)."""
 
 import importlib
 

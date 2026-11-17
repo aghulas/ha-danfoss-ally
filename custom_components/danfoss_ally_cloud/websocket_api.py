@@ -1,7 +1,7 @@
-"""Commandes WebSocket pour l'interface embarquée (contrat §5.3).
+"""WebSocket commands for the embedded frontend (contract §5.3).
 
-Même implémentation que les actions (voir `operations.py`) : une seule fonction par opération.
-Lecture pour tous ; écriture réservée aux administrateurs. L'interface n'appelle QUE ces commandes.
+Same implementation as the actions (see `operations.py`): one function per operation. Read for all;
+write reserved for administrators. The frontend calls ONLY these commands.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def _send_op_error(connection, msg_id: int, err: ops.OperationError) -> None:
 
 
 def async_register(hass: HomeAssistant) -> None:
-    """Enregistre les commandes WebSocket une fois."""
+    """Register the WebSocket commands once."""
     reg = websocket_api.async_register_command
     reg(hass, ws_info)
     reg(hass, ws_rooms)
@@ -69,7 +69,7 @@ async def ws_info(hass: HomeAssistant, connection, msg: dict) -> None:
 def ws_rooms(hass: HomeAssistant, connection, msg: dict) -> None:
     store = _store(hass, msg)
     if store is None:
-        connection.send_error(msg["id"], "unknown_target", "aucun compte configuré")
+        connection.send_error(msg["id"], "unknown_target", "no account configured")
         return
     connection.send_result(msg["id"], ops.rooms_payload(store))
 
@@ -86,7 +86,7 @@ def ws_rooms(hass: HomeAssistant, connection, msg: dict) -> None:
 async def ws_schedule_get(hass: HomeAssistant, connection, msg: dict) -> None:
     store = _store(hass, msg)
     if store is None:
-        connection.send_error(msg["id"], "unknown_target", "aucun compte configuré")
+        connection.send_error(msg["id"], "unknown_target", "no account configured")
         return
     try:
         schedule = await ops.get_schedule(store, msg["target"], msg["refresh"])
@@ -117,7 +117,7 @@ def ws_schedule_validate(hass: HomeAssistant, connection, msg: dict) -> None:
 async def ws_schedule_set(hass: HomeAssistant, connection, msg: dict) -> None:
     store = _store(hass, msg)
     if store is None:
-        connection.send_error(msg["id"], "unknown_target", "aucun compte configuré")
+        connection.send_error(msg["id"], "unknown_target", "no account configured")
         return
     try:
         job = await ops.set_schedule(hass, store, msg["target"], msg["days"])
@@ -139,7 +139,7 @@ async def ws_schedule_set(hass: HomeAssistant, connection, msg: dict) -> None:
 async def ws_schedule_restore(hass: HomeAssistant, connection, msg: dict) -> None:
     store = _store(hass, msg)
     if store is None:
-        connection.send_error(msg["id"], "unknown_target", "aucun compte configuré")
+        connection.send_error(msg["id"], "unknown_target", "no account configured")
         return
     try:
         job = await ops.restore_schedule(hass, store, msg["target"])
@@ -156,7 +156,7 @@ async def ws_schedule_restore(hass: HomeAssistant, connection, msg: dict) -> Non
 def ws_jobs_subscribe(hass: HomeAssistant, connection, msg: dict) -> None:
     store = _store(hass, msg)
     if store is None:
-        connection.send_error(msg["id"], "unknown_target", "aucun compte configuré")
+        connection.send_error(msg["id"], "unknown_target", "no account configured")
         return
     jobs = store[DATA_JOBS]
 

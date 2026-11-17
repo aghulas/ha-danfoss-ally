@@ -1,4 +1,4 @@
-"""Tests des méthodes d'édition de programme de CloudClient (bâties sur les primitives #10/#12)."""
+"""Tests of CloudClient's schedule-editing methods (built on the #10/#12 primitives)."""
 
 import json
 
@@ -74,7 +74,7 @@ async def test_set_schedule_invalide_n_envoie_rien():
     assert req.calls == []
 
 
-async def test_set_schedule_un_jour_delete_puis_create():
+async def test_set_schedule_one_day_delete_then_create():
     c, req = _client()
     await c.async_set_schedule_days(
         {"type": "room", "id": "13000000"}, {"mon": [{"start": "08:30", "end": "17:30"}]}

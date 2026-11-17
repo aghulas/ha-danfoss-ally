@@ -1,37 +1,33 @@
-# Feuille de route
+# Roadmap
 
-- **v0.0** — squelette (ce commit) : arborescence HA, config_flow/options,
-  stubs, CI (hassfest + HACS + ruff + pytest).
-- **v0.1** — lecture seule cloud : climate (température, consigne) + capteurs,
-  sur une install réelle.
-- **v0.2** — écritures cloud validées (consignes, verrou enfant, fenêtre) sur
-  modèles vérifiés ; valeurs contrôlées avant envoi.
-- **v0.3** — tunnel local optionnel : pré-chauffage (0x0025) et lecture du
-  programme hebdomadaire dans la tête.
-- **v0.4** — publication MQTT mode `discovery`.
-- **v0.5** — publication MQTT mode `zigbee2mqtt` (bridge/devices + topics z2m).
-- **v0.6** — extraction de la couche `api/` en bibliothèque partagée avec le
-  connecteur MCP.
-- **v1.0** — durcissement (tests, couverture, mypy, diagnostics), puis PR
-  d'inclusion au Marketplace HACS.
+- **v0.0** — skeleton: HA tree, config_flow/options, stubs, CI (hassfest + HACS + ruff + pytest).
+- **v0.1** — cloud read-only: climate (temperature, setpoint) + sensors, on a real install.
+- **v0.2** — validated cloud writes (setpoints, child lock, window) on verified models; values
+  checked before sending.
+- **v0.3** — optional local tunnel: preheat (0x0025) and reading the weekly schedule from the head.
+- **v0.4** — MQTT publishing, `discovery` mode.
+- **v0.5** — MQTT publishing, `zigbee2mqtt` mode (bridge/devices + z2m topics).
+- **v0.6** — extraction of the `api/` layer into a library shared with the MCP connector.
+- **v1.0** — hardening (tests, coverage, mypy, diagnostics), then an inclusion PR to the HACS
+  Marketplace.
 
-But transversal : éprouver le code sur d'autres installations (firmwares,
-product ids, modèles de passerelles) pour fiabiliser les hypothèses DP.
+Cross-cutting goal: exercise the code on other installs (firmwares, product ids, gateway models) to
+make the DP assumptions more reliable.
 
-## Programmes par pièce et interface embarquée
+## Per-room schedules and embedded frontend
 
-Chantier décrit par `docs/cahier-des-charges-interface.md`, cadré par le
-contrat `docs/contrat-interface.md` (règles R1–R7). Un lot = une branche = une
-demande de fusion, validée en réel sur une pièce d'essai.
+Work described by `docs/interface-requirements.md`, framed by the contract
+`docs/interface-contract.md` (rules R1–R7). One batch = one branch = one pull request, validated on
+real hardware on a test room.
 
-- **Lot 0** — mise à niveau des documents (R4/R5) et alignement du thermostat
-  sur R3 (pas d'écriture de consigne de mode sans réécriture du programme).
-- **Lot 1** — couche `api/` : `schedule.py` (modèle, conversions, validation
-  R1), pièces et programme dans `client.py`, décodage de l'état réel (DP 172).
-- **Lot 2** — câblage Home Assistant : appareil par pièce, entités, actions +
-  WebSocket, lots d'écriture (`WriteJob`), vérification locale différée.
-- **Lot 3** — socle de l'interface embarquée (`frontend/`, TypeScript + Lit,
-  fichier compilé versionné, enregistrement Lovelace, carte minimale).
-- **Lot 4** — carte Programme en lecture (grille 7 jours, état des têtes).
-- **Lot 5** — carte Programme en écriture (édition des plages, validation R1,
-  suivi du lot, retour au programme).
+- **Batch 0** — document upgrade (R4/R5) and alignment of the thermostat on R3 (no mode-setpoint
+  write without rewriting the schedule).
+- **Batch 1** — `api/` layer: `schedule.py` (model, conversions, R1 validation), rooms and schedule
+  in `client.py`, decoding of the real state (DP 172).
+- **Batch 2** — Home Assistant wiring: per-room device, entities, actions + WebSocket, write jobs
+  (`WriteJob`), deferred local verification.
+- **Batch 3** — embedded frontend base (`frontend/`, TypeScript + Lit, versioned compiled file,
+  Lovelace registration, minimal card).
+- **Batch 4** — read-only Schedule card (7-day grid, head states).
+- **Batch 5** — editable Schedule card (slot editing, R1 validation, job tracking, back to
+  schedule).
