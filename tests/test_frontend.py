@@ -6,6 +6,8 @@ ainsi notre logique d'enregistrement / mise à jour / nettoyage sur une vraie
 collection de ressources.
 """
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from homeassistant.components.lovelace.resources import ResourceStorageCollection
@@ -23,6 +25,9 @@ from custom_components.danfoss_ally_cloud.frontend import (
 )
 
 RES_BASE = f"{FRONTEND_URL_BASE}/{JS_FILENAME}"
+# Version attendue = celle du manifest (le code l'injecte pour le cache-busting) : lue ici pour que
+# le test ne casse pas à chaque bump de version.
+VERSION = json.loads((Path(frontend.__file__).parent / "manifest.json").read_text())["version"]
 
 
 class _FakeLovelaceConfig:
@@ -52,7 +57,7 @@ async def test_resource_url_contient_la_version(hass: HomeAssistant):
     url = await _async_resource_url(hass)
     assert url.startswith(f"{RES_BASE}?v=")
     # Version du manifest injectée (cache-busting, contrat §6).
-    assert url.endswith("?v=0.1.0")
+    assert url.endswith(f"?v={VERSION}")
 
 
 async def test_collection_absente_hors_lovelace(hass: HomeAssistant):
@@ -78,11 +83,11 @@ async def test_enregistrement_idempotent_et_mise_a_jour(hass: HomeAssistant):
     assert _module_urls(resources) == [f"{RES_BASE}?v=0.0.1"]
 
     await async_register_frontend(hass)
-    assert _module_urls(resources) == [f"{RES_BASE}?v=0.1.0"]  # une seule, à jour
+    assert _module_urls(resources) == [f"{RES_BASE}?v={VERSION}"]  # une seule, à jour
 
     # Idempotent : un second enregistrement ne duplique pas.
     await async_register_frontend(hass)
-    assert _module_urls(resources) == [f"{RES_BASE}?v=0.1.0"]
+    assert _module_urls(resources) == [f"{RES_BASE}?v={VERSION}"]
 
     # Nettoyage : la ressource disparaît.
     await async_unregister_frontend(hass)
