@@ -3,25 +3,25 @@
     "step": {
       "user": {
         "title": "Danfoss Ally (Cloud)",
-        "description": "Connectez-vous avec le compte de l'application Danfoss Ally / Smart Life. Aucune application développeur ni clé API n'est requise. Les secrets d'installation (clé de signature, identifiant d'appareil, clé de canal) sont capturés une fois sur l'installation (voir la documentation).",
+        "description": "Sign in with your Danfoss Ally / Smart Life app account. No developer app or API key is required. The installation secrets (sign key, device id, channel key) are captured once on the installation (see the documentation).",
         "data": {
-          "username": "Identifiant (e-mail)",
-          "password": "Mot de passe",
-          "country_code": "Indicatif pays (ex. 33 pour la France)",
+          "username": "Username (email)",
+          "password": "Password",
+          "country_code": "Country calling code (e.g. 33 for France)",
           "region": "Datacenter (eu, us, cn, in)",
-          "sign_key": "Clé de signature (sign_key)",
-          "device_id": "Identifiant d'appareil (deviceId)",
-          "ch_key": "Clé de canal (chKey)"
+          "sign_key": "Sign key (sign_key)",
+          "device_id": "Device id (deviceId)",
+          "ch_key": "Channel key (chKey)"
         }
       }
     },
     "error": {
-      "cannot_connect": "Connexion impossible",
-      "invalid_auth": "Identifiants ou secrets d'installation invalides",
-      "unknown": "Erreur inattendue"
+      "cannot_connect": "Cannot connect",
+      "invalid_auth": "Invalid credentials or installation secrets",
+      "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "Ce compte est déjà configuré"
+      "already_configured": "This account is already configured"
     }
   },
   "options": {
@@ -29,163 +29,171 @@
       "init": {
         "title": "Options",
         "data": {
-          "scan_interval": "Intervalle d'interrogation du cloud (secondes)",
-          "enable_local": "Activer le tunnel Zigbee local (passerelles) pour les écritures que le cloud rate",
-          "mqtt_mode": "Publication MQTT : off, discovery (entités HA auto), zigbee2mqtt (topics compatibles z2m)",
-          "mqtt_source": "Source des valeurs publiées : cloud ou local",
-          "mqtt_base_topic": "Préfixe de topic MQTT"
+          "scan_interval": "Cloud polling interval (seconds)",
+          "enable_local": "Enable the local Zigbee tunnel (gateways) for writes the cloud misses",
+          "mqtt_mode": "MQTT publishing: off, discovery (auto HA entities), zigbee2mqtt (z2m-compatible topics)",
+          "mqtt_source": "Source of published values: cloud or local",
+          "mqtt_base_topic": "MQTT topic prefix"
         }
       }
     }
   },
   "entity": {
     "sensor": {
-      "ouverture_vanne": {
-        "name": "Ouverture de vanne"
+      "valve_opening": {
+        "name": "Valve opening"
       },
-      "defaut": {
-        "name": "Code défaut"
+      "fault": {
+        "name": "Fault code"
       }
     },
     "binary_sensor": {
-      "en_ligne": {
-        "name": "En ligne"
+      "online": {
+        "name": "Online"
       },
-      "fenetre": {
-        "name": "Fenêtre"
+      "window": {
+        "name": "Window"
       }
     },
     "switch": {
-      "verrou_enfant": {
-        "name": "Verrouillage enfant"
+      "child_lock": {
+        "name": "Child lock"
       },
-      "detection_fenetre": {
-        "name": "Détection de fenêtre"
+      "window_detection": {
+        "name": "Open window detection"
       },
-      "pre_chauffage": {
-        "name": "Pré-chauffage"
+      "preheat": {
+        "name": "Pre-heating"
+      }
+    },
+    "number": {
+      "comfort_setpoint": {
+        "name": "Comfort setpoint"
+      },
+      "setback_setpoint": {
+        "name": "Setback setpoint"
       }
     }
   },
   "services": {
     "get_rooms": {
-      "name": "Lister les pièces",
-      "description": "Pièces et état de leurs têtes."
+      "name": "List rooms",
+      "description": "Rooms and the state of their heads."
     },
     "get_schedule": {
-      "name": "Lire le programme",
-      "description": "Programme hebdomadaire d'une pièce ou d'une tête isolée.",
+      "name": "Get schedule",
+      "description": "Weekly schedule of a room or an isolated head.",
       "fields": {
         "target": {
-          "name": "Cible",
-          "description": "Cible : type « room » ou « device », et son identifiant."
+          "name": "Target",
+          "description": "Target: type 'room' or 'device', and its id."
         },
         "refresh": {
-          "name": "Rafraîchir",
-          "description": "Relire depuis le cloud au lieu du cache."
+          "name": "Refresh",
+          "description": "Re-read from the cloud instead of the cache."
         },
         "config_entry_id": {
-          "name": "Compte",
-          "description": "Si plusieurs comptes sont configurés."
+          "name": "Account",
+          "description": "If several accounts are configured."
         }
       }
     },
     "set_schedule": {
-      "name": "Écrire le programme",
-      "description": "Écrit les jours fournis d'une cible (valide avant envoi). Administrateur.",
+      "name": "Set schedule",
+      "description": "Writes the given days of a target (validated first). Admin only.",
       "fields": {
         "target": {
-          "name": "Cible",
-          "description": "Cible : type « room » ou « device », et son identifiant."
+          "name": "Target",
+          "description": "Target: type 'room' or 'device', and its id."
         },
         "days": {
-          "name": "Jours",
-          "description": "Jours à écrire : chaque jour porte ses plages (heures début et fin)."
+          "name": "Days",
+          "description": "Days to write: each day holds its ranges (start and end times)."
         },
         "config_entry_id": {
-          "name": "Compte",
-          "description": "Si plusieurs comptes sont configurés."
+          "name": "Account",
+          "description": "If several accounts are configured."
         }
       }
     },
     "copy_schedule": {
-      "name": "Copier le programme",
-      "description": "Recopie le programme d'une cible vers d'autres. Administrateur.",
+      "name": "Copy schedule",
+      "description": "Copies one target's schedule onto others. Admin only.",
       "fields": {
         "source": {
           "name": "Source",
-          "description": "Cible d'origine."
+          "description": "Source target."
         },
         "targets": {
-          "name": "Destinations",
-          "description": "Liste de cibles."
+          "name": "Targets",
+          "description": "List of targets."
         },
         "days": {
-          "name": "Jours",
-          "description": "Jours à copier (tous si absent)."
+          "name": "Days",
+          "description": "Days to copy (all if omitted)."
         },
         "config_entry_id": {
-          "name": "Compte",
-          "description": "Si plusieurs comptes sont configurés."
+          "name": "Account",
+          "description": "If several accounts are configured."
         }
       }
     },
     "restore_schedule": {
-      "name": "Revenir au programme",
-      "description": "Réécrit le programme puis publie at_home (R4). Administrateur.",
+      "name": "Restore schedule",
+      "description": "Rewrites the schedule then publishes at_home (R4). Admin only.",
       "fields": {
         "target": {
-          "name": "Cible",
-          "description": "Cible : type « room » ou « device », et son identifiant."
+          "name": "Target",
+          "description": "Target: type 'room' or 'device', and its id."
         },
         "config_entry_id": {
-          "name": "Compte",
-          "description": "Si plusieurs comptes sont configurés."
+          "name": "Account",
+          "description": "If several accounts are configured."
         }
       }
     },
     "get_write_job": {
-      "name": "État d'un lot d'écriture",
-      "description": "Suivi d'un lot d'écriture par son identifiant.",
+      "name": "Write job status",
+      "description": "Follows a write job by its id.",
       "fields": {
         "job_id": {
-          "name": "Identifiant du lot",
-          "description": "job_id renvoyé par une écriture."
+          "name": "Job id",
+          "description": "job_id returned by a write."
         },
         "config_entry_id": {
-          "name": "Compte",
-          "description": "Si plusieurs comptes sont configurés."
+          "name": "Account",
+          "description": "If several accounts are configured."
         }
       }
     }
   },
   "exceptions": {
     "invalid_time": {
-      "message": "Heure invalide (attendu HH:MM, 00:00–23:59)."
+      "message": "Invalid time (expected HH:MM, 00:00–23:59)."
     },
     "empty_or_reversed": {
-      "message": "Plage vide ou inversée (début ≥ fin)."
+      "message": "Empty or reversed range (start ≥ end)."
     },
     "overlap": {
-      "message": "Deux plages se chevauchent."
+      "message": "Two ranges overlap."
     },
     "too_many_transitions": {
-      "message": "Trop de plages : au plus trois plages séparées (6 transitions) par jour."
+      "message": "Too many ranges: at most three separate ranges (6 transitions) per day."
     },
     "unknown_target": {
-      "message": "Pièce ou tête inconnue."
+      "message": "Unknown room or head."
     },
     "grouped_device": {
-      "message": "Tête groupée : viser sa pièce."
+      "message": "Grouped head: target its room."
     },
     "not_admin": {
-      "message": "Écriture réservée aux administrateurs."
+      "message": "Writing is reserved for administrators."
     },
     "cloud_refused": {
-      "message": "Le cloud a refusé l'appel."
+      "message": "The cloud refused the call."
     },
     "session_expired": {
-      "message": "Session à renouveler."
+      "message": "Session needs renewing."
     }
   }
 }

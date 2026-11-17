@@ -1,5 +1,5 @@
 /**
- * Types partagés avec le backend. Formes figées par docs/contrat-interface.md
+ * Types partagés avec le backend. Formes figées par docs/interface-contract.md
  * (sections 3 et 5.3). Ne pas diverger du contrat sans le modifier d'abord.
  */
 

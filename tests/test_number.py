@@ -1,4 +1,4 @@
-"""Plateforme number : consignes de pièce (confort, réduit) — écriture durable voie-1a (R3)."""
+"""number platform: room setpoints (comfort, setback) - durable path-1a write (R3)."""
 
 from types import SimpleNamespace
 
@@ -36,17 +36,17 @@ class _FakeCoord:
 def _room(**kw) -> RoomState:
     base = dict(
         group_id="77",
-        nom="Salle",
+        name="Salle",
         pid="03wvrwpv",
-        nb_tetes=2,
-        en_ligne=True,
+        head_count=2,
+        online=True,
         temperature=19.5,
-        consigne=6.0,
-        consignes={"confort": 6.0, "reduit": 5.0},
+        setpoint=6.0,
+        setpoints={"comfort": 6.0, "setback": 5.0},
         mode="at_home",
-        chauffe=True,
-        borne_basse=5.0,
-        borne_haute=35.0,
+        heating=True,
+        min_setpoint=5.0,
+        max_setpoint=35.0,
     )
     base.update(kw)
     return RoomState(**base)
@@ -68,10 +68,10 @@ async def _setup(room):
     return ajoutees[0]
 
 
-async def test_setup_cree_confort_et_reduit_produit_verifie():
+async def test_setup_creates_comfort_and_setback_verified_product():
     ents = await _setup(_room())
-    assert {e.entity_description.key for e in ents} == {"consigne_confort", "consigne_reduit"}
-    assert {e.unique_id for e in ents} == {"77_consigne_confort", "77_consigne_reduit"}
+    assert {e.entity_description.key for e in ents} == {"comfort_setpoint", "setback_setpoint"}
+    assert {e.unique_id for e in ents} == {"77_comfort_setpoint", "77_setback_setpoint"}
 
 
 async def test_setup_aucune_pour_produit_non_verifie():
@@ -79,22 +79,22 @@ async def test_setup_aucune_pour_produit_non_verifie():
 
 
 def test_lecture_valeurs_bornes_et_disponibilite():
-    conf, _ = _num("consigne_confort")
-    red, _ = _num("consigne_reduit")
+    conf, _ = _num("comfort_setpoint")
+    red, _ = _num("setback_setpoint")
     assert conf.native_value == 6.0
     assert red.native_value == 5.0
     assert conf.native_min_value == 5.0
     assert conf.native_max_value == 35.0
     assert conf.available is True
-    hors_ligne, _ = _num("consigne_confort", room=_room(en_ligne=False))
+    hors_ligne, _ = _num("comfort_setpoint", room=_room(online=False))
     assert hors_ligne.available is False
 
 
 @pytest.mark.parametrize(
     ("key", "dps"),
     [
-        ("consigne_confort", {"118": 65}),  # DP 118
-        ("consigne_reduit", {"109": 65, "119": 65}),  # DP 109 + 119
+        ("comfort_setpoint", {"118": 65}),  # DP 118
+        ("setback_setpoint", {"109": 65, "119": 65}),  # DP 109 + 119
     ],
 )
 async def test_ecrit_les_bons_dp_et_rafraichit(key, dps):
@@ -107,7 +107,7 @@ async def test_ecrit_les_bons_dp_et_rafraichit(key, dps):
 
 async def test_refuse_produit_non_verifie():
     client = _FakeClient()
-    ent, _ = _num("consigne_confort", room=_room(pid="autre"), client=client)
+    ent, _ = _num("comfort_setpoint", room=_room(pid="autre"), client=client)
     with pytest.raises(HomeAssistantError):
         await ent.async_set_native_value(6.5)
     assert client.calls == []

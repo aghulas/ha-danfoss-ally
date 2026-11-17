@@ -1,8 +1,8 @@
-"""Coordinateur de rafraîchissement.
+"""Refresh coordinator.
 
-Interroge le cloud (API cloud voie 1a) à intervalle conservateur et normalise les appareils en
-``{device_id: DanfossDevice}``. Le tunnel local (v0.3) corrigera plus tard les champs que le cloud
-remonte faux (ex. pré-chauffage réel 0x0025) ; ici, lecture cloud seule.
+Polls the cloud (path-1a cloud API) at a conservative interval and normalises the devices into
+``{device_id: DanfossDevice}``. The local tunnel (v0.3) will later correct the fields the cloud
+reports wrong (e.g. the real preheat 0x0025); here, cloud read only.
 """
 
 from __future__ import annotations
@@ -17,17 +17,17 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import CloudAuthError, CloudClient, CloudError, DanfossDevice
 from .api.local.manager import Head, LocalTunnelManager
-from .api.rooms import Piece, RoomState, aggregate_room
+from .api.rooms import Room, RoomState, aggregate_room
 
 _LOGGER = logging.getLogger(__name__)
 
-# La topologie des pièces (groupes Tuya + membres) change rarement : on la met en cache et on ne la
-# re-télécharge qu'au bout de cet intervalle (ou au reload), pour rester conservateur sur le quota.
-_TOPOLOGY_TTL = 3600  # secondes
+# The room topology (Tuya groups + members) rarely changes: we cache it and only re-download it
+# after this interval (or on reload), to stay conservative on the quota.
+_TOPOLOGY_TTL = 3600  # seconds
 
 
 class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
-    """Rassemble l'état du parc : têtes (``data``) + pièces agrégées (``rooms``)."""
+    """Gathers the fleet state: heads (``data``) + aggregated rooms (``rooms``)."""
 
     def __init__(self, hass: HomeAssistant, client: CloudClient, scan_interval: int) -> None:
         super().__init__(
@@ -37,62 +37,60 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
             update_interval=timedelta(seconds=scan_interval),
         )
         self.client = client
-        # Pièces agrégées (group_id -> RoomState) et appartenance tête -> pièce, recalculées à
-        # chaque refresh à partir de la topologie en cache et de l'état courant des têtes.
+        # Aggregated rooms (group_id -> RoomState) and head -> room membership, recomputed on each
+        # refresh from the cached topology and the current head state.
         self.rooms: dict[str, RoomState] = {}
         self.grouped_ids: set[str] = set()
-        self._pieces: dict[str, Piece] = {}
+        self._rooms_topology: dict[str, Room] = {}
         self._group_of: dict[str, str] = {}
         self._topology_ts: float = 0.0
 
     async def _async_update_data(self) -> dict[str, DanfossDevice]:
-        """Lecture cloud : têtes décodées (indexées par id) + agrégation par pièce. Aucun secret."""
+        """Cloud read: decoded heads (indexed by id) + per-room aggregation. No secret."""
         try:
             devices = await self.client.async_list_devices()
         except CloudAuthError as err:
-            # Identifiants/secrets refusés : déclenche la ré-authentification côté HA.
+            # Credentials/secrets refused: triggers HA re-authentication.
             raise ConfigEntryAuthFailed(str(err)) from err
         except CloudError as err:
             raise UpdateFailed(str(err)) from err
         data = {dev.id: dev for dev in devices}
         await self._ensure_topology()
         self.rooms = {
-            gid: aggregate_room(piece, membres)
-            for gid, piece in self._pieces.items()
-            if (membres := [data[m] for m in piece.membres if m in data])
+            gid: aggregate_room(room, members)
+            for gid, room in self._rooms_topology.items()
+            if (members := [data[m] for m in room.members if m in data])
         }
         self.grouped_ids = {head_id for head_id in self._group_of if head_id in data}
         return data
 
     def group_of(self, head_id: str) -> str | None:
-        """Group_id de la pièce d'une tête, ou None si la tête n'est pas groupée."""
+        """A head's room group_id, or None if the head is not grouped."""
         return self._group_of.get(head_id)
 
     async def _ensure_topology(self) -> None:
-        """Rafraîchit la topologie des pièces si le cache a expiré. Best-effort : ne bloque jamais.
+        """Refresh the room topology if the cache expired. Best-effort: never blocks.
 
-        En cas d'échec de lecture : on conserve le cache précédent s'il existe, sinon topologie
-        vide (toutes les têtes traitées comme isolées — thermostat en lecture seule).
+        On a read failure: keep the previous cache if any, else an empty topology (all heads treated
+        as isolated - read-only thermostat).
         """
         now = time.monotonic()
-        if self._pieces and (now - self._topology_ts) < _TOPOLOGY_TTL:
+        if self._rooms_topology and (now - self._topology_ts) < _TOPOLOGY_TTL:
             return
         try:
-            pieces, group_of = await self._fetch_topology()
+            rooms_topology, group_of = await self._fetch_topology()
         except CloudError as err:
-            if self._pieces:
-                _LOGGER.debug("topologie des pièces conservée (lecture échouée : %s)", err)
+            if self._rooms_topology:
+                _LOGGER.debug("room topology kept (read failed: %s)", err)
                 return
-            _LOGGER.warning(
-                "topologie des pièces indisponible (%s) : têtes traitées isolément", err
-            )
-            self._pieces, self._group_of, self._topology_ts = {}, {}, now
+            _LOGGER.warning("room topology unavailable (%s): heads treated individually", err)
+            self._rooms_topology, self._group_of, self._topology_ts = {}, {}, now
             return
-        self._pieces, self._group_of, self._topology_ts = pieces, group_of, now
+        self._rooms_topology, self._group_of, self._topology_ts = rooms_topology, group_of, now
 
-    async def _fetch_topology(self) -> tuple[dict[str, Piece], dict[str, str]]:
-        """Lit les pièces (groupes) et leurs membres de chaque maison (voie 1a)."""
-        pieces: dict[str, Piece] = {}
+    async def _fetch_topology(self) -> tuple[dict[str, Room], dict[str, str]]:
+        """Read the rooms (groups) and their members of each home (path 1a)."""
+        rooms_topology: dict[str, Room] = {}
         group_of: dict[str, str] = {}
         for home in await self.client.async_get_homes():
             gid = home["gid"]
@@ -100,20 +98,22 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
             members = await self.client.async_group_members(gid)
             for g in groups:
                 gid_s = str(g["group_id"])
-                membres = tuple(members.get(gid_s, ()))
-                if not membres:
+                member_ids = tuple(members.get(gid_s, ()))
+                if not members:
                     continue
-                pieces[gid_s] = Piece(gid_s, g.get("nom") or gid_s, g.get("pid"), str(gid), membres)
-                for devid in membres:
+                rooms_topology[gid_s] = Room(
+                    gid_s, g.get("name") or gid_s, g.get("pid"), str(gid), member_ids
+                )
+                for devid in member_ids:
                     group_of[devid] = gid_s
-        return pieces, group_of
+        return rooms_topology, group_of
 
 
 class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
-    """Relevé LOCAL (tunnel Zigbee) du pré-chauffage réel (0x0025), indexé par id de tête.
+    """LOCAL survey (Zigbee tunnel) of the real preheat (0x0025), indexed by head id.
 
-    Lent et best-effort : il corrige ce que le cloud remonte faux (DP 1 cloud ne touche que le cache
-    passerelle). S'appuie sur le coordinateur cloud pour connaître les têtes et leur passerelle.
+    Slow and best-effort: it corrects what the cloud reports wrong (cloud DP 1 only touches the
+    gateway cache). Relies on the cloud coordinator to know the heads and their gateway.
     """
 
     def __init__(
@@ -133,12 +133,12 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
         self._cloud = cloud
 
     def heads(self) -> list[Head]:
-        """Têtes joignables par le tunnel (node_id + passerelle connus du manager)."""
+        """Heads reachable through the tunnel (node_id + gateway known to the manager)."""
         gws = self.manager.gateway_ids
         return [
             Head(d.id, d.node_id, d.mesh_id)
             for d in self._cloud.data.values()
-            if d.est_tete and d.node_id and d.mesh_id and d.mesh_id in gws
+            if d.is_head and d.node_id and d.mesh_id and d.mesh_id in gws
         ]
 
     async def _async_update_data(self) -> dict[str, bool | None]:
@@ -146,6 +146,6 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
         if not heads:
             return {}
         try:
-            return await self.hass.async_add_executor_job(self.manager.relever_prechauffage, heads)
-        except Exception as err:  # noqa: BLE001 - repli local best-effort
-            raise UpdateFailed(f"relevé local : {err}") from err
+            return await self.hass.async_add_executor_job(self.manager.survey_preheat, heads)
+        except Exception as err:  # noqa: BLE001 - best-effort local fallback
+            raise UpdateFailed(f"local survey: {err}") from err

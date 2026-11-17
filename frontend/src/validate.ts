@@ -1,7 +1,7 @@
 /**
  * Validation du programme côté interface (lot 5).
  *
- * Porte fidèlement la règle **R1** du contrat (docs/contrat-interface.md §2) en
+ * Porte fidèlement la règle **R1** du contrat (docs/interface-contract.md §2) en
  * TypeScript, plus les contrôles de forme des plages (§5.4). Logique pure, sans
  * DOM ni Home Assistant : testable par Vitest. Les codes d'erreur sont ceux du
  * contrat (§5.4) ; le texte est traduit par la carte, pas ici.

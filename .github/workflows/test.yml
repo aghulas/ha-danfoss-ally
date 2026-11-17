@@ -13,9 +13,9 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy custom_components/danfoss_ally_cloud
-      - run: pytest  # couverture + seuil via pyproject (addopts)
-      # Valide l'extraction de la bibliothèque pydanfoss-cloud (paquet installable, sans HA).
+      - run: pytest  # coverage + threshold via pyproject (addopts)
+      # Validates the extraction of the pydanfoss-cloud library (installable package, without HA).
       - run: pip install -e '.[local]'
-      - run: python -c "import pydanfoss_cloud; from pydanfoss_cloud import CloudClient, decoder; from pydanfoss_cloud.local import tunnel"
-      # Audit des dépendances d'exécution.
+      - run: python -c "import pydanfoss_cloud; from pydanfoss_cloud import CloudClient, decode_device; from pydanfoss_cloud.local import tunnel"
+      # Runtime dependency audit.
       - run: pip-audit -r requirements.txt

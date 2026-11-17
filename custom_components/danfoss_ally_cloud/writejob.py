@@ -1,10 +1,10 @@
-"""Suivi des écritures (`WriteJob`) : file en mémoire, événements pour `jobs/subscribe`.
+"""Write tracking (`WriteJob`): in-memory queue, events for `jobs/subscribe`.
 
-Un lot naît « sent » (le cloud a accepté) ; la vérification (différée, jamais bloquante) fait
-passer chaque tête de `pending` à `applied` / `mismatch` / `unreachable` / `unverified`, puis le
-lot à `applied` / `partial` / `unverified` (contrat §3.5). `failed` = le cloud a refusé l'appel.
+A job is born "sent" (the cloud accepted); the (deferred, never blocking) verification moves each
+head from `pending` to `applied` / `mismatch` / `unreachable` / `unverified`, then the job to
+`applied` / `partial` / `unverified` (contract §3.5). `failed` = the cloud refused the call.
 
-Les lots ne sont pas persistés : on garde les 50 derniers en mémoire.
+Jobs are not persisted: the last 50 are kept in memory.
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ def _lot_status(heads: list[HeadResult]) -> str:
 
 
 class JobManager:
-    """File en mémoire des lots d'écriture, avec abonnés (`jobs/subscribe`)."""
+    """In-memory queue of write jobs, with subscribers (`jobs/subscribe`)."""
 
     def __init__(self, max_jobs: int = MAX_JOBS) -> None:
         self._jobs: OrderedDict[str, WriteJob] = OrderedDict()

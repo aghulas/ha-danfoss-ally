@@ -1,4 +1,4 @@
-"""Tests de la pile HTTP Tuya bas niveau (requests moqué, aucun réseau)."""
+"""Low-level Tuya HTTP stack tests (requests mocked, no network)."""
 
 import json
 from unittest.mock import patch
@@ -37,12 +37,12 @@ def test_request_result_dict():
     with patch.object(c.http, "post", return_value=FakeResp({"result": {"a": 1}})) as post:
         out = c.request("tuya.m.x", "1.0", {"k": 1}, extra_params={"gid": 5})
     assert out == {"a": 1}
-    # le corps est sérialisé en form-urlencoded, gid passé en paramètre non signé
+    # the body is serialized as form-urlencoded, gid passed as an unsigned param
     _, kw = post.call_args
     assert "data" in kw and kw["timeout"] == 20.0
 
 
-def test_request_raw_renvoie_enveloppe():
+def test_request_raw_returns_envelope():
     c = _client()
     env = {"result": {"a": 1}}
     with patch.object(c.http, "post", return_value=FakeResp(env)):
@@ -81,7 +81,7 @@ def test_request_erreur_interne_chiffree():
 
 def test_close():
     c = _client()
-    c.close()  # ne lève pas
+    c.close()  # does not raise
 
 
 def test_md5_as_base64_est_hex():

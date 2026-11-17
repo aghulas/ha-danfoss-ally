@@ -1,8 +1,8 @@
-"""Tests de l'interface embarquée : service du bundle et ressource Lovelace (contrat §6).
+"""Embedded frontend tests: bundle serving and Lovelace resource (contract §6).
 
 On construit directement une `ResourceStorageCollection` (sans mettre en place le
 composant `frontend`/`lovelace` complet, trop lourd pour le harnais) : on teste
-ainsi notre logique d'enregistrement / mise à jour / nettoyage sur une vraie
+so our registration / update / cleanup logic against a real
 collection de ressources.
 """
 
@@ -26,7 +26,7 @@ from custom_components.danfoss_ally_cloud.frontend import (
 
 RES_BASE = f"{FRONTEND_URL_BASE}/{JS_FILENAME}"
 # Version attendue = celle du manifest (le code l'injecte pour le cache-busting) : lue ici pour que
-# le test ne casse pas à chaque bump de version.
+# the test does not break on every version bump.
 VERSION = json.loads((Path(frontend.__file__).parent / "manifest.json").read_text())["version"]
 
 
@@ -56,14 +56,14 @@ def _module_urls(resources: ResourceStorageCollection) -> list[str]:
 async def test_resource_url_contient_la_version(hass: HomeAssistant):
     url = await _async_resource_url(hass)
     assert url.startswith(f"{RES_BASE}?v=")
-    # Version du manifest injectée (cache-busting, contrat §6).
+    # Manifest version injected (cache-busting, contract §6).
     assert url.endswith(f"?v={VERSION}")
 
 
-async def test_collection_absente_hors_lovelace(hass: HomeAssistant):
-    # Lovelace non chargé : pas de collection -> ajout manuel (mode YAML documenté).
+async def test_collection_absent_without_lovelace(hass: HomeAssistant):
+    # Lovelace not loaded: no collection -> manual add (documented YAML mode).
     assert _resources_collection(hass) is None
-    # Ne lève pas : service du dossier best-effort, ressource ignorée proprement.
+    # Does not raise: best-effort folder serving, resource skipped cleanly.
     await async_register_frontend(hass)
     await async_unregister_frontend(hass)
 
@@ -71,28 +71,28 @@ async def test_collection_absente_hors_lovelace(hass: HomeAssistant):
 async def test_import_lovelace_indisponible(hass: HomeAssistant, monkeypatch):
     # HA minimal sans lovelace : le garde-fou renvoie None.
     monkeypatch.setattr(frontend, "_ResourcesCls", None)
-    await _install_fake_lovelace(hass)  # présent, mais classe indisponible
+    await _install_fake_lovelace(hass)  # present, but class unavailable
     assert _resources_collection(hass) is None
 
 
-async def test_enregistrement_idempotent_et_mise_a_jour(hass: HomeAssistant):
+async def test_registration_idempotent_and_update(hass: HomeAssistant):
     resources = await _install_fake_lovelace(hass)
 
-    # Une ressource obsolète préexistante (ancienne version) doit être mise à jour.
+    # A pre-existing stale resource (old version) must be updated.
     await _async_register_resource(hass, f"{RES_BASE}?v=0.0.1")
     assert _module_urls(resources) == [f"{RES_BASE}?v=0.0.1"]
 
     await async_register_frontend(hass)
-    assert _module_urls(resources) == [f"{RES_BASE}?v={VERSION}"]  # une seule, à jour
+    assert _module_urls(resources) == [f"{RES_BASE}?v={VERSION}"]  # a single one, up to date
 
     # Idempotent : un second enregistrement ne duplique pas.
     await async_register_frontend(hass)
     assert _module_urls(resources) == [f"{RES_BASE}?v={VERSION}"]
 
-    # Nettoyage : la ressource disparaît.
+    # Cleanup: the resource disappears.
     await async_unregister_frontend(hass)
     assert _module_urls(resources) == []
-    # Nettoyage d'une ressource déjà absente : sans effet.
+    # Cleanup of an already-absent resource: no effect.
     await async_unregister_frontend(hass)
     assert _module_urls(resources) == []
 
@@ -110,5 +110,5 @@ async def test_register_conserve_les_autres_ressources(hass: HomeAssistant):
 
     await async_unregister_frontend(hass)
     urls_apres = [str(i["url"]) for i in resources.async_items()]
-    assert urls_apres == ["/autre/carte.js"]  # on n'a retiré QUE la nôtre
+    assert urls_apres == ["/autre/carte.js"]  # we removed ONLY ours
     assert autre["id"]  # (sanity) l'item tiers existait bien

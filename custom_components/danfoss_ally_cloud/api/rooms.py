@@ -1,15 +1,15 @@
-"""Pièces (groupes Tuya) : modèle et agrégation de l'état des têtes membres.
+"""Rooms (Tuya groups): model and aggregation of the member heads' state.
 
-Fonctions et dataclasses pures, sans dépendance Home Assistant ni réseau (couche réutilisable).
-Danfoss pilote une pièce multi-têtes par son GROUPE : programme et consignes y sont communs. On
-expose donc un thermostat par PIÈCE dont l'état agrège celui des têtes membres.
+Pure functions and dataclasses, with no Home Assistant or network dependency (reusable layer).
+Danfoss drives a multi-head room through its GROUP: schedule and setpoints are shared there. So we
+expose one thermostat per ROOM whose state aggregates that of the member heads.
 
-Agrégation retenue :
-- température : moyenne des têtes **en ligne** (les hors-ligne figeraient une valeur mensongère) ;
-- consignes (active, confort/réduit) et mode : ceux d'une tête de référence en ligne — les têtes
-  d'un même groupe sont synchronisées, donc n'importe quel membre en ligne fait foi ;
-- chauffe : vrai si **au moins une** tête ouvre sa vanne ;
-- en ligne : vrai si au moins une tête du groupe est en ligne.
+Aggregation used:
+- temperature: mean of the **online** heads (offline ones would freeze a misleading value);
+- setpoints (active, comfort/setback) and mode: those of an online reference head - heads in the
+  same group are synchronised, so any online member is authoritative;
+- heating: true if **at least one** head opens its valve;
+- online: true if at least one head in the group is online.
 """
 
 from __future__ import annotations
@@ -20,51 +20,51 @@ from .decode import DanfossDevice
 
 
 @dataclass(frozen=True)
-class Piece:
-    """Une pièce = un groupe Tuya (resType 2) et la liste de ses têtes membres."""
+class Room:
+    """A room = one Tuya group (resType 2) and the list of its member heads."""
 
     group_id: str
-    nom: str
+    name: str
     pid: str | None
     home_gid: str
-    membres: tuple[str, ...]
+    members: tuple[str, ...]
 
 
 @dataclass
 class RoomState:
-    """État agrégé d'une pièce pour le thermostat de pièce (lecture)."""
+    """Aggregated state of a room for the room thermostat (read-only)."""
 
     group_id: str
-    nom: str
+    name: str
     pid: str | None
-    nb_tetes: int
-    en_ligne: bool = False
+    head_count: int
+    online: bool = False
     temperature: float | None = None
-    consigne: float | None = None  # consigne active (°C)
-    consignes: dict[str, float] = field(default_factory=dict)
+    setpoint: float | None = None  # active setpoint (°C)
+    setpoints: dict[str, float] = field(default_factory=dict)
     mode: str | None = None
-    chauffe: bool | None = None
-    borne_basse: float | None = None
-    borne_haute: float | None = None
+    heating: bool | None = None
+    min_setpoint: float | None = None
+    max_setpoint: float | None = None
 
 
-def aggregate_room(piece: Piece, membres: list[DanfossDevice]) -> RoomState:
-    """Construit l'état agrégé d'une pièce à partir de ses têtes membres présentes."""
-    online = [m for m in membres if m.en_ligne]
+def aggregate_room(room: Room, members: list[DanfossDevice]) -> RoomState:
+    """Build the aggregated state of a room from its present member heads."""
+    online = [m for m in members if m.online]
     temps = [m.temperature for m in online if m.temperature is not None]
     temperature = round(sum(temps) / len(temps), 1) if temps else None
-    ref = online[0] if online else (membres[0] if membres else None)
+    ref = online[0] if online else (members[0] if members else None)
     return RoomState(
-        group_id=piece.group_id,
-        nom=piece.nom,
-        pid=piece.pid,
-        nb_tetes=len(piece.membres),
-        en_ligne=bool(online),
+        group_id=room.group_id,
+        name=room.name,
+        pid=room.pid,
+        head_count=len(room.members),
+        online=bool(online),
         temperature=temperature,
-        consigne=ref.consigne if ref else None,
-        consignes=dict(ref.consignes) if ref else {},
+        setpoint=ref.setpoint if ref else None,
+        setpoints=dict(ref.setpoints) if ref else {},
         mode=ref.mode if ref else None,
-        chauffe=(any((m.ouverture_vanne or 0) > 0 for m in online) if online else None),
-        borne_basse=ref.borne_basse if ref else None,
-        borne_haute=ref.borne_haute if ref else None,
+        heating=(any((m.valve_opening or 0) > 0 for m in online) if online else None),
+        min_setpoint=ref.min_setpoint if ref else None,
+        max_setpoint=ref.max_setpoint if ref else None,
     )

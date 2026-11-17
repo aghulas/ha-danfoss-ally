@@ -1,4 +1,4 @@
-"""Tests de la couche « contrat » de schedule.py (jours anglais, R1, modèle) — synthétiques."""
+"""Tests of the "contract" layer of schedule.py (English days, R1, model) - synthetic."""
 
 from custom_components.danfoss_ally_cloud.api import schedule as sch
 
@@ -53,7 +53,7 @@ def test_codes_erreur():
     assert chev[0]["code"] == sch.ERR_OVERLAP
 
 
-def test_validate_days_agrege_et_jour_vide_valide():
+def test_validate_days_aggregates_and_empty_day_valid():
     days = {"mon": [_r("08:30", "17:30")], "wed": [], "fri": [_r("17:30", "08:30")]}
     err = sch.validate_days(days)
     assert len(err) == 1 and err[0]["day"] == "fri"

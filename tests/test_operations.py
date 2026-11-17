@@ -1,4 +1,4 @@
-"""Tests des opérations partagées (services/WebSocket) : pièces, validation, écriture, lots."""
+"""Shared operations tests (services/WebSocket): rooms, validation, write, jobs."""
 
 import pytest
 
@@ -6,22 +6,22 @@ from custom_components.danfoss_ally_cloud import operations as ops
 from custom_components.danfoss_ally_cloud.const import DATA_COORDINATOR, DATA_JOBS, DATA_SCHEDULES
 from custom_components.danfoss_ally_cloud.writejob import JobManager
 
-from .common import tete
+from .common import head
 
 _ROOM = {"type": "room", "id": "13000000"}
 
 
 @pytest.fixture(autouse=True)
 def _no_timer(monkeypatch):
-    """Désactive la vérification différée (timer) : testée séparément via verify_job."""
+    """Disable the deferred verification (timer): tested separately via verify_job."""
     monkeypatch.setattr(ops, "_defer_verification", lambda *a, **k: None)
 
 
 class _RoomState:
     def __init__(self, nom, pid, consignes):
-        self.nom = nom
+        self.name = nom
         self.pid = pid
-        self.consignes = consignes
+        self.setpoints = consignes
 
 
 class _FakeClient:
@@ -44,11 +44,11 @@ class _Coord:
     def __init__(self, grouped=True):
         self.client = _FakeClient()
         self.data = {
-            "a": tete("a", "Salle 1 #2", schedule_active=True),
-            "b": tete("b", "Salle 1 #3", schedule_active=False, mode="at_home"),
+            "a": head("a", "Salle 1 #2", schedule_active=True),
+            "b": head("b", "Salle 1 #3", schedule_active=False, mode="at_home"),
         }
         self.rooms = {
-            "13000000": _RoomState("Salle 1", "03wvrwpv", {"confort": 21.0, "reduit": 14.0})
+            "13000000": _RoomState("Salle 1", "03wvrwpv", {"comfort": 21.0, "setback": 14.0})
         }
         self._group = {"a": "13000000", "b": "13000000"} if grouped else {}
         self.refreshed = False
@@ -68,7 +68,7 @@ def _store(grouped=True):
 # --- Lecture -----------------------------------------------------------------------------------
 
 
-def test_rooms_payload_pieces_et_tetes():
+def test_rooms_payload_rooms_and_heads():
     store, _ = _store()
     rooms = ops.rooms_payload(store)["rooms"]
     assert len(rooms) == 1
@@ -94,7 +94,7 @@ def test_validate_payload():
     assert out["valid"] is False and out["errors"][0]["code"] == "empty_or_reversed"
 
 
-# --- Écriture ----------------------------------------------------------------------------------
+# --- Write ------------------------------------------------------------------------------------
 
 
 async def test_set_schedule_invalide_n_appelle_pas_le_client():
@@ -105,7 +105,7 @@ async def test_set_schedule_invalide_n_appelle_pas_le_client():
     assert coord.client.calls == []
 
 
-async def test_set_schedule_tete_groupee_refusee():
+async def test_set_schedule_grouped_head_refused():
     store, coord = _store()
     with pytest.raises(ops.OperationError) as exc:
         await ops.set_schedule(None, store, {"type": "device", "id": "a"}, {"mon": []})
@@ -113,7 +113,7 @@ async def test_set_schedule_tete_groupee_refusee():
     assert coord.client.calls == []
 
 
-async def test_set_schedule_succes_cree_un_lot():
+async def test_set_schedule_success_creates_a_job():
     store, coord = _store()
     job = await ops.set_schedule(None, store, _ROOM, {"mon": [{"start": "08:30", "end": "17:30"}]})
     assert job["kind"] == "set_schedule" and job["status"] == "sent"
@@ -121,13 +121,13 @@ async def test_set_schedule_succes_cree_un_lot():
     assert coord.client.calls[0][0] == "set"
 
 
-async def test_restore_cree_un_lot():
+async def test_restore_creates_a_job():
     store, coord = _store()
     job = await ops.restore_schedule(None, store, _ROOM)
     assert job["kind"] == "restore" and coord.client.calls[0][0] == "restore"
 
 
-# --- Vérification (DP 172, R6) et garde admin --------------------------------------------------
+# --- Verification (DP 172, R6) and admin guard ------------------------------------------------
 
 
 async def test_verify_job_restore_dp172():

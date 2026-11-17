@@ -1,13 +1,12 @@
 name: Frontend
 on: [push, pull_request]
 
-# Reconstruit le bundle versionné de l'interface embarquée de façon DÉTERMINISTE
-# et échoue si le fichier commité
-# (custom_components/danfoss_ally_cloud/frontend/danfoss-ally-cloud.js) n'est pas
-# à jour. Déterminisme : Node épinglé (.nvmrc), dépendances épinglées (npm ci sur
-# package-lock.json), sortie non minifiée. La sortie de Rollup/esbuild dépend de
-# la version des outils (verrouillée), pas de la version de Node ni de la
-# plateforme.
+# Rebuilds the versioned bundle of the embedded frontend DETERMINISTICALLY and
+# fails if the committed file
+# (custom_components/danfoss_ally_cloud/frontend/danfoss-ally-cloud.js) is out of
+# date. Determinism: pinned Node (.nvmrc), pinned dependencies (npm ci on
+# package-lock.json), non-minified output. Rollup/esbuild output depends on the
+# tool versions (locked), not on the Node version or the platform.
 jobs:
   frontend:
     runs-on: ubuntu-latest
@@ -24,13 +23,13 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      # Commande de build EXACTE (cf. frontend/README). La sortie va dans
+      # EXACT build command (see frontend/README). Output goes to
       # custom_components/danfoss_ally_cloud/frontend/danfoss-ally-cloud.js.
       - run: npm run build
-      - name: Vérifier que le bundle versionné est à jour
+      - name: Check that the versioned bundle is up to date
         run: |
           if ! git diff --quiet -- ../custom_components/danfoss_ally_cloud/frontend/danfoss-ally-cloud.js; then
-            echo "::error::Le bundle versionné n'est pas à jour. Lancez 'npm --prefix frontend ci && npm --prefix frontend run build' puis committez le fichier."
+            echo "::error::The versioned bundle is out of date. Run 'npm --prefix frontend ci && npm --prefix frontend run build' then commit the file."
             git --no-pager diff -- ../custom_components/danfoss_ally_cloud/frontend/danfoss-ally-cloud.js | head -50
             exit 1
           fi

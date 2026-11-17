@@ -1,28 +1,24 @@
-"""Interface embarquée : service du bundle et déclaration de la ressource Lovelace.
+"""Embedded frontend: serving the bundle and declaring the Lovelace resource.
 
-Contrat §6 :
-- sert le dossier `frontend/` à l'URL `/danfoss_ally_cloud/frontend/`
-  (`async_register_static_paths`) ;
-- déclare la ressource Lovelace `…/danfoss-ally-cloud.js?v=<version>` pour les
-  tableaux de bord en mode stockage, afin que la carte apparaisse dans le
-  sélecteur sans manipulation manuelle (en mode YAML, l'utilisateur l'ajoute
-  lui-même — voir README) ;
-- enregistrement DANS `async_setup` (une fois par instance), jamais dans
-  `async_setup_entry` ;
-- nettoyage de la ressource au retrait de la dernière entrée.
+Contract §6:
+- serves the `frontend/` folder at URL `/danfoss_ally_cloud/frontend/`
+  (`async_register_static_paths`);
+- declares the Lovelace resource `…/danfoss-ally-cloud.js?v=<version>` for storage-mode
+  dashboards, so the card appears in the picker without manual steps (in YAML mode the user adds
+  it themselves — see README);
+- registration IN `async_setup` (once per instance), never in `async_setup_entry`;
+- cleanup of the resource when the last entry is removed.
 
-Le service du fichier et la déclaration de la ressource sont « best-effort » :
-ils ne doivent jamais empêcher l'intégration de se configurer.
+Serving the file and declaring the resource are "best-effort": they must never prevent the
+integration from configuring.
 
-Choix d'implémentation : `frontend`, `http` et `lovelace` sont déclarés en
-`after_dependencies` (et non en `dependencies`) dans le manifest. En dépendance
-dure, Home Assistant forcerait la mise en place complète de `frontend`
-(onboarding → analytics → recorder → `psutil_home_assistant`), ce qui échoue dans
-le harnais de test et sur toute installation où ces dépendances ne sont pas
-présentes au moment de notre configuration. `after_dependencies` garantit l'ordre
-de chargement en production (où ces composants sont toujours là via
-`default_config`) sans les imposer. Si l'un manque, l'enregistrement se dégrade
-proprement (voir ci-dessous).
+Implementation choice: `frontend`, `http` and `lovelace` are declared as `after_dependencies` (not
+`dependencies`) in the manifest. As a hard dependency, Home Assistant would force the full setup of
+`frontend` (onboarding → analytics → recorder → `psutil_home_assistant`), which fails in the test
+harness and on any install where these dependencies are not present at our configuration time.
+`after_dependencies` guarantees the load order in production (where these components are always
+there via `default_config`) without imposing them. If one is missing, registration degrades
+gracefully (see below).
 """
 
 from __future__ import annotations
@@ -35,9 +31,9 @@ from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN
 
-# Classe de collection des ressources Lovelace (mode stockage). Rangée dans une
-# variable annotée `type | None` plutôt que de réassigner le nom importé : lovelace
-# peut être absent (HA minimal), et réassigner un nom de classe déplaît à mypy.
+# Lovelace resources collection class (storage mode). Stored in a `type | None`-annotated variable
+# rather than reassigning the imported name: lovelace may be absent (minimal HA), and reassigning a
+# class name upsets mypy.
 try:
     from homeassistant.components.lovelace.resources import ResourceStorageCollection
 
@@ -47,45 +43,45 @@ except ImportError:  # lovelace absent
 
 _LOGGER = logging.getLogger(__name__)
 
-# URL publique du dossier servi, et nom du bundle (versionné dans le dépôt).
+# Public URL of the served folder, and the bundle name (versioned in the repo).
 FRONTEND_URL_BASE = f"/{DOMAIN}/frontend"
 JS_FILENAME = "danfoss-ally-cloud.js"
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 
-# Drapeau dans hass.data : chemin statique déjà enregistré pour cette instance.
+# Flag in hass.data: static path already registered for this instance.
 _DATA_STATIC_REGISTERED = f"{DOMAIN}_frontend_static"
 
 
 async def async_register_frontend(hass: HomeAssistant) -> None:
-    """Servir le bundle et déclarer la ressource Lovelace. À appeler dans async_setup."""
+    """Serve the bundle and declare the Lovelace resource. Call this in async_setup."""
     await _async_register_static_path(hass)
     url = await _async_resource_url(hass)
     await _async_register_resource(hass, url)
 
 
 async def async_unregister_frontend(hass: HomeAssistant) -> None:
-    """Retirer la ressource Lovelace (au retrait de la dernière entrée).
+    """Remove the Lovelace resource (when the last entry is removed).
 
-    Le chemin statique n'est pas retiré : Home Assistant ne propose pas de le
-    désenregistrer, et il est inoffensif (il disparaît au prochain redémarrage).
+    The static path is not removed: Home Assistant offers no way to unregister it, and it is
+    harmless (it disappears on the next restart).
     """
     url = await _async_resource_url(hass)
     await _async_remove_resource(hass, url)
 
 
 async def _async_resource_url(hass: HomeAssistant) -> str:
-    """URL de la ressource avec la version de l'intégration (cache-busting, contrat §6)."""
+    """Resource URL with the integration version (cache-busting, contract §6)."""
     version = "0"
     try:
         integration = await async_get_integration(hass, DOMAIN)
         version = str(integration.version)
-    except Exception as err:  # noqa: BLE001 - la version n'est pas vitale
-        _LOGGER.debug("Version de l'intégration introuvable : %s", err)
+    except Exception as err:  # noqa: BLE001 - the version is not vital
+        _LOGGER.debug("Integration version not found: %s", err)
     return f"{FRONTEND_URL_BASE}/{JS_FILENAME}?v={version}"
 
 
 async def _async_register_static_path(hass: HomeAssistant) -> None:
-    """Enregistrer le dossier statique, une seule fois par instance."""
+    """Register the static folder, once per instance."""
     if hass.data.get(_DATA_STATIC_REGISTERED):
         return
     try:
@@ -94,17 +90,17 @@ async def _async_register_static_path(hass: HomeAssistant) -> None:
         await hass.http.async_register_static_paths(
             [StaticPathConfig(FRONTEND_URL_BASE, str(FRONTEND_DIR), cache_headers=False)]
         )
-    except Exception as err:  # noqa: BLE001 - best-effort, ne bloque pas le setup
-        _LOGGER.warning("Service du dossier de l'interface impossible : %s", err)
+    except Exception as err:  # noqa: BLE001 - best-effort, does not block setup
+        _LOGGER.warning("Could not serve the frontend folder: %s", err)
         return
     hass.data[_DATA_STATIC_REGISTERED] = True
 
 
 def _resources_collection(hass: HomeAssistant):
-    """Collection de ressources Lovelace en mode stockage, ou None.
+    """Storage-mode Lovelace resources collection, or None.
 
-    En mode YAML (ou si lovelace n'est pas chargé), renvoie None : la ressource
-    doit alors être ajoutée à la main (documenté dans le README).
+    In YAML mode (or if lovelace is not loaded), returns None: the resource must then be added by
+    hand (documented in the README).
     """
     if _ResourcesCls is None:
         return None
@@ -116,10 +112,10 @@ def _resources_collection(hass: HomeAssistant):
 
 
 async def _async_register_resource(hass: HomeAssistant, url: str) -> None:
-    """Créer (ou mettre à jour) la ressource module pointant sur le bundle."""
+    """Create (or update) the module resource pointing to the bundle."""
     resources = _resources_collection(hass)
     if resources is None:
-        _LOGGER.debug("Ressources Lovelace en mode YAML ou indisponibles : ajout manuel requis.")
+        _LOGGER.debug("Lovelace resources in YAML mode or unavailable: manual add required.")
         return
     try:
         if not getattr(resources, "loaded", False):
@@ -134,11 +130,11 @@ async def _async_register_resource(hass: HomeAssistant, url: str) -> None:
                 return
         await resources.async_create_item({"res_type": "module", "url": url})
     except Exception as err:  # noqa: BLE001 - best-effort
-        _LOGGER.warning("Déclaration de la ressource Lovelace impossible : %s", err)
+        _LOGGER.warning("Could not declare the Lovelace resource: %s", err)
 
 
 async def _async_remove_resource(hass: HomeAssistant, url: str) -> None:
-    """Supprimer la ressource module (nettoyage)."""
+    """Delete the module resource (cleanup)."""
     resources = _resources_collection(hass)
     if resources is None:
         return
@@ -153,4 +149,4 @@ async def _async_remove_resource(hass: HomeAssistant, url: str) -> None:
                 await resources.async_delete_item(item["id"])
                 return
     except Exception as err:  # noqa: BLE001 - best-effort
-        _LOGGER.debug("Suppression de la ressource Lovelace impossible : %s", err)
+        _LOGGER.debug("Could not remove the Lovelace resource: %s", err)

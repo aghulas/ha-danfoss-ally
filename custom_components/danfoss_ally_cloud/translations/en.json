@@ -40,37 +40,37 @@
   },
   "entity": {
     "sensor": {
-      "ouverture_vanne": {
+      "valve_opening": {
         "name": "Valve opening"
       },
-      "defaut": {
+      "fault": {
         "name": "Fault code"
       }
     },
     "binary_sensor": {
-      "en_ligne": {
+      "online": {
         "name": "Online"
       },
-      "fenetre": {
+      "window": {
         "name": "Window"
       }
     },
     "switch": {
-      "verrou_enfant": {
+      "child_lock": {
         "name": "Child lock"
       },
-      "detection_fenetre": {
+      "window_detection": {
         "name": "Open window detection"
       },
-      "pre_chauffage": {
+      "preheat": {
         "name": "Pre-heating"
       }
     },
     "number": {
-      "consigne_confort": {
+      "comfort_setpoint": {
         "name": "Comfort setpoint"
       },
-      "consigne_reduit": {
+      "setback_setpoint": {
         "name": "Setback setpoint"
       }
     }

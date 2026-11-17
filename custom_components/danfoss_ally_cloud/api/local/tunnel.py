@@ -1,15 +1,15 @@
-"""Tunnel Zigbee local via les passerelles Tuya (DP 198 -> réponse DP 199).
+"""Local Zigbee tunnel through the Tuya gateways (DP 198 -> DP 199 response).
 
-Pour les opérations que le cloud rate : lecture du programme hebdomadaire directement dans la tête,
-lecture/écriture des vrais attributs ZCL (dont l'état de pré-chauffage, attribut 0x0025). Protocole
-LAN Tuya 3.5 (tinytuya). Repris de ~/dev/danfoss-ally-mcp/local.py.
+For the operations the cloud misses: reading the weekly schedule directly from the head,
+reading/writing the real ZCL attributes (including the preheat state, attribute 0x0025). Tuya LAN
+protocol 3.5 (tinytuya). Ported from ~/dev/danfoss-ally-mcp/local.py.
 
-Les fonctions de trame sont PURES (testables sans réseau). ``LocalLink`` isole tinytuya (doublure
-possible dans les tests). Appels bloquants : la couche HA les exécute dans l'executor.
+The frame functions are PURE (testable without a network). ``LocalLink`` isolates tinytuya (a double
+is possible in tests). Blocking calls: the HA layer runs them in the executor.
 
-En-tête du tunnel : ``40 01 | cluster (2 o, LE) | 04 01 01 00 | trame ZCL``. La passerelle relaie la
-trame du DP 198 à la tête et pousse la réponse dans le DP 199 (1 à 9 s). La séquence ZCL étant
-renumérotée, une réponse se reconnaît à son contenu.
+Tunnel header: ``40 01 | cluster (2 bytes, LE) | 04 01 01 00 | ZCL frame``. The gateway relays the
+DP 198 frame to the head and pushes the response into DP 199 (1 to 9 s). As the ZCL sequence is
+renumbered, a response is recognised by its content.
 """
 
 from __future__ import annotations
@@ -24,80 +24,81 @@ from typing import Any
 from ..keys import GatewayKey
 
 CLUSTER_THERMOSTAT = 0x0201
-FABRICANT = 0x1246
-JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
-BIT_JOUR = {
-    "dimanche": 0x01,
-    "lundi": 0x02,
-    "mardi": 0x04,
-    "mercredi": 0x08,
-    "jeudi": 0x10,
-    "vendredi": 0x20,
-    "samedi": 0x40,
+MANUFACTURER = 0x1246
+WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+DAY_BIT = {
+    "sunday": 0x01,
+    "monday": 0x02,
+    "tuesday": 0x04,
+    "wednesday": 0x08,
+    "thursday": 0x10,
+    "friday": 0x20,
+    "saturday": 0x40,
 }
 MAX_TRANSITIONS = 6
-# Jours du dégommage (attribut Danfoss 0x4010, enum8) : dimanche = 0, … samedi = 6, 7 = indéfini.
-JOURS_DEGOMMAGE = [
-    "dimanche",
-    "lundi",
-    "mardi",
-    "mercredi",
-    "jeudi",
-    "vendredi",
-    "samedi",
-    "indéfini",
+# Valve descaling days (Danfoss attribute 0x4010, enum8): Sunday = 0, ... Saturday = 6,
+# 7 = undefined.
+DESCALE_DAYS = [
+    "sunday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "undefined",
 ]
 
-# Attributs lus : (id, nom). 0x0025 = mode programmation (bit 1 = pré-chauffage).
-ATTRIBUTS_STD = [
-    (0x0012, "consigne_en_cours"),
-    (0x0015, "borne_basse"),
-    (0x0016, "borne_haute"),
-    (0x0025, "mode_programmation"),
-    (0x0030, "source_consigne"),
+# Attributes read: (id, name). 0x0025 = programming mode (bit 1 = preheat).
+ATTRS_STD = [
+    (0x0012, "current_setpoint"),
+    (0x0015, "min_setpoint"),
+    (0x0016, "max_setpoint"),
+    (0x0025, "programming_mode"),
+    (0x0030, "setpoint_source"),
 ]
-# Attributs Danfoss (code fabricant 0x1246), répartis en deux relevés comme le connecteur MCP.
-ATTRIBUTS_DANFOSS_A = [
-    (0x4010, "degommage_jour"),
-    (0x4011, "degommage_heure"),
+# Danfoss attributes (manufacturer code 0x1246), split into two surveys like the MCP connector.
+ATTRS_DANFOSS_A = [
+    (0x4010, "descale_day"),
+    (0x4011, "descale_time"),
     (0x4014, "orientation"),
-    (0x4016, "radiateur_couvert"),
-    (0x4020, "vitesse_regulation"),
-    (0x4030, "chaleur_disponible"),
-    (0x4031, "demande_chaleur"),
-    (0x4032, "equilibrage"),
+    (0x4016, "radiator_covered"),
+    (0x4020, "control_speed"),
+    (0x4030, "heat_available"),
+    (0x4031, "heat_request"),
+    (0x4032, "load_balancing"),
 ]
-ATTRIBUTS_DANFOSS_B = [
-    (0x404B, "decalage_consigne"),
-    (0x404D, "adaptation_etat"),
-    (0x404E, "adaptation_reglage"),
-    (0x404F, "prechauffage_en_cours"),
-    (0x4051, "detection_fenetre"),
-    (0x4000, "etat_fenetre"),
+ATTRS_DANFOSS_B = [
+    (0x404B, "setpoint_offset"),
+    (0x404D, "adaptation_state"),
+    (0x404E, "adaptation_setting"),
+    (0x404F, "preheat_active"),
+    (0x4051, "window_detection"),
+    (0x4000, "window_state"),
 ]
-# Réglages inscriptibles par leur DP de pièce (noms officiels du schéma produit 03wvrwpv, contrat
-# §4.2). Le pré-chauffage réel, lui, est le bit 1 de l'attribut 0x0025 (voir ecrire_prechauffage) :
-# écrire le DP 1 ne touche que le cache de la passerelle (constat réel du 15/11/2026).
-REGLAGES_DP: dict[str, tuple[str, type]] = {
-    "detection_fenetre": ("116", bool),  # window_toggle
-    "verrouillage_enfant": ("30", bool),  # child_lock
+# Settings writable by their room DP (official names of the product schema 03wvrwpv, contract §4.2).
+# The real preheat, though, is bit 1 of attribute 0x0025 (see write_preheat): writing DP 1 only
+# touches the gateway cache (observed on real hardware, 2026-11-15).
+SETTINGS_DP: dict[str, tuple[str, type]] = {
+    "window_detection": ("116", bool),  # window_toggle
+    "child_lock": ("30", bool),  # child_lock
 }
-# Dérogation de consigne « maintenant » : DP 171 OccupiedSetpoint. ATTENTION à l'échelle, voir
-# valeur_consigne : le MCP (validé en réel) l'écrit en centièmes de °C, alors que le schéma produit
-# annonce une échelle 10^0 — incohérence signalée, on suit le constat réel (centièmes).
-DP_CONSIGNE = "171"
+# "Now" setpoint override: DP 171 OccupiedSetpoint. MIND the scale, see setpoint_value: the MCP
+# (verified on real hardware) writes it in hundredths of °C, whereas the product schema announces a
+# 10^0 scale - inconsistency flagged, we follow the real observation (hundredths).
+DP_SETPOINT = "171"
 
-_CENTIEMES = {"consigne_en_cours", "borne_basse", "borne_haute"}
-_BOOLEENS = {
-    "radiateur_couvert",
-    "chaleur_disponible",
-    "demande_chaleur",
-    "equilibrage",
-    "prechauffage_en_cours",
-    "detection_fenetre",
+_HUNDREDTHS = {"current_setpoint", "min_setpoint", "max_setpoint"}
+_BOOLEANS = {
+    "radiator_covered",
+    "heat_available",
+    "heat_request",
+    "load_balancing",
+    "preheat_active",
+    "window_detection",
     "orientation",
 }
-_LONGUEUR = {
+_LENGTH = {
     0x10: 1,
     0x18: 1,
     0x19: 2,
@@ -111,178 +112,177 @@ _LONGUEUR = {
     0x30: 1,
     0x31: 2,
 }
-_SIGNES = {0x28, 0x29, 0x2B}
+_SIGNED = {0x28, 0x29, 0x2B}
 
 
-class LocalIndisponible(Exception):
-    """Accès local impossible (clés absentes, tinytuya manquant, passerelle injoignable)."""
+class LocalUnavailable(Exception):
+    """Local access impossible (keys missing, tinytuya missing, gateway unreachable)."""
 
 
-class LocalErreur(Exception):
-    """Demande locale invalide (programme mal formé, type ZCL non géré…)."""
+class LocalError(Exception):
+    """Invalid local request (malformed schedule, unhandled ZCL type...)."""
 
 
-# --- trames (fonctions pures) -----------------------------------------------------------------
+# --- frames (pure functions) ------------------------------------------------------------------
 
 
-def entete(cluster: int) -> bytes:
+def header(cluster: int) -> bytes:
     return bytes.fromhex("4001") + cluster.to_bytes(2, "little") + bytes.fromhex("04010100")
 
 
-def trame_lire_attributs(attributs: list[int], fabricant: bool, seq: int = 0x40) -> bytes:
-    if fabricant:
-        debut = bytes([0x04]) + FABRICANT.to_bytes(2, "little") + bytes([seq, 0x00])
+def frame_read_attributes(attributes: list[int], manufacturer: bool, seq: int = 0x40) -> bytes:
+    if manufacturer:
+        start = bytes([0x04]) + MANUFACTURER.to_bytes(2, "little") + bytes([seq, 0x00])
     else:
-        debut = bytes([0x00, seq, 0x00])
-    return entete(CLUSTER_THERMOSTAT) + debut + b"".join(a.to_bytes(2, "little") for a in attributs)
+        start = bytes([0x00, seq, 0x00])
+    body = b"".join(a.to_bytes(2, "little") for a in attributes)
+    return header(CLUSTER_THERMOSTAT) + start + body
 
 
-def trame_lire_programme(jour: str, seq: int = 0x40) -> bytes:
-    return entete(CLUSTER_THERMOSTAT) + bytes([0x01, seq, 0x02, BIT_JOUR[jour], 0x01])
+def frame_read_schedule(day: str, seq: int = 0x40) -> bytes:
+    return header(CLUSTER_THERMOSTAT) + bytes([0x01, seq, 0x02, DAY_BIT[day], 0x01])
 
 
-def trame_ecrire_attributs(
-    enregistrements: list[tuple[int, int, int]], fabricant: bool, seq: int = 0x40
+def frame_write_attributes(
+    records: list[tuple[int, int, int]], manufacturer: bool, seq: int = 0x40
 ) -> bytes:
-    """Écriture d'attributs ZCL (cmd 0x02). enregistrements = [(attribut, type ZCL, valeur)]."""
-    if fabricant:
-        debut = bytes([0x04]) + FABRICANT.to_bytes(2, "little") + bytes([seq, 0x02])
+    """ZCL attribute write (cmd 0x02). records = [(attribute, ZCL type, value)]."""
+    if manufacturer:
+        start = bytes([0x04]) + MANUFACTURER.to_bytes(2, "little") + bytes([seq, 0x02])
     else:
-        debut = bytes([0x00, seq, 0x02])
-    corps = b""
-    for a, typ, v in enregistrements:
-        if typ not in _LONGUEUR:
-            raise LocalErreur(f"type ZCL non géré : 0x{typ:02x}")
-        corps += (
+        start = bytes([0x00, seq, 0x02])
+    body = b""
+    for a, typ, v in records:
+        if typ not in _LENGTH:
+            raise LocalError(f"unhandled ZCL type: 0x{typ:02x}")
+        body += (
             a.to_bytes(2, "little")
             + bytes([typ])
-            + int(v).to_bytes(_LONGUEUR[typ], "little", signed=typ in _SIGNES)
+            + int(v).to_bytes(_LENGTH[typ], "little", signed=typ in _SIGNED)
         )
-    return entete(CLUSTER_THERMOSTAT) + debut + corps
+    return header(CLUSTER_THERMOSTAT) + start + body
 
 
 def minutes(h: str) -> int:
     try:
         hh, mm = (int(x) for x in h.split(":"))
     except (ValueError, AttributeError) as e:
-        raise LocalErreur(f"heure invalide : {h!r} (attendu HH:MM)") from e
+        raise LocalError(f"invalid time: {h!r} (expected HH:MM)") from e
     if not (0 <= hh <= 24 and 0 <= mm < 60 and hh * 60 + mm <= 1440):
-        raise LocalErreur(f"heure invalide : {h!r}")
+        raise LocalError(f"invalid time: {h!r}")
     return hh * 60 + mm
 
 
-def verifier_transitions(transitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Journée valide : 1 à 6 transitions, 1re à 00:00, heures croissantes, consignes 5–35/0,5."""
+def check_transitions(transitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Valid day: 1 to 6 transitions, 1st at 00:00, increasing times, setpoints 5-35/0.5."""
     if not transitions or len(transitions) > MAX_TRANSITIONS:
-        raise LocalErreur(f"une journée compte 1 à {MAX_TRANSITIONS} transitions")
+        raise LocalError(f"a day has 1 to {MAX_TRANSITIONS} transitions")
     out: list[dict[str, Any]] = []
-    avant = -1
+    prev = -1
     for t in transitions:
         m, c = minutes(t["h"]), float(t["c"])
-        if m <= avant or m >= 1440:
-            raise LocalErreur("transitions à donner dans l'ordre, sans doublon, avant 24:00")
+        if m <= prev or m >= 1440:
+            raise LocalError("transitions must be in order, without duplicates, before 24:00")
         if not 5 <= c <= 35 or round(c * 2) != c * 2:
-            raise LocalErreur(f"consigne hors plage : {c} (5 à 35 °C par 0,5)")
+            raise LocalError(f"setpoint out of range: {c} (5 to 35 °C by 0.5)")
         out.append({"h": f"{m // 60:02d}:{m % 60:02d}", "c": c})
-        avant = m
+        prev = m
     if out[0]["h"] != "00:00":
-        raise LocalErreur("la première transition d'une journée doit être à 00:00")
+        raise LocalError("the first transition of a day must be at 00:00")
     return out
 
 
-def trame_ecrire_programme(jour: str, transitions: list[dict[str, Any]], seq: int = 0x40) -> bytes:
-    tr = verifier_transitions(transitions)
-    corps = bytes([len(tr), BIT_JOUR[jour], 0x01])
+def frame_write_schedule(day: str, transitions: list[dict[str, Any]], seq: int = 0x40) -> bytes:
+    tr = check_transitions(transitions)
+    body = bytes([len(tr), DAY_BIT[day], 0x01])
     for t in tr:
-        corps += minutes(t["h"]).to_bytes(2, "little") + int(round(t["c"] * 100)).to_bytes(
+        body += minutes(t["h"]).to_bytes(2, "little") + int(round(t["c"] * 100)).to_bytes(
             2, "little", signed=True
         )
-    return entete(CLUSTER_THERMOSTAT) + bytes([0x01, seq, 0x01]) + corps
+    return header(CLUSTER_THERMOSTAT) + bytes([0x01, seq, 0x01]) + body
 
 
-def decoder_trame(brut: bytes) -> dict[str, Any] | None:
-    """Trame DP 199 → {cluster, fabricant, commande, specifique, charge} ; None si non reconnue."""
-    if len(brut) < 11 or brut[:2] != b"\x40\x01":
+def decode_frame(raw: bytes) -> dict[str, Any] | None:
+    """DP 199 frame -> {cluster, manufacturer, command, specific, payload}; None if unrecognised."""
+    if len(raw) < 11 or raw[:2] != b"\x40\x01":
         return None
-    z = brut[8:]
-    fc, i, fab = z[0], 1, None
+    z = raw[8:]
+    fc, i, man = z[0], 1, None
     if fc & 0x04:
         if len(z) < 5:
             return None
-        fab, i = int.from_bytes(z[1:3], "little"), 3
+        man, i = int.from_bytes(z[1:3], "little"), 3
     return {
-        "cluster": int.from_bytes(brut[2:4], "little"),
-        "fabricant": fab,
-        "commande": z[i + 1],
-        "specifique": bool(fc & 0x01),
-        "charge": z[i + 2 :],
+        "cluster": int.from_bytes(raw[2:4], "little"),
+        "manufacturer": man,
+        "command": z[i + 1],
+        "specific": bool(fc & 0x01),
+        "payload": z[i + 2 :],
     }
 
 
-def decoder_attributs(charge: bytes) -> dict[int, int | None]:
+def decode_attributes(payload: bytes) -> dict[int, int | None]:
     out: dict[int, int | None] = {}
     i = 0
-    while i + 3 <= len(charge):
-        a, statut = int.from_bytes(charge[i : i + 2], "little"), charge[i + 2]
+    while i + 3 <= len(payload):
+        a, status = int.from_bytes(payload[i : i + 2], "little"), payload[i + 2]
         i += 3
-        if statut != 0:
+        if status != 0:
             out[a] = None
             continue
-        n = _LONGUEUR.get(charge[i])
-        if n is None or i + 1 + n > len(charge):
+        n = _LENGTH.get(payload[i])
+        if n is None or i + 1 + n > len(payload):
             break
-        out[a] = int.from_bytes(charge[i + 1 : i + 1 + n], "little", signed=charge[i] in _SIGNES)
+        out[a] = int.from_bytes(payload[i + 1 : i + 1 + n], "little", signed=payload[i] in _SIGNED)
         i += 1 + n
     return out
 
 
-def decoder_programme(charge: bytes) -> tuple[int, list[dict[str, Any]]]:
-    """Réponse GetWeeklySchedule → (bit du jour, transitions [{h, c}])."""
-    n, jour = charge[0], charge[1]
+def decode_schedule(payload: bytes) -> tuple[int, list[dict[str, Any]]]:
+    """GetWeeklySchedule response -> (day bit, transitions [{h, c}])."""
+    n, day = payload[0], payload[1]
     tr = []
     for k in range(n):
         o = 3 + 4 * k
-        if o + 4 > len(charge):
+        if o + 4 > len(payload):
             break
-        m = int.from_bytes(charge[o : o + 2], "little")
-        c = int.from_bytes(charge[o + 2 : o + 4], "little", signed=True) / 100
+        m = int.from_bytes(payload[o : o + 2], "little")
+        c = int.from_bytes(payload[o + 2 : o + 4], "little", signed=True) / 100
         tr.append({"h": f"{m // 60:02d}:{m % 60:02d}", "c": c})
-    return jour, tr
+    return day, tr
 
 
-def nommer(valeurs: dict[int, int | None], table: list[tuple[int, str]]) -> dict[str, Any]:
+def name_attributes(values: dict[int, int | None], table: list[tuple[int, str]]) -> dict[str, Any]:
     out: dict[str, Any] = {}
-    for a, nom in table:
-        v = valeurs.get(a)
+    for a, name in table:
+        v = values.get(a)
         if v is None:
             continue
-        if nom in _CENTIEMES:
-            out[nom] = v / 100
-        elif nom in _BOOLEENS:
-            out[nom] = bool(v)
-        elif nom == "degommage_jour":
-            out[nom] = JOURS_DEGOMMAGE[v] if v < len(JOURS_DEGOMMAGE) else v
-        elif nom == "degommage_heure":
-            out[nom] = f"{v // 60:02d}:{v % 60:02d}"
-        elif nom == "mode_programmation":
-            out[nom] = v
-            out["pre_chauffage"] = bool(
-                v & 0x02
-            )  # 3 = programme + pré-chauffage, 1 = programme seul
-        elif nom == "adaptation_etat":
-            out[nom] = v
-            out["adaptation_faite"] = bool(v & 0x02)
+        if name in _HUNDREDTHS:
+            out[name] = v / 100
+        elif name in _BOOLEANS:
+            out[name] = bool(v)
+        elif name == "descale_day":
+            out[name] = DESCALE_DAYS[v] if v < len(DESCALE_DAYS) else v
+        elif name == "descale_time":
+            out[name] = f"{v // 60:02d}:{v % 60:02d}"
+        elif name == "programming_mode":
+            out[name] = v
+            out["preheat"] = bool(v & 0x02)  # 3 = schedule + preheat, 1 = schedule only
+        elif name == "adaptation_state":
+            out[name] = v
+            out["adaptation_done"] = bool(v & 0x02)
         else:
-            out[nom] = v
+            out[name] = v
     return out
 
 
-def plages(transitions: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    """Plages de confort d'une journée : segments dont la consigne dépasse la plus basse du jour.
+def comfort_slots(transitions: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Comfort slots of a day: segments whose setpoint exceeds the day's lowest.
 
-    Deux segments de confort consécutifs à la même consigne sont fusionnés. La référence est la
-    consigne la plus basse de la journée (le réduit), et non celle de 00:00 : sinon une journée qui
-    commence en confort (plage à 00:00) ne montrerait aucune plage.
+    Two consecutive comfort segments at the same setpoint are merged. The reference is the day's
+    lowest setpoint (the setback), not the one at 00:00: otherwise a day starting in comfort (a slot
+    at 00:00) would show no slot.
     """
     if not transitions:
         return []
@@ -290,99 +290,95 @@ def plages(transitions: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for i, t in enumerate(transitions):
         if t["c"] > base:
-            fin = transitions[i + 1]["h"] if i + 1 < len(transitions) else "24:00"
-            if out and out[-1]["fin"] == t["h"] and out[-1]["consigne"] == t["c"]:
-                out[-1]["fin"] = fin
+            end = transitions[i + 1]["h"] if i + 1 < len(transitions) else "24:00"
+            if out and out[-1]["end"] == t["h"] and out[-1]["setpoint"] == t["c"]:
+                out[-1]["end"] = end
             else:
-                out.append({"debut": t["h"], "fin": fin, "consigne": t["c"]})
+                out.append({"start": t["h"], "end": end, "setpoint": t["c"]})
     return out
 
 
-def degommage_valeurs(jour: str, heure: str) -> list[tuple[int, int, int]]:
-    """Dégommage hebdomadaire de la vanne : attributs Danfoss 0x4010 (jour, enum8) et 0x4011 (heure
-    en minutes, uint16). À écrire par ``ecrire_attributs(..., fabricant=True)``."""
-    j = (jour or "").lower()
-    if j not in JOURS_DEGOMMAGE[:7]:
-        raise LocalErreur(f"jour de dégommage inconnu : {jour}")
-    return [(0x4010, 0x30, JOURS_DEGOMMAGE.index(j)), (0x4011, 0x21, minutes(heure) % 1440)]
+def descale_records(day: str, hour: str) -> list[tuple[int, int, int]]:
+    """Weekly valve descaling: Danfoss attributes 0x4010 (day, enum8) and 0x4011 (time in minutes,
+    uint16). To be written with ``write_attributes(..., manufacturer=True)``."""
+    d = (day or "").lower()
+    if d not in DESCALE_DAYS[:7]:
+        raise LocalError(f"unknown descale day: {day}")
+    return [(0x4010, 0x30, DESCALE_DAYS.index(d)), (0x4011, 0x21, minutes(hour) % 1440)]
 
 
-def valeur_consigne(celsius: float) -> int:
-    """Dérogation de consigne (DP 171) → entier à publier. Valide 5–35 °C par 0,5.
+def setpoint_value(celsius: float) -> int:
+    """Setpoint override (DP 171) -> integer to publish. Valid 5-35 °C by 0.5.
 
-    Échelle : centièmes de °C (21 °C → 2100), d'après le constat réel du connecteur MCP du
-    15/11/2026. Le schéma produit officiel (DP 171 ``OccupiedSetpoint``) annonce une échelle 10^0 :
-    cette incohérence est connue et tranchée en faveur du constat réel (voir DP_CONSIGNE).
+    Scale: hundredths of °C (21 °C -> 2100), per the MCP connector's real observation of 2026-11-15.
+    The official product schema (DP 171 ``OccupiedSetpoint``) announces a 10^0 scale: this
+    inconsistency is known and settled in favour of the real observation (see DP_SETPOINT).
     """
     c = float(celsius)
     if not 5 <= c <= 35 or round(c * 2) != c * 2:
-        raise LocalErreur(f"consigne hors plage : {celsius} (5 à 35 °C par 0,5)")
+        raise LocalError(f"setpoint out of range: {celsius} (5 to 35 °C by 0.5)")
     return int(round(c * 100))
 
 
-def transitions_depuis_fenetres(
-    fenetres: list[dict[str, str]], confort: float, reduit: float
+def transitions_from_slots(
+    slots: list[dict[str, str]], comfort: float, setback: float
 ) -> list[dict[str, Any]]:
-    """Fenêtres de confort ``[{debut, fin}]`` → transitions d'une journée (réduit en dehors)."""
-    tr: list[dict[str, Any]] = [{"h": "00:00", "c": float(reduit)}]
-    fin_prec = 0
-    for f in sorted(fenetres, key=lambda x: minutes(x["debut"])):
-        d, e = minutes(f["debut"]), minutes(f["fin"])
-        if d < fin_prec or e <= d:
-            raise LocalErreur(
-                "fenêtres de confort mal formées (chevauchement ou fin avant le début)"
-            )
+    """Comfort slots ``[{start, end}]`` -> a day's transitions (setback outside)."""
+    tr: list[dict[str, Any]] = [{"h": "00:00", "c": float(setback)}]
+    prev_end = 0
+    for f in sorted(slots, key=lambda x: minutes(x["start"])):
+        d, e = minutes(f["start"]), minutes(f["end"])
+        if d < prev_end or e <= d:
+            raise LocalError("malformed comfort slots (overlap or end before start)")
         if d == 0:
-            tr[0]["c"] = float(confort)
+            tr[0]["c"] = float(comfort)
         else:
-            tr.append({"h": f"{d // 60:02d}:{d % 60:02d}", "c": float(confort)})
+            tr.append({"h": f"{d // 60:02d}:{d % 60:02d}", "c": float(comfort)})
         if e < 1440:
-            tr.append({"h": f"{e // 60:02d}:{e % 60:02d}", "c": float(reduit)})
-        fin_prec = e
-    return verifier_transitions(tr)
+            tr.append({"h": f"{e // 60:02d}:{e % 60:02d}", "c": float(setback)})
+        prev_end = e
+    return check_transitions(tr)
 
 
-# --- liaison avec une passerelle (tinytuya) ---------------------------------------------------
+# --- link to a gateway (tinytuya) -------------------------------------------------------------
 
 
 class LocalLink:
-    """Connexion persistante à une passerelle (tinytuya). Doublure possible dans les tests."""
+    """Persistent connection to a gateway (tinytuya). A double is possible in tests."""
 
     def __init__(self, gateway: GatewayKey) -> None:
         if not gateway.ip:
-            raise LocalIndisponible(
-                f"IP LAN inconnue pour la passerelle {gateway.nom or gateway.dev_id}"
-            )
+            raise LocalUnavailable(f"unknown LAN IP for gateway {gateway.name or gateway.dev_id}")
         try:
             import tinytuya
         except ImportError as e:
-            raise LocalIndisponible("tinytuya non installé") from e
+            raise LocalUnavailable("tinytuya not installed") from e
         self._tt = tinytuya
         self._p = tinytuya.Device(
             gateway.dev_id, gateway.ip, gateway.local_key, version=3.5, persist=True
         )
         self._p.set_socketTimeout(3)
         self._subs: dict[str, Any] = {}
-        self._battement = time.time()
+        self._heartbeat_at = time.time()
 
     def _sub(self, dev_id: str, node_id: str) -> Any:
         if dev_id not in self._subs:
             self._subs[dev_id] = self._tt.Device(dev_id, cid=node_id, parent=self._p)
         return self._subs[dev_id]
 
-    def envoyer(self, dev_id: str, node_id: str, trame: bytes) -> None:
-        self._sub(dev_id, node_id).set_value("198", base64.b64encode(trame).decode(), nowait=True)
+    def send(self, dev_id: str, node_id: str, frame: bytes) -> None:
+        self._sub(dev_id, node_id).set_value("198", base64.b64encode(frame).decode(), nowait=True)
 
-    def envoyer_dp(self, dev_id: str, node_id: str, dp: str, valeur: Any) -> None:
-        """Publie une valeur sur un DP de la tête (hors tunnel) : dérogation de consigne (171),
-        réglages de pièce (116, 30). Fire-and-forget : la passerelle accuse par rafraîchissement."""
-        self._sub(dev_id, node_id).set_value(dp, valeur, nowait=True)
+    def send_dp(self, dev_id: str, node_id: str, dp: str, value: Any) -> None:
+        """Publish a value on a head DP (outside the tunnel): setpoint override (171), room settings
+        (116, 30). Fire-and-forget: the gateway acknowledges via a refresh."""
+        self._sub(dev_id, node_id).set_value(dp, value, nowait=True)
 
-    def recevoir(self) -> tuple[str | None, dict[str, Any]] | None:
-        if time.time() - self._battement > 20:
+    def receive(self) -> tuple[str | None, dict[str, Any]] | None:
+        if time.time() - self._heartbeat_at > 20:
             with contextlib.suppress(Exception):
                 self._p.heartbeat(nowait=True)
-            self._battement = time.time()
+            self._heartbeat_at = time.time()
         try:
             m = self._p.receive()
         except Exception:  # noqa: BLE001
@@ -394,334 +390,341 @@ class LocalLink:
             return None
         return (m.get("cid") or (m.get("data") or {}).get("cid"), d)
 
-    def fermer(self) -> None:
+    def close(self) -> None:
         with contextlib.suppress(Exception):
             self._p.close()
 
 
-def demander(
-    lien: Any,
+def request(
+    link: Any,
     dev_id: str,
     node_id: str,
-    trame: bytes,
-    accepte: Callable[[dict[str, Any]], Any],
-    duree: float = 12,
-    essais: int = 2,
+    frame: bytes,
+    accept: Callable[[dict[str, Any]], Any],
+    duration: float = 12,
+    attempts: int = 2,
 ) -> Any:
-    """Envoie une trame par le tunnel et attend la réponse que `accepte` reconnaît (None sinon)."""
-    for _ in range(essais):
-        lien.envoyer(dev_id, node_id, trame)
+    """Send a frame through the tunnel and wait for the response `accept` recognises (None else)."""
+    for _ in range(attempts):
+        link.send(dev_id, node_id, frame)
         t0 = time.time()
-        while time.time() - t0 < duree:
-            r = lien.recevoir()
+        while time.time() - t0 < duration:
+            r = link.receive()
             if not r or r[0] != node_id or "199" not in r[1]:
                 continue
             try:
-                f = decoder_trame(base64.b64decode(r[1]["199"]))
+                f = decode_frame(base64.b64decode(r[1]["199"]))
             except (ValueError, TypeError):
                 f = None
             if f and f["cluster"] == CLUSTER_THERMOSTAT:
-                v = accepte(f)
+                v = accept(f)
                 if v is not None:
                     return v
     return None
 
 
-def lire_attributs(
-    lien: Any, dev_id: str, node_id: str, table: list[tuple[int, str]], fabricant: bool, **kw: Any
+def read_attributes(
+    link: Any,
+    dev_id: str,
+    node_id: str,
+    table: list[tuple[int, str]],
+    manufacturer: bool,
+    **kw: Any,
 ) -> dict[str, Any] | None:
     ids = [a for a, _ in table]
 
-    def accepte(f: dict[str, Any]) -> Any:
-        if f["specifique"] or f["commande"] != 0x01 or bool(f["fabricant"]) != fabricant:
+    def accept(f: dict[str, Any]) -> Any:
+        if f["specific"] or f["command"] != 0x01 or bool(f["manufacturer"]) != manufacturer:
             return None
-        v = decoder_attributs(f["charge"])
+        v = decode_attributes(f["payload"])
         return v if ids[0] in v else None
 
-    v = demander(lien, dev_id, node_id, trame_lire_attributs(ids, fabricant), accepte, **kw)
-    return None if v is None else nommer(v, table)
+    v = request(link, dev_id, node_id, frame_read_attributes(ids, manufacturer), accept, **kw)
+    return None if v is None else name_attributes(v, table)
 
 
-def lire_prechauffage(lien: Any, dev_id: str, node_id: str, **kw: Any) -> bool | None:
-    """Pré-chauffage réel d'une tête (attribut standard 0x0025, bit 1). None si pas de réponse."""
-    a = lire_attributs(lien, dev_id, node_id, ATTRIBUTS_STD, False, **kw)
-    return None if a is None else a.get("pre_chauffage")
+def read_preheat(link: Any, dev_id: str, node_id: str, **kw: Any) -> bool | None:
+    """A head's real preheat (standard attribute 0x0025, bit 1). None if no response."""
+    a = read_attributes(link, dev_id, node_id, ATTRS_STD, False, **kw)
+    return None if a is None else a.get("preheat")
 
 
-def lire_jour(
-    lien: Any, dev_id: str, node_id: str, jour: str, **kw: Any
+def read_day(
+    link: Any, dev_id: str, node_id: str, day: str, **kw: Any
 ) -> list[dict[str, Any]] | None:
-    def accepte(f: dict[str, Any]) -> Any:
-        if not f["specifique"] or f["commande"] != 0x00 or f["fabricant"] or len(f["charge"]) < 3:
+    def accept(f: dict[str, Any]) -> Any:
+        if not f["specific"] or f["command"] != 0x00 or f["manufacturer"] or len(f["payload"]) < 3:
             return None
-        bit, tr = decoder_programme(f["charge"])
-        return tr if bit == BIT_JOUR[jour] else None
+        bit, tr = decode_schedule(f["payload"])
+        return tr if bit == DAY_BIT[day] else None
 
-    return demander(lien, dev_id, node_id, trame_lire_programme(jour), accepte, **kw)
+    return request(link, dev_id, node_id, frame_read_schedule(day), accept, **kw)
 
 
-def lire_programme(lien: Any, dev_id: str, node_id: str) -> dict[str, list[dict[str, Any]]]:
-    """Programme hebdomadaire des 7 jours d'une tête (par le tunnel)."""
-    prog: dict[str, list[dict[str, Any]]] = {}
-    for j in JOURS:
-        tr = lire_jour(lien, dev_id, node_id, j)
+def read_schedule(link: Any, dev_id: str, node_id: str) -> dict[str, list[dict[str, Any]]]:
+    """A head's 7-day weekly schedule (through the tunnel)."""
+    sched: dict[str, list[dict[str, Any]]] = {}
+    for d in WEEKDAYS:
+        tr = read_day(link, dev_id, node_id, d)
         if tr is not None:
-            prog[j] = tr
-    return prog
+            sched[d] = tr
+    return sched
 
 
-def lire_mode_programmation(lien: Any, dev_id: str, node_id: str, **kw: Any) -> int | None:
-    """Valeur brute 0x0025 (bit 0 programme, bit 1 pré-chauffage). None sans réponse."""
-    a = lire_attributs(lien, dev_id, node_id, ATTRIBUTS_STD, False, **kw)
-    return None if a is None else a.get("mode_programmation")
+def read_programming_mode(link: Any, dev_id: str, node_id: str, **kw: Any) -> int | None:
+    """Raw 0x0025 value (bit 0 schedule, bit 1 preheat). None without a response."""
+    a = read_attributes(link, dev_id, node_id, ATTRS_STD, False, **kw)
+    return None if a is None else a.get("programming_mode")
 
 
-def nouveau_mode_prechauffage(mode_actuel: int, actif: bool) -> int:
-    """Nouvelle valeur 0x0025 : (dés)active le bit pré-chauffage (0x02), bit programme préservé."""
-    return (mode_actuel | 0x02) if actif else (mode_actuel & ~0x02)
+def new_preheat_mode(current_mode: int, active: bool) -> int:
+    """New 0x0025 value: (de)activate the preheat bit (0x02), schedule bit preserved."""
+    return (current_mode | 0x02) if active else (current_mode & ~0x02)
 
 
-def ecrire_attributs(
-    lien: Any,
+def write_attributes(
+    link: Any,
     dev_id: str,
     node_id: str,
-    enregistrements: list[tuple[int, int, int]],
-    fabricant: bool,
+    records: list[tuple[int, int, int]],
+    manufacturer: bool,
 ) -> int | None:
-    """Écrit des attributs par le tunnel. Renvoie le 1er statut (0 = accepté), None sans réponse."""
+    """Write attributes through the tunnel. Returns the 1st status (0 = accepted), else None."""
 
-    def accepte(f: dict[str, Any]) -> Any:
-        if f["specifique"] or f["commande"] != 0x04 or bool(f["fabricant"]) != fabricant:
+    def accept(f: dict[str, Any]) -> Any:
+        if f["specific"] or f["command"] != 0x04 or bool(f["manufacturer"]) != manufacturer:
             return None
-        return f["charge"][0] if f["charge"] else None
+        return f["payload"][0] if f["payload"] else None
 
-    trame = trame_ecrire_attributs(enregistrements, fabricant)
-    return demander(lien, dev_id, node_id, trame, accepte, duree=10, essais=1)
+    frame = frame_write_attributes(records, manufacturer)
+    return request(link, dev_id, node_id, frame, accept, duration=10, attempts=1)
 
 
-def ecrire_prechauffage(
-    lien: Any, dev_id: str, node_id: str, actif: bool, mode_actuel: int
+def write_preheat(
+    link: Any, dev_id: str, node_id: str, active: bool, current_mode: int
 ) -> int | None:
-    """Active/désactive le pré-chauffage réel (0x0025 bit 1), bit programme préservé.
+    """Enable/disable the real preheat (0x0025 bit 1), schedule bit preserved.
 
-    L'attribut 0x0025 « Programming Operation Mode » du cluster thermostat est un bitmap8 : il doit
-    s'écrire avec le type ZCL 0x18 (et non 0x30 enum8, que la tête rejette). Type validé par le
-    connecteur MCP de référence (constat réel du 15/11/2026).
+    Attribute 0x0025 "Programming Operation Mode" of the thermostat cluster is a bitmap8: it must be
+    written with ZCL type 0x18 (and not 0x30 enum8, which the head rejects). Type validated by the
+    reference MCP connector (real observation of 2026-11-15).
     """
-    nouveau = nouveau_mode_prechauffage(mode_actuel, actif)
-    return ecrire_attributs(lien, dev_id, node_id, [(0x0025, 0x18, nouveau)], fabricant=False)
+    new = new_preheat_mode(current_mode, active)
+    return write_attributes(link, dev_id, node_id, [(0x0025, 0x18, new)], manufacturer=False)
 
 
-def ecrire_jour(
-    lien: Any, dev_id: str, node_id: str, jour: str, transitions: list[dict[str, Any]]
+def write_day(
+    link: Any, dev_id: str, node_id: str, day: str, transitions: list[dict[str, Any]]
 ) -> int | None:
-    """SetWeeklySchedule (0x01) pour UN jour par le tunnel. Renvoie le statut de la tête (0 =
-    accepté) dans la réponse par défaut ZCL (0x0B), None sans réponse. R2 : la tête propage ensuite
-    toute la semaine. R1 est validée en amont (``verifier_transitions``, aussi dans la trame)."""
+    """SetWeeklySchedule (0x01) for ONE day through the tunnel. Returns the head's status (0 =
+    accepted) in the default ZCL response (0x0B), None without a response. R2: the head then
+    propagates the whole week. R1 is validated upstream (``check_transitions``, also in frame)."""
 
-    def accepte(f: dict[str, Any]) -> Any:
-        c = f["charge"]
-        return c[1] if f["commande"] == 0x0B and len(c) >= 2 and c[0] == 0x01 else None
+    def accept(f: dict[str, Any]) -> Any:
+        c = f["payload"]
+        return c[1] if f["command"] == 0x0B and len(c) >= 2 and c[0] == 0x01 else None
 
-    trame = trame_ecrire_programme(jour, transitions)
-    return demander(lien, dev_id, node_id, trame, accepte, duree=10, essais=1)
-
-
-def ecrire_degommage(lien: Any, dev_id: str, node_id: str, jour: str, heure: str) -> int | None:
-    """Règle le dégommage de la vanne (0x4010/0x4011, fabricant). Statut 0 = accepté."""
-    return ecrire_attributs(lien, dev_id, node_id, degommage_valeurs(jour, heure), fabricant=True)
+    frame = frame_write_schedule(day, transitions)
+    return request(link, dev_id, node_id, frame, accept, duration=10, attempts=1)
 
 
-def ecrire_consigne(lien: Any, dev_id: str, node_id: str, celsius: float) -> int:
-    """Dérogation de consigne « maintenant » par le DP 171 (centièmes). Fire-and-forget : renvoie la
-    valeur publiée (vérification par relecture ultérieure). Hors programme : dérogation jusqu'au
-    prochain changement d'horaire de la tête (pas une consigne durable, cf. contrat R3/R5)."""
-    val = valeur_consigne(celsius)
-    lien.envoyer_dp(dev_id, node_id, DP_CONSIGNE, val)
+def write_descale(link: Any, dev_id: str, node_id: str, day: str, hour: str) -> int | None:
+    """Set the valve descaling (0x4010/0x4011, manufacturer). Status 0 = accepted."""
+    return write_attributes(link, dev_id, node_id, descale_records(day, hour), manufacturer=True)
+
+
+def write_setpoint(link: Any, dev_id: str, node_id: str, celsius: float) -> int:
+    """ "Now" setpoint override via DP 171 (hundredths). Fire-and-forget: returns the published
+    value (verified by a later read-back). Outside the schedule: an override until the head's
+    next change (not a durable setpoint, cf. contract R3/R5)."""
+    val = setpoint_value(celsius)
+    link.send_dp(dev_id, node_id, DP_SETPOINT, val)
     return val
 
 
-def ecrire_reglage_dp(lien: Any, dev_id: str, node_id: str, reglage: str, valeur: Any) -> Any:
-    """Écrit un réglage de pièce par son DP (``detection_fenetre`` → 116, ``verrouillage_enfant`` →
-    30). Fire-and-forget : renvoie la valeur publiée (type coercé selon REGLAGES_DP)."""
-    if reglage not in REGLAGES_DP:
-        raise LocalErreur(f"réglage DP inconnu : {reglage} (connus : {', '.join(REGLAGES_DP)})")
-    dp, typ = REGLAGES_DP[reglage]
-    val = typ(valeur)
-    lien.envoyer_dp(dev_id, node_id, dp, val)
+def write_setting_dp(link: Any, dev_id: str, node_id: str, setting: str, value: Any) -> Any:
+    """Write a room setting by its DP (``window_detection`` -> 116, ``child_lock`` -> 30).
+    Fire-and-forget: returns the published value (type coerced per SETTINGS_DP)."""
+    if setting not in SETTINGS_DP:
+        raise LocalError(f"unknown DP setting: {setting} (known: {', '.join(SETTINGS_DP)})")
+    dp, typ = SETTINGS_DP[setting]
+    val = typ(value)
+    link.send_dp(dev_id, node_id, dp, val)
     return val
 
 
-def lire_detection_fenetre(lien: Any, dev_id: str, node_id: str, **kw: Any) -> bool | None:
-    """Lit l'attribut Danfoss 0x4051 (détection de fenêtre ouverte, bool). None sans réponse."""
-    a = lire_attributs(lien, dev_id, node_id, [(0x4051, "detection_fenetre")], True, **kw)
-    return None if a is None else a.get("detection_fenetre")
+def read_window_detection(link: Any, dev_id: str, node_id: str, **kw: Any) -> bool | None:
+    """Read Danfoss attribute 0x4051 (open-window detection, bool). None without a response."""
+    a = read_attributes(link, dev_id, node_id, [(0x4051, "window_detection")], True, **kw)
+    return None if a is None else a.get("window_detection")
 
 
-def lire_tete(lien: Any, dev_id: str, node_id: str, programme: bool = True) -> dict[str, Any]:
-    """Relevé complet d'une tête par le tunnel : attributs standard + Danfoss (A et B) et, si
-    ``programme``, les transitions des 7 jours. ``injoignable`` si rien ne répond. Best-effort : un
-    relevé d'attributs qui échoue est noté dans ``manques`` sans interrompre les autres."""
-    e: dict[str, Any] = {"attributs": {}, "programme": {}, "manques": []}
-    t0, echecs = time.time(), 0
-    for nom, table, fab in (
-        ("standard", ATTRIBUTS_STD, False),
-        ("danfoss_a", ATTRIBUTS_DANFOSS_A, True),
-        ("danfoss_b", ATTRIBUTS_DANFOSS_B, True),
+def read_head(link: Any, dev_id: str, node_id: str, schedule: bool = True) -> dict[str, Any]:
+    """Full survey of a head through the tunnel: standard + Danfoss attributes (A and B) and, if
+    ``schedule``, the transitions of the 7 days. ``unreachable`` if nothing responds. Best-effort:
+    attribute survey that fails is noted in ``missing`` without interrupting the others."""
+    e: dict[str, Any] = {"attributes": {}, "schedule": {}, "missing": []}
+    t0, failures = time.time(), 0
+    for name, table, man in (
+        ("standard", ATTRS_STD, False),
+        ("danfoss_a", ATTRS_DANFOSS_A, True),
+        ("danfoss_b", ATTRS_DANFOSS_B, True),
     ):
-        a = lire_attributs(lien, dev_id, node_id, table, fab)
+        a = read_attributes(link, dev_id, node_id, table, man)
         if a is None:
-            e["manques"].append(nom)
-            echecs += 1
-            if echecs >= 2 and not e["attributs"]:
+            e["missing"].append(name)
+            failures += 1
+            if failures >= 2 and not e["attributes"]:
                 break
         else:
-            e["attributs"].update(a)
-    if not e["attributs"]:
-        e["injoignable"] = True
-    elif programme:
-        for j in JOURS:
-            tr = lire_jour(lien, dev_id, node_id, j)
+            e["attributes"].update(a)
+    if not e["attributes"]:
+        e["unreachable"] = True
+    elif schedule:
+        for d in WEEKDAYS:
+            tr = read_day(link, dev_id, node_id, d)
             if tr is None:
-                e["manques"].append(j)
+                e["missing"].append(d)
             else:
-                e["programme"][j] = tr
-    e["duree_s"] = round(time.time() - t0)
+                e["schedule"][d] = tr
+    e["duration_s"] = round(time.time() - t0)
     return e
 
 
-def releve(
+def survey(
     gateways: dict[str, GatewayKey],
     heads: list[Any],
-    ouvrir: Callable[[GatewayKey], Any] = LocalLink,
-    progres: Callable[[str, dict[str, Any]], None] | None = None,
+    open_link: Callable[[GatewayKey], Any] = LocalLink,
+    progress: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Relevé robuste de plusieurs têtes, une passerelle par fil (lecture seule, ~8 s par tête).
+    """Robust survey of several heads, one gateway per thread (read-only, ~8 s per head).
 
-    ``heads`` : objets exposant ``dev_id``, ``node_id`` et ``gateway_id`` (p. ex. ``manager.Head``).
-    Résultat indexé par ``dev_id``. Best-effort : une passerelle injoignable marque ses têtes
-    ``injoignable``, et chaque tête est isolée des autres (aucune exception propagée)."""
+    ``heads``: objects exposing ``dev_id``, ``node_id`` and ``gateway_id`` (e.g. ``manager.Head``).
+    Result indexed by ``dev_id``. Best-effort: an unreachable gateway marks its heads unreachable,
+    and each head is isolated from the others (no exception propagated)."""
     res: dict[str, dict[str, Any]] = {}
-    garde = threading.Lock()
-    par_gw: dict[str, list[Any]] = {}
+    lock = threading.Lock()
+    by_gw: dict[str, list[Any]] = {}
     for h in heads:
         if h.gateway_id in gateways:
-            par_gw.setdefault(h.gateway_id, []).append(h)
+            by_gw.setdefault(h.gateway_id, []).append(h)
 
-    def fil(gw_id: str, miennes: list[Any]) -> None:
+    def worker(gw_id: str, mine: list[Any]) -> None:
         try:
-            lien = ouvrir(gateways[gw_id])
-        except Exception as ex:  # noqa: BLE001 - passerelle injoignable
-            with garde:
-                for h in miennes:
+            link = open_link(gateways[gw_id])
+        except Exception as ex:  # noqa: BLE001 - gateway unreachable
+            with lock:
+                for h in mine:
                     res[h.dev_id] = {
-                        "attributs": {},
-                        "programme": {},
-                        "injoignable": True,
-                        "erreur": str(ex)[:80],
+                        "attributes": {},
+                        "schedule": {},
+                        "unreachable": True,
+                        "error": str(ex)[:80],
                     }
             return
         try:
-            for h in miennes:
+            for h in mine:
                 try:
-                    e = lire_tete(lien, h.dev_id, h.node_id)
-                except Exception as ex:  # noqa: BLE001 - on isole chaque tête
+                    e = read_head(link, h.dev_id, h.node_id)
+                except Exception as ex:  # noqa: BLE001 - isolate each head
                     e = {
-                        "attributs": {},
-                        "programme": {},
-                        "injoignable": True,
-                        "erreur": str(ex)[:80],
+                        "attributes": {},
+                        "schedule": {},
+                        "unreachable": True,
+                        "error": str(ex)[:80],
                     }
-                with garde:
+                with lock:
                     res[h.dev_id] = e
-                if progres:
-                    progres(h.dev_id, e)
+                if progress:
+                    progress(h.dev_id, e)
         finally:
-            lien.fermer()
+            link.close()
 
-    fils = [threading.Thread(target=fil, args=(g, m), daemon=True) for g, m in par_gw.items()]
-    for f in fils:
-        f.start()
-    for f in fils:
-        f.join(timeout=60)
+    threads = [threading.Thread(target=worker, args=(g, m), daemon=True) for g, m in by_gw.items()]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
     return res
 
 
-# --- synthèse et comparaison (fonctions pures) ------------------------------------------------
+# --- summary and comparison (pure functions) --------------------------------------------------
 
 
-def resumer_tete(e: dict[str, Any]) -> dict[str, Any]:
-    """Résumé d'un relevé de tête : plages de confort par jour, confort/réduit et attributs."""
-    if not e.get("attributs"):
-        return {"injoignable": True}
-    p = e.get("programme") or {}
-    cs = [t["c"] for j in JOURS for t in p.get(j, [])]
+def summarize_head(e: dict[str, Any]) -> dict[str, Any]:
+    """Summary of a head survey: comfort slots per day, comfort/setback and attributes."""
+    if not e.get("attributes"):
+        return {"unreachable": True}
+    p = e.get("schedule") or {}
+    cs = [t["c"] for d in WEEKDAYS for t in p.get(d, [])]
     return {
-        "plages": {
-            j: [f"{x['debut']}–{x['fin']}" for x in plages(p.get(j))] for j in JOURS if j in p
+        "slots": {
+            d: [f"{x['start']}–{x['end']}" for x in comfort_slots(p.get(d))]
+            for d in WEEKDAYS
+            if d in p
         },
-        "confort": max(cs) if cs else None,
-        "reduit": min(cs) if cs else None,
-        **e["attributs"],
-        **({"manques": e["manques"]} if e.get("manques") else {}),
+        "comfort": max(cs) if cs else None,
+        "setback": min(cs) if cs else None,
+        **e["attributes"],
+        **({"missing": e["missing"]} if e.get("missing") else {}),
     }
 
 
-# Réglages suivis d'un relevé à l'autre (écarts remontés par ``comparer``).
-REGLAGES_SUIVIS = (
-    "borne_haute",
-    "borne_basse",
-    "mode_programmation",
-    "degommage_jour",
-    "degommage_heure",
-    "vitesse_regulation",
-    "detection_fenetre",
-    "adaptation_faite",
-    "radiateur_couvert",
-    "equilibrage",
+# Settings tracked from one survey to the next (differences reported by ``compare``).
+TRACKED_SETTINGS = (
+    "max_setpoint",
+    "min_setpoint",
+    "programming_mode",
+    "descale_day",
+    "descale_time",
+    "control_speed",
+    "window_detection",
+    "adaptation_done",
+    "radiator_covered",
+    "load_balancing",
 )
 
 
-def comparer(
-    reference: dict[str, dict[str, Any]], nouveau: dict[str, dict[str, Any]]
+def compare(
+    reference: dict[str, dict[str, Any]], current: dict[str, dict[str, Any]]
 ) -> dict[str, Any]:
-    """Écarts d'un relevé par rapport à une référence : programmes, réglages suivis, injoignables.
+    """Differences of a survey against a reference: schedules, tracked settings, unreachable heads.
 
-    ``reference`` et ``nouveau`` sont indexés de la même façon (``dev_id`` ou nom)."""
-    ra = {n: e for n, e in reference.items() if e.get("attributs")}
-    rb = {n: e for n, e in nouveau.items() if e.get("attributs")}
-    prog = []
+    ``reference`` and ``current`` are indexed the same way (``dev_id`` or name)."""
+    ra = {n: e for n, e in reference.items() if e.get("attributes")}
+    rb = {n: e for n, e in current.items() if e.get("attributes")}
+    sched = []
     for n in sorted(rb):
         if n in ra:
-            for j in JOURS:
-                x, y = ra[n]["programme"].get(j), rb[n]["programme"].get(j)
+            for d in WEEKDAYS:
+                x, y = ra[n]["schedule"].get(d), rb[n]["schedule"].get(d)
                 if x != y and y is not None:
-                    prog.append({"tete": n, "jour": j, "avant": x, "apres": y})
-    regl = [
+                    sched.append({"head": n, "day": d, "before": x, "after": y})
+    settings = [
         {
-            "tete": n,
-            "reglage": k,
-            "avant": ra[n]["attributs"].get(k),
-            "apres": rb[n]["attributs"].get(k),
+            "head": n,
+            "setting": k,
+            "before": ra[n]["attributes"].get(k),
+            "after": rb[n]["attributes"].get(k),
         }
         for n in sorted(rb)
         if n in ra
-        for k in REGLAGES_SUIVIS
-        if ra[n]["attributs"].get(k) != rb[n]["attributs"].get(k)
+        for k in TRACKED_SETTINGS
+        if ra[n]["attributes"].get(k) != rb[n]["attributes"].get(k)
     ]
 
-    def chauffe(e: dict[str, Any], j: str) -> bool:
-        return bool(plages(e["programme"].get(j)))
+    def heating(e: dict[str, Any], d: str) -> bool:
+        return bool(comfort_slots(e["schedule"].get(d)))
 
     return {
-        "relevees": len(rb),
-        "tentees": len(nouveau),
-        "injoignables": sorted(n for n, e in nouveau.items() if not e.get("attributs")),
-        "nouvelles_injoignables": sorted(n for n in ra if n in nouveau and n not in rb),
-        "programmes_modifies": prog,
-        "reglages_modifies": regl,
-        "chauffent_mercredi": sorted(n for n, e in rb.items() if chauffe(e, "mercredi")),
-        "chauffent_week_end": sorted(
-            n for n, e in rb.items() if chauffe(e, "samedi") or chauffe(e, "dimanche")
+        "surveyed": len(rb),
+        "attempted": len(current),
+        "unreachable": sorted(n for n, e in current.items() if not e.get("attributes")),
+        "newly_unreachable": sorted(n for n in ra if n in current and n not in rb),
+        "schedules_changed": sched,
+        "settings_changed": settings,
+        "heating_wednesday": sorted(n for n, e in rb.items() if heating(e, "wednesday")),
+        "heating_weekend": sorted(
+            n for n, e in rb.items() if heating(e, "saturday") or heating(e, "sunday")
         ),
     }

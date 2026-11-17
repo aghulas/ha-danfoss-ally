@@ -1,6 +1,6 @@
-"""Tests d'intégration des actions et commandes WebSocket (harnais hass).
+"""Integration tests of the actions and WebSocket commands (hass harness).
 
-Le serveur WebSocket ne démarre pas dans cet environnement (import de la pile HTTP en échec, hors
+The WebSocket server does not start in this environment (HTTP stack import fails, outside
 de ce code) : on appelle les handlers WebSocket en direct avec une fausse connexion.
 """
 
@@ -16,9 +16,9 @@ from custom_components.danfoss_ally_cloud import operations as ops
 from custom_components.danfoss_ally_cloud import websocket_api as ws
 from custom_components.danfoss_ally_cloud.const import DOMAIN
 
-from .common import ENTRY_DATA, FakeCloudClient, tete
+from .common import ENTRY_DATA, FakeCloudClient, head
 
-_GROUPS = [{"group_id": "13000000", "nom": "Salle 1", "pid": "03wvrwpv", "nb_tetes": 2}]
+_GROUPS = [{"group_id": "13000000", "name": "Salle 1", "pid": "03wvrwpv", "head_count": 2}]
 _MEMBERS = {"13000000": ["a", "b"]}
 _ROOM_TARGET = {"type": "room", "id": "13000000"}
 _VALID_DAYS = {"mon": [{"start": "08:30", "end": "17:30"}]}
@@ -35,7 +35,7 @@ async def setup(hass: HomeAssistant):
     entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, unique_id="compte@exemple.fr")
     entry.add_to_hass(hass)
     fake = FakeCloudClient(
-        devices=[tete("a", "Salle 1 #2"), tete("b", "Salle 1 #3")],
+        devices=[head("a", "Salle 1 #2"), head("b", "Salle 1 #3")],
         groups=_GROUPS,
         members=_MEMBERS,
     )
@@ -147,7 +147,7 @@ async def test_ws_rooms_validate_info(setup):
     assert conn.results[3]["is_admin"] is True and conn.results[3]["version"]
 
 
-async def test_ws_schedule_get_set_restore_et_refus(setup):
+async def test_ws_schedule_get_set_restore_and_refusal(setup):
     hass, _, fake = setup
     conn = _FakeConn(is_admin=True)
     ws.ws_schedule_get(hass, conn, {"id": 4, "target": _ROOM_TARGET, "refresh": False})

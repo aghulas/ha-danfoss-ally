@@ -1,7 +1,7 @@
-"""Tests de la pile de signature/chiffrement vendue (clés synthétiques uniquement).
+"""Tests of the vendored signature/encryption stack (synthetic keys only).
 
-Ne valide PAS le protocole réel (fait en réel ailleurs) : vérifie l'intégrité des fonctions pures
-(aller-retour AES-GCM, forme du canonical, présence de la signature)."""
+Does NOT validate the real protocol (done on real hardware elsewhere): checks the integrity of the
+pure functions (AES-GCM round-trip, canonical shape, signature presence)."""
 
 from custom_components.danfoss_ally_cloud.api._tuya import postdata, sign
 
@@ -25,7 +25,7 @@ def test_swap_sign_string_involution():
 def test_canonical_trie_et_filtre():
     params = {"a": "m.test", "v": "1.0", "nonsigne": "x", "et": "3"}
     c = sign.canonical_string(params)
-    # trié alpha, « nonsigne » hors liste blanche donc absent
+    # sorted alpha, "nonsigne" outside the whitelist so absent
     assert c == "a=m.test||et=3||v=1.0"
 
 
@@ -41,4 +41,4 @@ def test_build_request_body_signe():
     }
     out = postdata.build_request_body(params, '{"x":1}', _SIGN_KEY, _ECODE)
     assert "sign" in out and len(out["sign"]) == 64
-    assert "postData" in out  # corps chiffré présent
+    assert "postData" in out  # encrypted body present

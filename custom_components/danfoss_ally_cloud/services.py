@@ -1,8 +1,8 @@
-"""Actions (services) du domaine danfoss_ally_cloud (contrat §5.2).
+"""Actions (services) of the danfoss_ally_cloud domain (contract §5.2).
 
-Même implémentation que les commandes WebSocket (voir `operations.py`). Les écritures refusent un
-utilisateur non administrateur et renvoient un `WriteJob`. Les erreurs du contrat (§5.4) sont
-remontées en `ServiceValidationError` traduites (clé = code stable).
+Same implementation as the WebSocket commands (see `operations.py`). Writes refuse a non-admin user
+and return a `WriteJob`. Contract errors (§5.4) are raised as translated `ServiceValidationError`
+(key = stable code).
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ _GET_JOB = vol.Schema(
 
 
 def _store(hass: HomeAssistant, call: ServiceCall) -> dict:
-    """Store de l'entrée visée (config_entry_id, ou l'unique entrée configurée)."""
+    """Store of the targeted entry (config_entry_id, or the single configured entry)."""
     entries = {
         k: v
         for k, v in hass.data.get(DOMAIN, {}).items()
@@ -63,10 +63,10 @@ def _store(hass: HomeAssistant, call: ServiceCall) -> dict:
     if entry_id is not None:
         store = entries.get(entry_id)
         if store is None:
-            raise ServiceValidationError(f"entrée inconnue : {entry_id}")
+            raise ServiceValidationError(f"unknown entry: {entry_id}")
         return store
     if len(entries) != 1:
-        raise ServiceValidationError("plusieurs comptes configurés : préciser config_entry_id")
+        raise ServiceValidationError("several accounts configured: specify config_entry_id")
     return next(iter(entries.values()))
 
 
@@ -77,7 +77,7 @@ def _raise(err: ops.OperationError) -> NoReturn:
 
 
 def async_register_services(hass: HomeAssistant) -> None:
-    """Enregistre les actions une fois pour le domaine (idempotent)."""
+    """Register the actions once for the domain (idempotent)."""
     if hass.services.has_service(DOMAIN, "get_rooms"):
         return
 
@@ -123,7 +123,7 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def get_write_job(call: ServiceCall) -> dict:
         job = _store(hass, call)[DATA_JOBS].get(call.data["job_id"])
         if job is None:
-            raise ServiceValidationError(f"lot inconnu : {call.data['job_id']}")
+            raise ServiceValidationError(f"unknown job: {call.data['job_id']}")
         return job.to_dict()
 
     reg = hass.services.async_register

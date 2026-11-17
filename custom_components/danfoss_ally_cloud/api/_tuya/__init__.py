@@ -1,10 +1,10 @@
-"""Pile Tuya « voie 1a » vendue depuis danfoss-ally-mcp (reverse validé en réel).
+"""Tuya "path 1a" stack vendored from danfoss-ally-mcp (reverse-engineered, verified on real hw).
 
-Trois modules purs (stdlib + requests + pycryptodome), sans l'app ni frida :
-- ``sign`` : signature HMAC-SHA256 du canonical.
-- ``postdata`` : chiffrement AES-GCM du postData (requête et réponse).
-- ``http`` : client HTTP bas niveau des méthodes ``m.*`` et flux de login.
+Three pure modules (stdlib + requests + pycryptodome), without the app or frida:
+- ``sign``: HMAC-SHA256 signature of the canonical.
+- ``postdata``: AES-GCM encryption of the postData (request and response).
+- ``http``: low-level HTTP client of the ``m.*`` methods and the login flow.
 
-À extraire à terme en bibliothèque partagée avec le connecteur MCP (roadmap v0.6).
-Ne jamais logguer sign_key, sid, ecode ni chKey.
+To extract eventually into a shared library with the MCP connector (roadmap v0.6).
+Never log sign_key, sid, ecode or chKey.
 """

@@ -1,41 +1,42 @@
-# Réutilisation du code existant
+# Reuse of existing code
 
-| Besoin | Où le prendre |
+| Need | Where to take it from |
 |---|---|
-| Client API cloud, signature | `~/dev/danfoss-ally-signing-re` |
-| Récupération des clés passerelles (voie 1a) | `~/dev/danfoss-ally-mcp` → `danfoss_ally_mcp/tuya/pilote_tuya.py` (`cles_etat`, `_parc_1a`, `_lire_maitre`) |
-| Lecture/écriture DP, pièces, programmes | `~/dev/danfoss-ally-mcp` → `tuya/pilote_tuya.py` |
-| Tunnel Zigbee DP 198/199, trames pures | `~/dev/danfoss-ally-mcp` → `danfoss_ally_mcp/local.py` (`trame_*`, `decoder_*`, `Lien`, `releve`) |
-| Décodage code défaut E1..E15 | `~/dev/danfoss-ally-mcp` → `danfoss_ally_mcp/modeles.py` (`decoder_defaut`, `DEFAUTS_BITS`) |
-| Noms officiels des DP | `~/dev/danfoss-app-capture/dp_schema_officiel.md` |
-| Garde-fous d'écriture (modèle) | `~/dev/danfoss-ally-mcp` → `ecritures.py` (validation des valeurs) |
+| Cloud API client, signature | `~/dev/danfoss-ally-signing-re` |
+| Fetching gateway keys (path 1a) | `~/dev/danfoss-ally-mcp` → `danfoss_ally_mcp/tuya/pilote_tuya.py` (`cles_etat`, `_parc_1a`, `_lire_maitre`) |
+| DP read/write, rooms, schedules | `~/dev/danfoss-ally-mcp` → `tuya/pilote_tuya.py` |
+| Zigbee tunnel DP 198/199, pure frames | `~/dev/danfoss-ally-mcp` → `danfoss_ally_mcp/local.py` (`trame_*`, `decoder_*`, `Lien`, `releve`) |
+| Fault-code decoding E1..E15 | `~/dev/danfoss-ally-mcp` → `danfoss_ally_mcp/modeles.py` (`decoder_defaut`, `DEFAUTS_BITS`) |
+| Official DP names | `~/dev/danfoss-app-capture/dp_schema_officiel.md` |
+| Write guard-rails (model) | `~/dev/danfoss-ally-mcp` → `ecritures.py` (value validation) |
 
-Note : le connecteur MCP garde sa logique préparer→confirmer (propre au MCP).
-Dans l'intégration HA, la sûreté d'écriture passe par la validation des valeurs
-et la rédaction des diagnostics, pas par un jeton de confirmation.
+Note: the MCP connector keeps its prepare→confirm logic (specific to the MCP). In the HA
+integration, write safety comes from value validation and diagnostics redaction, not from a
+confirmation token.
 
-## Extraction en bibliothèque (v0.6)
+## Extraction into a library (v0.6)
 
-La couche `custom_components/danfoss_ally_cloud/api/` est désormais **sans dépendance Home
-Assistant** et packagée sous le nom **`pydanfoss-cloud`** par le `pyproject.toml` du dépôt
-(`package-dir` pointant sur ce dossier, source unique, sans déplacement). Voir
+The `custom_components/danfoss_ally_cloud/api/` layer is now **free of any Home Assistant
+dependency** and packaged under the name **`pydanfoss-cloud`** by the repo's `pyproject.toml`
+(`package-dir` pointing at this folder, single source, without moving files). See
 `custom_components/danfoss_ally_cloud/api/README.md`.
 
-- L'intégration continue de « vendre » ce code (import relatif) → installation HACS autonome.
-- Le connecteur MCP pourra remplacer sa copie (`tuya/`, `local.py`, `modeles.py`) par une dépendance
-  `pydanfoss-cloud` une fois la bibliothèque **publiée sur PyPI** (repo/compte à décider par Rémi).
-- Ensuite seulement, l'intégration référencera la version dans `manifest.json -> requirements`.
+- The integration keeps "vendoring" this code (relative import) → self-contained HACS install.
+- The MCP connector can replace its copy (`tuya/`, `local.py`, `modeles.py`) with a
+  `pydanfoss-cloud` dependency once the library is **published to PyPI** (repo/account to be decided
+  by Rémi).
+- Only then will the integration reference the version in `manifest.json -> requirements`.
 
-## Voie officielle Danfoss (OAuth2) : hors lib, hors intégration
+## Official Danfoss path (OAuth2): outside the lib, outside the integration
 
-La **voie officielle Danfoss** — API publique `api.danfoss.com`, authentification **OAuth2** avec
-application développeur et clé API — **reste dans le connecteur MCP `danfoss-ally-mcp`** (pour le
-diagnostic et la compatibilité) et **n'entre ni dans `pydanfoss-cloud` ni dans l'intégration**.
+The **official Danfoss path** — public API `api.danfoss.com`, **OAuth2** authentication with a
+developer app and an API key — **stays in the MCP connector `danfoss-ally-mcp`** (for diagnostics
+and compatibility) and **enters neither `pydanfoss-cloud` nor the integration**.
 
-C'est un **choix de conception assumé**, pas un manque : l'intégration et la bibliothèque sont
-**cloud-first voie 1a**, c.-à-d. la même API cloud que l'application mobile, précisément pour
-**éviter l'application développeur et son quota partagé** (voir README et `architecture.md`). Faire
-entrer OAuth2 dans la lib ré-introduirait exactement la dépendance que ce projet écarte.
+This is a **deliberate design choice**, not a gap: the integration and the library are
+**cloud-first path 1a**, i.e. the same cloud API as the mobile app, precisely to **avoid the
+developer app and its shared quota** (see README and `architecture.md`). Bringing OAuth2 into the
+lib would reintroduce exactly the dependency this project avoids.
 
-**Donc : ne pas porter la voie OAuth2 dans `pydanfoss-cloud`.** Si un besoin de diagnostic l'exige,
-il passe par le connecteur MCP, qui la conserve à part.
+**So: do not port the OAuth2 path into `pydanfoss-cloud`.** If a diagnostic need requires it, it
+goes through the MCP connector, which keeps it separate.

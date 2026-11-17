@@ -1,12 +1,12 @@
-"""Client HTTP bas niveau de l'API mobile Tuya (app Danfoss Ally), 100 % hors app.
+"""Low-level HTTP client of the Tuya mobile API (Danfoss Ally app), fully outside the app.
 
-S'appuie sur ``sign`` (HMAC-SHA256) + ``postdata`` (AES-GCM). Endpoint selon le datacenter
-(EU/US/CN/IN). En-tête ``User-Agent: Thing-UA=...`` obligatoire. Matériel requis :
-- SESSION : ``sid`` et ``ecode`` issus du login (stables tant que l'app reste connectée).
-- INSTALLATION : ``sign_key``, ``deviceId``, ``chKey`` (capturés une fois, stables).
+Built on ``sign`` (HMAC-SHA256) + ``postdata`` (AES-GCM). Endpoint per datacenter (EU/US/CN/IN).
+The ``User-Agent: Thing-UA=...`` header is mandatory. Material required:
+- SESSION: ``sid`` and ``ecode`` from the login (stable as long as the app stays logged in).
+- INSTALLATION: ``sign_key``, ``deviceId``, ``chKey`` (captured once, stable).
 
-Reverse et flux de login validés en réel (voir danfoss-ally-mcp/tuya/client_http.py). Appels
-synchrones (requests) : l'intégration HA les exécute dans l'executor.
+Reverse engineering and login flow verified on real hardware (see danfoss-ally-mcp/tuya/
+client_http.py). Synchronous calls (requests): the HA integration runs them in the executor.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ DEFAULT_OS = "Android"
 
 
 class TuyaApiError(RuntimeError):
-    """Erreur renvoyée par le cloud (enveloppe success=false ou errorCode présent)."""
+    """Error returned by the cloud (envelope success=false or errorCode present)."""
 
     def __init__(self, code, msg, raw):
         super().__init__(f"{code}: {msg}")
@@ -52,7 +52,7 @@ class TuyaApiError(RuntimeError):
 
 
 class TuyaHttpClient:
-    """Client bas niveau des méthodes ``m.*`` (lecture/écriture), 100 % hors app."""
+    """Low-level client of the ``m.*`` methods (read/write), fully outside the app."""
 
     def __init__(
         self,
@@ -112,10 +112,10 @@ class TuyaHttpClient:
         raw: bool = False,
         extra_params: dict | None = None,
     ):
-        """Envoie une requête ``m.*`` signée+chiffrée et renvoie le ``result`` déchiffré.
+        """Send a signed+encrypted ``m.*`` request and return the decrypted ``result``.
 
-        `extra_params` : paramètres d'URL non signés (hors SIGN_WHITELIST), p.ex. ``gid``.
-        Lève TuyaApiError si le cloud renvoie une erreur.
+        `extra_params`: unsigned URL params (outside SIGN_WHITELIST), e.g. ``gid``.
+        Raises TuyaApiError if the cloud returns an error.
         """
         params = self._base_params(api, version, et)
         if extra_params:
@@ -130,7 +130,7 @@ class TuyaHttpClient:
         if env.get("errorCode") or env.get("success") is False:
             raise TuyaApiError(env.get("errorCode"), env.get("errorMsg"), env)
         result = env.get("result")
-        if isinstance(result, str):  # et=3 : result chiffré -> déchiffrer + gunzip
+        if isinstance(result, str):  # et=3: encrypted result -> decrypt + gunzip
             inner = json.loads(decrypt_response(result, request_id, self.ecode, self.sign_key))
             if inner.get("success") is False or inner.get("errorCode"):
                 raise TuyaApiError(inner.get("errorCode"), inner.get("errorMsg"), inner)
@@ -141,18 +141,18 @@ class TuyaHttpClient:
         self.http.close()
 
 
-# --- LOGIN / bootstrap de session -------------------------------------------------------------
-# Flux e-mail + mot de passe, confirmé par capture. 3 requêtes et=3 SANS sid (pré-session) mais
-# AVEC le chKey d'installation. chKey est du matériel d'INSTALLATION (stable), pas de session.
+# --- LOGIN / session bootstrap ----------------------------------------------------------------
+# Email + password flow, confirmed by capture. 3 et=3 requests WITHOUT sid (pre-session) but WITH
+# the installation chKey. chKey is INSTALLATION material (stable), not session material.
 
 
 def md5_as_base64(s: str) -> str:
-    """MD5Util.md5AsBase64 — nom trompeur : renvoie en fait le MD5 en HEXADÉCIMAL (32 car.)."""
+    """MD5Util.md5AsBase64 - misleading name: actually returns the MD5 in HEXADECIMAL (32 chars)."""
     return hashlib.md5(s.encode("utf-8")).hexdigest()
 
 
 def encrypt_password(password: str, public_key_decimal: str, exponent: str) -> str:
-    """passwd du login : HEX(RSA/ECB/PKCS1(md5_hex(password))). Clé publique = module en décimal."""
+    """login passwd: HEX(RSA/ECB/PKCS1(md5_hex(password))). Public key = modulus in decimal."""
     from Crypto.Cipher import PKCS1_v1_5
     from Crypto.PublicKey import RSA
 
@@ -176,11 +176,11 @@ def login(
     lang: str = DEFAULT_LANG,
     timeout: float = 20.0,
 ) -> dict:
-    """LOGIN e-mail/mot de passe (flux confirmé par capture).
+    """Email/password LOGIN (flow confirmed by capture).
 
-    Renvoie {sid, ecode, chKey, deviceId, uid}.
-    `ch_key`, `sign_key`, `device_id` = matériel d'installation (capturé une fois). Les identifiants
-    sont fournis à l'exécution et ne sont jamais stockés ni journalisés par cette fonction.
+    Returns {sid, ecode, chKey, deviceId, uid}.
+    `ch_key`, `sign_key`, `device_id` = installation material (captured once). Credentials are
+    supplied at runtime and are never stored or logged by this function.
     """
     http = requests.Session()
     http.headers["User-Agent"] = USER_AGENT
@@ -202,7 +202,7 @@ def login(
         }
         request_id = params["requestId"]
         body = json.dumps(post, separators=(",", ":"), ensure_ascii=False)
-        form = build_request_body(params, body, sign_key, "")  # pré-login : ecode=""
+        form = build_request_body(params, body, sign_key, "")  # pre-login: ecode=""
         r = http.post(endpoint, data=form, timeout=timeout)
         r.raise_for_status()
         env = r.json()

@@ -1,6 +1,6 @@
-"""Capteurs : batterie, ouverture de vanne (%), code défaut (décodé E1..E15).
+"""Sensors: battery, valve opening (%), fault code (decoded E1..E15).
 
-Le code `fault` est un champ de bits (SW error code) décodé par api.decode.decoder_defaut.
+The `fault` code is a bit field (SW error code) decoded by api.decode.decode_fault.
 """
 
 from __future__ import annotations
@@ -27,21 +27,21 @@ from .entity import DanfossEntity
 
 @dataclass(frozen=True, kw_only=True)
 class DanfossSensorDescription(SensorEntityDescription):
-    """Description d'un capteur, avec l'accès à la valeur décodée."""
+    """Describes a sensor, with access to the decoded value."""
 
     value: Callable[[DanfossDevice], object]
 
 
-def _defaut(dev: DanfossDevice) -> str:
-    if not dev.defauts:
-        return "aucun"
-    return ", ".join(e.get("code", "?") for e in dev.defauts)
+def _fault(dev: DanfossDevice) -> str:
+    if not dev.faults:
+        return "none"
+    return ", ".join(e.get("code", "?") for e in dev.faults)
 
 
 SENSORS: tuple[DanfossSensorDescription, ...] = (
     DanfossSensorDescription(
-        # Température mesurée par la tête : capteur propre à CHAQUE tête (le climate est désormais
-        # au niveau pièce, la température individuelle doit rester visible par tête).
+        # Temperature measured by the head: a sensor specific to EACH head (the climate is now at
+        # room level, the per-head temperature must stay visible per head).
         key="temperature",
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
@@ -49,25 +49,25 @@ SENSORS: tuple[DanfossSensorDescription, ...] = (
         value=lambda d: d.temperature,
     ),
     DanfossSensorDescription(
-        key="batterie",
+        key="battery",
         device_class=SensorDeviceClass.BATTERY,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=PERCENTAGE,
-        value=lambda d: d.batterie,
+        value=lambda d: d.battery,
     ),
     DanfossSensorDescription(
-        key="ouverture_vanne",
-        translation_key="ouverture_vanne",
+        key="valve_opening",
+        translation_key="valve_opening",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:radiator",
-        value=lambda d: d.ouverture_vanne,
+        value=lambda d: d.valve_opening,
     ),
     DanfossSensorDescription(
-        key="defaut",
-        translation_key="defaut",
+        key="fault",
+        translation_key="fault",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value=_defaut,
+        value=_fault,
     ),
 )
 
@@ -79,13 +79,13 @@ async def async_setup_entry(
     async_add_entities(
         DanfossSensor(coordinator, dev.id, desc)
         for dev in coordinator.data.values()
-        if dev.est_tete
+        if dev.is_head
         for desc in SENSORS
     )
 
 
 class DanfossSensor(DanfossEntity, SensorEntity):
-    """Capteur d'une tête Danfoss."""
+    """Sensor of a Danfoss head."""
 
     entity_description: DanfossSensorDescription
 
@@ -95,8 +95,8 @@ class DanfossSensor(DanfossEntity, SensorEntity):
         super().__init__(coordinator, device_id)
         self.entity_description = description
         self._attr_unique_id = f"{device_id}_{description.key}"
-        # Le code défaut reste lisible même hors ligne (dernier état connu).
-        if description.key == "defaut":
+        # The fault code stays readable even offline (last known state).
+        if description.key == "fault":
             self._require_online = False
 
     @property

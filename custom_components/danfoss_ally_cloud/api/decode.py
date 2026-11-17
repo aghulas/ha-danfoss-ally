@@ -1,11 +1,11 @@
-"""Décodage des `dps` Tuya (voie 1a) d'une tête Danfoss Ally en un modèle normalisé.
+"""Decode a Danfoss Ally head's Tuya ``dps`` (path 1a) into a normalised model.
 
-Entrée : un appareil brut de ``tuya.m.my.group.device.list`` (devId, name, category, productId,
-nodeId, meshId, moduleMap, dps). Les `dps` sont indexés par NUMÉRO de DP (chaîne), selon le schéma
-officiel du produit ``03wvrwpv`` (voir danfoss-app-capture/dp_schema_officiel.md, source de vérité).
+Input: a raw device from ``tuya.m.my.group.device.list`` (devId, name, category, productId,
+nodeId, meshId, moduleMap, dps). The ``dps`` are indexed by DP NUMBER (string), per the official
+product schema ``03wvrwpv`` (see danfoss-app-capture/dp_schema_officiel.md, source of truth).
 
-⚠ À vérifier en réel (v0.1) : l'échelle exacte de certains DP peut dépendre du firmware.
-Consignes et températures suivent l'échelle 10^-1 (dixièmes de °C). Tout DP inconnu reste dans dps.
+⚠ To confirm on real hardware (v0.1): the exact scale of some DPs may depend on the firmware.
+Setpoints and temperatures use the 10^-1 scale (tenths of °C). Any unknown DP stays in dps.
 """
 
 from __future__ import annotations
@@ -13,74 +13,76 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-# --- Table des défauts (DP 45 `fault` / DP 184 `sw_error_code`) : champ de bits « SW error code »
-# Danfoss (attribut Zigbee 0x4000, cluster diagnostic 0x0B05). Identique à ZHA et Zigbee2MQTT.
-DEFAUTS_BITS = {
-    0: ("E1", "capteur de la carte supérieure en défaut", "tête défectueuse : à remplacer"),
-    1: ("E2", "capteur de la carte latérale en défaut", "tête défectueuse : à remplacer"),
-    2: ("E3", "mémoire interne en défaut", "tête défectueuse : à remplacer"),
-    3: ("E4", "erreur matérielle inconnue", "tête défectueuse : à remplacer"),
+# --- Fault table (DP 45 `fault` / DP 184 `sw_error_code`): Danfoss "SW error code" bit field
+# (Zigbee attribute 0x4000, diagnostic cluster 0x0B05). Identical to ZHA and Zigbee2MQTT.
+# The sibling MCP connector (danfoss-ally-mcp) imports this table and now surfaces these English
+# strings too (coordinated with pydanfoss-cloud 0.2.0).
+FAULT_BITS = {
+    0: ("E1", "upper board sensor fault", "faulty head: replace it"),
+    1: ("E2", "side board sensor fault", "faulty head: replace it"),
+    2: ("E3", "internal memory fault", "faulty head: replace it"),
+    3: ("E4", "unknown hardware error", "faulty head: replace it"),
     5: (
         "E6",
-        "moteur bloqué",
-        "redémarrer la tête (piles), puis la remonter sur le corps de vanne",
+        "motor stuck",
+        "restart the head (batteries), then remount it on the valve body",
     ),
     7: (
         "E8",
-        "communication interne invalide",
-        "redémarrer ; disparaît seule en ~10 min si passagère",
+        "invalid internal communication",
+        "restart; clears on its own in ~10 min if transient",
     ),
     9: (
         "E10",
-        "horloge invalide",
-        "heure à resynchroniser par la passerelle (le programme ne tourne pas sans heure)",
+        "invalid clock",
+        "time to resync via the gateway (the schedule does not run without the time)",
     ),
-    11: ("E12", "erreur de communication radio", "vérifier la passerelle et la portée Zigbee"),
-    12: ("E13", "codeur bloqué", "redémarrer la tête"),
-    13: ("E14", "pile faible", "changer les piles prochainement"),
-    14: ("E15", "pile très faible (critique)", "changer les piles maintenant"),
+    11: ("E12", "radio communication error", "check the gateway and the Zigbee range"),
+    12: ("E13", "encoder stuck", "restart the head"),
+    13: ("E14", "low battery", "change the batteries soon"),
+    14: ("E15", "very low battery (critical)", "change the batteries now"),
 }
 
 
-def decoder_defaut(v: Any) -> list[dict[str, Any]]:
-    """Code `fault` (champ de bits, entier ou chaîne décimale, ou « E14 ») → liste d'erreurs."""
+def decode_fault(v: Any) -> list[dict[str, Any]]:
+    """`fault` code (bit field, int or decimal string, or "E14") -> list of errors."""
     if isinstance(v, str) and v.strip().upper().startswith("E") and v.strip()[1:].isdigit():
         n = int(v.strip()[1:]) - 1
-        valeur = 1 << n if 0 <= n < 16 else 0
+        value = 1 << n if 0 <= n < 16 else 0
     else:
         try:
-            valeur = int(v)
+            value = int(v)
         except (TypeError, ValueError):
-            return [{"code": str(v), "libelle": "code non reconnu"}]
-    erreurs = []
+            return [{"code": str(v), "label": "unrecognised code"}]
+    errors = []
     for bit in range(16):
-        if valeur >> bit & 1:
-            if bit in DEFAUTS_BITS:
-                code, libelle, action = DEFAUTS_BITS[bit]
-                erreurs.append({"code": code, "bit": bit, "libelle": libelle, "action": action})
+        if value >> bit & 1:
+            if bit in FAULT_BITS:
+                code, label, action = FAULT_BITS[bit]
+                errors.append({"code": code, "bit": bit, "label": label, "action": action})
             else:
-                erreurs.append(
-                    {"code": f"bit {bit}", "bit": bit, "libelle": f"bit {bit} non documenté"}
+                errors.append(
+                    {"code": f"bit {bit}", "bit": bit, "label": f"undocumented bit {bit}"}
                 )
-    return erreurs
+    return errors
 
 
-# Consignes par mode (DP -> clé lisible), échelle dixièmes de °C.
-_CONSIGNES = {
-    "16": "consigne",  # temp_set : consigne effective en cours
-    "118": "confort",  # at_home_setting
-    "119": "reduit",  # leaving_home_setting
-    "114": "manuel",  # manual_mode_fast
+# Setpoints per mode (DP -> readable key), tenths-of-°C scale.
+_SETPOINT_DPS = {
+    "16": "setpoint",  # temp_set: current effective setpoint
+    "118": "comfort",  # at_home_setting
+    "119": "setback",  # leaving_home_setting
+    "114": "manual",  # manual_mode_fast
     "120": "pause",  # pause_setting
-    "121": "vacances",  # holiday_setting
+    "121": "holiday",  # holiday_setting
 }
 
 
-def _num(v: Any, diviseur: float = 1) -> float | None:
+def _num(v: Any, divisor: float = 1) -> float | None:
     if v is None or v == "":
         return None
     try:
-        return round(float(v) / diviseur, 2)
+        return round(float(v) / divisor, 2)
     except (TypeError, ValueError):
         return None
 
@@ -99,57 +101,57 @@ def _bool(v: Any) -> bool | None:
     return None
 
 
-def categorie(category: str | None) -> str:
-    """Catégorie Tuya brute -> catégorie lisible."""
+def category_of(category: str | None) -> str:
+    """Raw Tuya category -> readable category."""
     c = (category or "").lower()
     if c == "wk":
-        return "tete"
+        return "head"
     if c == "kg":
-        return "relais"
+        return "relay"
     if c in ("wsdcg", "mcs", "ms", "pir"):
-        return "capteur"
+        return "sensor"
     if c in ("wg2", "zigbee", "gateway"):
-        return "passerelle"
-    return "autre"
+        return "gateway"
+    return "other"
 
 
 @dataclass
 class DanfossDevice:
-    """Modèle normalisé d'un appareil Danfoss Ally (lecture)."""
+    """Normalised model of a Danfoss Ally device (read-only)."""
 
     id: str
-    nom: str
-    categorie: str
+    name: str
+    category: str
     product_id: str | None = None
-    node_id: str | None = None  # cid Zigbee (lien avec le pont local)
-    mesh_id: str | None = None  # passerelle
-    en_ligne: bool = False
+    node_id: str | None = None  # Zigbee cid (link with the local bridge)
+    mesh_id: str | None = None  # gateway
+    online: bool = False
     temperature: float | None = None  # °C (DP 24)
-    consigne: float | None = None  # °C effective (DP 16)
-    consignes: dict[str, float] = field(default_factory=dict)
+    setpoint: float | None = None  # °C effective (DP 16)
+    setpoints: dict[str, float] = field(default_factory=dict)
     mode: str | None = None  # DP 2
-    etat: str | None = None  # DP 3 work_state
-    batterie: float | None = None  # % (DP 34)
-    ouverture_vanne: float | None = None  # % (DP 170 pi_heating_demand)
-    demande_chaleur: bool | None = None  # DP 162 heat_supply_request
-    fenetre_ouverte: bool | None = None  # DP 25 window_state
-    detection_fenetre: bool | None = None  # DP 116 window_toggle
-    verrouillage: bool | None = None  # DP 30 child_lock
-    borne_haute: float | None = None  # °C (DP 18)
-    borne_basse: float | None = None  # °C (DP 27)
-    schedule_active: bool | None = None  # DP 172 bit 0 (R6) ; None si DP absent
-    preheat: bool | None = None  # DP 172 bit 1 (R6) ; None si DP absent
-    mounting: bool | None = None  # DP 149 (mode montage : ne régule pas)
-    defauts: list[dict[str, Any]] = field(default_factory=list)
+    state: str | None = None  # DP 3 work_state
+    battery: float | None = None  # % (DP 34)
+    valve_opening: float | None = None  # % (DP 170 pi_heating_demand)
+    heat_request: bool | None = None  # DP 162 heat_supply_request
+    window_open: bool | None = None  # DP 25 window_state
+    window_detection: bool | None = None  # DP 116 window_toggle
+    child_lock: bool | None = None  # DP 30 child_lock
+    max_setpoint: float | None = None  # °C (DP 18)
+    min_setpoint: float | None = None  # °C (DP 27)
+    schedule_active: bool | None = None  # DP 172 bit 0 (R6); None if DP absent
+    preheat: bool | None = None  # DP 172 bit 1 (R6); None if DP absent
+    mounting: bool | None = None  # DP 149 (mounting mode: not regulating)
+    faults: list[dict[str, Any]] = field(default_factory=list)
     dps: dict[str, Any] = field(default_factory=dict)
 
     @property
-    def est_tete(self) -> bool:
-        return self.categorie == "tete"
+    def is_head(self) -> bool:
+        return self.category == "head"
 
     @property
     def inconsistent(self) -> bool:
-        """Mode affiché confort/réduit alors que le programme est inactif dans la tête (R6)."""
+        """Mode shows comfort/setback while the schedule is inactive in the head (R6)."""
         return self.mode in ("at_home", "leaving_home") and self.schedule_active is False
 
 
@@ -162,10 +164,10 @@ def _int(v: Any) -> int | None:
         return None
 
 
-def decoder_operation(dp172: Any) -> tuple[bool | None, bool | None]:
-    """DP 172 (operation_mode, reflet de l'attribut Zigbee 0x0025) -> (programme, pré-chauffage).
+def decode_operation(dp172: Any) -> tuple[bool | None, bool | None]:
+    """DP 172 (operation_mode, mirror of Zigbee attribute 0x0025) -> (schedule, preheat).
 
-    bit 0 = programme actif, bit 1 = pré-chauffage ; 0 = manuel. (None, None) si le DP est absent.
+    bit 0 = schedule active, bit 1 = preheat; 0 = manual. (None, None) if the DP is absent.
     """
     v = _int(dp172)
     if v is None:
@@ -173,13 +175,13 @@ def decoder_operation(dp172: Any) -> tuple[bool | None, bool | None]:
     return bool(v & 1), bool(v & 2)
 
 
-def etat_tete(dev: DanfossDevice, room_id: str | None = None) -> dict[str, Any]:
-    """`HeadState` du contrat (§3.3) à partir d'un appareil décodé."""
+def head_state(dev: DanfossDevice, room_id: str | None = None) -> dict[str, Any]:
+    """Contract `HeadState` (§3.3) built from a decoded device."""
     return {
         "device_id": dev.id,
-        "name": dev.nom,
+        "name": dev.name,
         "room_id": room_id,
-        "online": dev.en_ligne,
+        "online": dev.online,
         "mode_displayed": dev.mode,
         "schedule_active": dev.schedule_active,
         "preheat": dev.preheat,
@@ -188,49 +190,49 @@ def etat_tete(dev: DanfossDevice, room_id: str | None = None) -> dict[str, Any]:
     }
 
 
-def _online(appareil: dict[str, Any]) -> bool:
-    zb = (appareil.get("moduleMap") or {}).get("zigbee") or {}
+def _online(device: dict[str, Any]) -> bool:
+    zb = (device.get("moduleMap") or {}).get("zigbee") or {}
     if "isOnline" in zb:
         return bool(zb.get("isOnline"))
-    return bool(appareil.get("isOnline", appareil.get("online", False)))
+    return bool(device.get("isOnline", device.get("online", False)))
 
 
-def decoder(appareil: dict[str, Any]) -> DanfossDevice:
-    """Appareil brut (``tuya.m.my.group.device.list``) -> DanfossDevice normalisé."""
-    dps: dict[str, Any] = {str(k): v for k, v in (appareil.get("dps") or {}).items()}
-    dev_id: str = appareil.get("devId") or ""
+def decode_device(device: dict[str, Any]) -> DanfossDevice:
+    """Raw device (``tuya.m.my.group.device.list``) -> normalised DanfossDevice."""
+    dps: dict[str, Any] = {str(k): v for k, v in (device.get("dps") or {}).items()}
+    dev_id: str = device.get("devId") or ""
     d = DanfossDevice(
         id=dev_id,
-        nom=(appareil.get("name") or "").strip(),
-        categorie=categorie(appareil.get("category")),
-        product_id=appareil.get("productId"),
-        node_id=appareil.get("nodeId"),
-        mesh_id=appareil.get("meshId"),
-        en_ligne=_online(appareil),
+        name=(device.get("name") or "").strip(),
+        category=category_of(device.get("category")),
+        product_id=device.get("productId"),
+        node_id=device.get("nodeId"),
+        mesh_id=device.get("meshId"),
+        online=_online(device),
         dps=dps,
     )
     d.temperature = _num(dps.get("24"), 10)
-    d.consigne = _num(dps.get("16"), 10)
-    for dp, cle in _CONSIGNES.items():
+    d.setpoint = _num(dps.get("16"), 10)
+    for dp, key in _SETPOINT_DPS.items():
         x = _num(dps.get(dp), 10)
         if x is not None:
-            d.consignes[cle] = x
+            d.setpoints[key] = x
     d.mode = dps.get("2")
-    d.etat = dps.get("3")
-    d.batterie = _num(dps.get("34"))
-    d.ouverture_vanne = _num(dps.get("170"))
-    d.demande_chaleur = _bool(dps.get("162"))
-    d.verrouillage = _bool(dps.get("30"))
-    d.detection_fenetre = _bool(dps.get("116"))
-    d.borne_haute = _num(dps.get("18"), 10)
-    d.borne_basse = _num(dps.get("27"), 10)
-    d.schedule_active, d.preheat = decoder_operation(dps.get("172"))
+    d.state = dps.get("3")
+    d.battery = _num(dps.get("34"))
+    d.valve_opening = _num(dps.get("170"))
+    d.heat_request = _bool(dps.get("162"))
+    d.child_lock = _bool(dps.get("30"))
+    d.window_detection = _bool(dps.get("116"))
+    d.max_setpoint = _num(dps.get("18"), 10)
+    d.min_setpoint = _num(dps.get("27"), 10)
+    d.schedule_active, d.preheat = decode_operation(dps.get("172"))
     d.mounting = _bool(dps.get("149"))
     ws = dps.get("25")
     if ws is not None and ws != "":
-        d.fenetre_ouverte = _bool(ws)
+        d.window_open = _bool(ws)
     for dp in ("45", "184"):
         v = dps.get(dp)
         if v not in (None, "", 0, "0", [], "none"):
-            d.defauts.extend(decoder_defaut(v))
+            d.faults.extend(decode_fault(v))
     return d

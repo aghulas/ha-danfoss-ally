@@ -1,44 +1,43 @@
 # pydanfoss-cloud
 
-Bibliothèque d'accès à l'**API cloud non officielle Danfoss Ally** (voie 1a, celle de
-l'application mobile — sans application développeur ni quota partagé), extraite de l'intégration
-Home Assistant [`danfoss_ally_cloud`](https://github.com/aghulas/ha-danfoss-ally). **Sans dépendance
-Home Assistant.**
+Access library for the **unofficial Danfoss Ally cloud API** (path 1a, the mobile app's one — with
+no developer app and no shared quota), extracted from the Home Assistant integration
+[`danfoss_ally_cloud`](https://github.com/aghulas/ha-danfoss-ally). **No Home Assistant dependency.**
 
-Elle fournit :
+It provides:
 
-- `CloudClient` — login email/mot de passe (+ secrets d'installation), liste des têtes, écritures
-  gardées (`tuya.m.custom.wkf.settings.change`), re-authentification robuste.
-- `decode` / `DanfossDevice` — décodage des `dps` Tuya en un modèle normalisé (schéma produit
-  `03wvrwpv`), décodage des codes défaut E1–E15.
-- `writes` — validation des valeurs avant envoi et garde-fou par modèle.
-- `keys` — récupération des `localKey` + IP LAN des passerelles depuis le cloud.
-- `local/` — tunnel Zigbee local (DP 198→199, tinytuya) : lecture/écriture d'attributs (pré-chauffage
-  0x0025), programme hebdomadaire.
+- `CloudClient` — email/password login (+ installation secrets), list of heads, guarded writes
+  (`tuya.m.custom.wkf.settings.change`), robust re-authentication.
+- `decode` / `DanfossDevice` — decoding of the Tuya `dps` into a normalised model (product schema
+  `03wvrwpv`), decoding of the E1–E15 fault codes.
+- `writes` — value validation before sending and a per-model guard-rail.
+- `keys` — fetching the gateways' `localKey` + LAN IP from the cloud.
+- `local/` — local Zigbee tunnel (DP 198→199, tinytuya): attribute read/write (preheat 0x0025),
+  weekly schedule.
 
-## Statut d'extraction (roadmap v0.6)
+## Extraction status (roadmap v0.6)
 
-Source **unique** : ce dossier (`custom_components/danfoss_ally_cloud/api/`). Il est packagé sous le
-nom `pydanfoss_cloud` par le `pyproject.toml` du dépôt, **sans déplacement de fichiers** :
+**Single** source: this folder (`custom_components/danfoss_ally_cloud/api/`). It is packaged under
+the name `pydanfoss_cloud` by the repo's `pyproject.toml`, **without moving files**:
 
-- l'intégration Home Assistant continue de « vendre » ce code (import relatif `from .api import …`),
-  ce qui garde l'installation HACS autonome ;
-- le connecteur MCP (`danfoss-ally-mcp`) pourra en dépendre via `pip install pydanfoss-cloud` une
-  fois la bibliothèque **publiée sur PyPI**, puis l'intégration basculera vers une dépendance
-  `requirements` du `manifest.json`.
+- the Home Assistant integration keeps "vendoring" this code (relative import `from .api import …`),
+  which keeps the HACS install self-contained;
+- the MCP connector (`danfoss-ally-mcp`) can depend on it via `pip install pydanfoss-cloud` once the
+  library is **published to PyPI**, then the integration will switch to a `requirements` dependency
+  in `manifest.json`.
 
-Installation en développement :
+Development install:
 
 ```
-pip install -e .            # expose le paquet pydanfoss_cloud
-pip install -e '.[local]'   # + tinytuya pour le tunnel local
+pip install -e .            # exposes the pydanfoss_cloud package
+pip install -e '.[local]'   # + tinytuya for the local tunnel
 ```
 
-## Dépendances
+## Dependencies
 
-`pycryptodome`, `requests` (cœur) ; `tinytuya` (extra `local`, tunnel Zigbee). Python ≥ 3.12.
+`pycryptodome`, `requests` (core); `tinytuya` (extra `local`, Zigbee tunnel). Python ≥ 3.12.
 
-## Avertissement
+## Disclaimer
 
-API non documentée, obtenue par observation du protocole de l'application : elle peut changer ou
-être coupée. Secrets (jeton de session, `localKey`, identifiants) : jamais journalisés ni commités.
+Undocumented API, obtained by observing the app's protocol: it can change or be cut off. Secrets
+(session token, `localKey`, credentials): never logged or committed.

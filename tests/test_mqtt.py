@@ -1,4 +1,4 @@
-"""Tests du publicateur MQTT (payloads purs + flux de publication, mqtt monkeypatché)."""
+"""MQTT publisher tests (pure payloads + publish flow, mqtt monkeypatched)."""
 
 import json
 from unittest.mock import AsyncMock, MagicMock
@@ -8,24 +8,24 @@ import homeassistant.components.mqtt as mqtt_mod
 from custom_components.danfoss_ally_cloud.api import DanfossDevice
 from custom_components.danfoss_ally_cloud.mqtt_publisher import (
     MqttPublisher,
-    etat_payload,
-    etat_z2m,
-    nom_z2m,
+    name_z2m,
+    state_payload,
+    state_z2m,
 )
 
 
 def _dev(**kw):
     base = dict(
         id="dev-1",
-        nom="Salon",
-        categorie="tete",
+        name="Salon",
+        category="head",
         product_id="03wvrwpv",
-        en_ligne=True,
+        online=True,
         temperature=20.5,
-        consigne=21.0,
-        batterie=90.0,
-        ouverture_vanne=0,
-        fenetre_ouverte=False,
+        setpoint=21.0,
+        battery=90.0,
+        valve_opening=0,
+        window_open=False,
     )
     base.update(kw)
     return DanfossDevice(**base)
@@ -37,13 +37,13 @@ def _publisher(coordinator=None, mode="discovery"):
     )
 
 
-def test_etat_payload_exclut_none():
-    dev = _dev(consigne=None)
-    payload = etat_payload(dev)
-    assert "consigne" not in payload
-    # 0 et False sont conservés (différents de None)
-    assert payload["ouverture_vanne"] == 0
-    assert payload["fenetre_ouverte"] is False
+def test_state_payload_excludes_none():
+    dev = _dev(setpoint=None)
+    payload = state_payload(dev)
+    assert "setpoint" not in payload
+    # 0 and False are kept (different from None)
+    assert payload["valve_opening"] == 0
+    assert payload["window_open"] is False
     assert payload["temperature"] == 20.5
 
 
@@ -53,14 +53,14 @@ def test_discovery_configs():
     topics = [c["topic"] for c in cfgs]
     assert len(cfgs) == 5  # 4 capteurs + 1 binaire
     assert "homeassistant/sensor/danfoss_dev-1_temperature/config" in topics
-    assert "homeassistant/binary_sensor/danfoss_dev-1_fenetre/config" in topics
+    assert "homeassistant/binary_sensor/danfoss_dev-1_window/config" in topics
     temp = next(c["payload"] for c in cfgs if c["topic"].endswith("temperature/config"))
     assert temp["state_topic"] == "danfoss_ally_cloud/dev-1"
     assert temp["value_template"] == "{{ value_json.temperature }}"
     assert temp["availability_topic"] == "danfoss_ally_cloud/dev-1/availability"
     assert temp["device"]["identifiers"] == ["danfoss_ally_cloud_dev-1"]
     assert temp["unit_of_measurement"] == "°C"
-    fen = next(c["payload"] for c in cfgs if c["topic"].endswith("fenetre/config"))
+    fen = next(c["payload"] for c in cfgs if c["topic"].endswith("window/config"))
     assert fen["payload_on"] == "ON" and fen["payload_off"] == "OFF"
 
 
@@ -76,10 +76,10 @@ async def test_publish_flow(monkeypatch):
     await pub.async_start()
 
     topics = [c.args[1] for c in publie.await_args_list]
-    assert "danfoss_ally_cloud/dev-1" in topics  # état
-    assert "danfoss_ally_cloud/dev-1/availability" in topics  # disponibilité
+    assert "danfoss_ally_cloud/dev-1" in topics  # state
+    assert "danfoss_ally_cloud/dev-1/availability" in topics  # availability
     assert any(t.startswith("homeassistant/sensor/") for t in topics)  # discovery
-    # l'état est un JSON valide
+    # the state is valid JSON
     etat = next(
         c.args[2] for c in publie.await_args_list if c.args[1] == "danfoss_ally_cloud/dev-1"
     )
@@ -101,8 +101,8 @@ async def test_publish_off_si_broker_absent(monkeypatch):
 # --- mode zigbee2mqtt -------------------------------------------------------------------------
 
 
-def test_etat_z2m_noms_proprietes():
-    etat = etat_z2m(_dev(ouverture_vanne=40))
+def test_state_z2m_property_names():
+    etat = state_z2m(_dev(valve_opening=40))
     assert etat["local_temperature"] == 20.5
     assert etat["occupied_heating_setpoint"] == 21.0
     assert etat["battery"] == 90.0
@@ -111,13 +111,13 @@ def test_etat_z2m_noms_proprietes():
     assert etat["window_open"] is False
 
 
-def test_etat_z2m_running_state_idle():
-    assert etat_z2m(_dev(ouverture_vanne=0))["running_state"] == "idle"
+def test_state_z2m_running_state_idle():
+    assert state_z2m(_dev(valve_opening=0))["running_state"] == "idle"
 
 
-def test_nom_z2m_nettoie_les_topics():
-    assert nom_z2m(_dev(nom="Salon/RDC+1")) == "Salon_RDC_1"
-    assert nom_z2m(_dev(nom="")) == "dev-1"  # repli sur l'id
+def test_name_z2m_cleans_topics():
+    assert name_z2m(_dev(name="Salon/RDC+1")) == "Salon_RDC_1"
+    assert name_z2m(_dev(name="")) == "dev-1"  # repli sur l'id
 
 
 def test_device_z2m_descripteur():

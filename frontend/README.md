@@ -42,4 +42,4 @@ versionné n'est pas à jour.
 - `test/` — tests Vitest.
 - `vite.config.ts` — build (bundle unique) et config Vitest.
 
-Le contrat d'interface fait foi : `../docs/contrat-interface.md` (section 6).
+Le contrat d'interface fait foi : `../docs/interface-contract.md` (section 6).

@@ -1,106 +1,94 @@
 # Architecture
 
-## Principe : cloud-first, repli local
+## Principle: cloud-first, local fallback
 
-L'API cloud couvre l'essentiel du contrôle. Mais on a établi en réel des cas
-où le cloud **ment ou n'agit pas**, qu'il faut traiter en local :
+The cloud API covers most of the control. But we have established on real hardware cases where the
+cloud **lies or does not act**, which must be handled locally:
 
-- C'est le **passage en mode manuel** (DP 2 `manual`) qui efface le programme
-  de la tête (R4). `at_home` / `leaving_home` publiés par le DP 2 ne sont que
-  des **étiquettes** côté cloud : la tête garde la consigne de son programme
-  (R5). Le passage confort/réduit et le retour au programme passent donc par la
-  réécriture du programme de la pièce, pas par un simple write cloud du mode.
-  Règles R1–R7 et appels : `docs/contrat-interface.md`.
-- Pré-chauffage : écrire le DP 1 côté cloud ne change que le cache de la
-  passerelle. Le vrai levier est l'attribut Zigbee **0x0025** (bit 0 programme,
-  bit 1 pré-chauffage), accessible seulement par le tunnel local.
-- `update_time` est un horodatage d'enregistrement événementiel : ne jamais en
-  déduire la fraîcheur. `online` fait foi pour la connectivité.
+- It is the **switch to manual mode** (DP 2 `manual`) that erases the head's schedule (R4).
+  `at_home` / `leaving_home` published via DP 2 are only **labels** on the cloud side: the head
+  keeps the setpoint from its schedule (R5). The comfort/setback switch and the return to schedule
+  therefore go through rewriting the room's schedule, not a simple cloud write of the mode. Rules
+  R1–R7 and calls: `docs/interface-contract.md`.
+- Preheat: writing DP 1 on the cloud side only changes the gateway cache. The real lever is the
+  Zigbee attribute **0x0025** (bit 0 schedule, bit 1 preheat), reachable only through the local
+  tunnel.
+- `update_time` is an event-driven registration timestamp: never infer freshness from it. `online`
+  is authoritative for connectivity.
 
-Donc : **cloud par défaut, tunnel local (optionnel) pour les opérations que le
-cloud rate**. La même intégration récupère les clés passerelles, donc le repli
-local reste interne, sans rien demander de plus à l'utilisateur.
+So: **cloud by default, local tunnel (optional) for the operations the cloud misses**. The same
+integration fetches the gateway keys, so the local fallback stays internal, asking nothing more of
+the user.
 
-## Couches
+## Layers
 
-- `api/client.py` — API cloud (voie 1a) : session, appareils, DP, pièces,
-  programmes.
-- `api/keys.py` — récupération des localKey des passerelles (remplace
-  émulateur/Frida ; validé en réel).
-- `api/local/tunnel.py` — tunnel Zigbee DP 198→199 (tinytuya) : programme réel,
-  attribut 0x0025, vrais attributs.
-- `coordinator.py` — polling cloud conservateur + superposition des vérités
-  locales.
-- Plateformes : `climate` (consigne, préréglages), `sensor` (batterie, vanne,
-  demande de chaleur, code défaut), `binary_sensor` (en ligne, fenêtre),
-  `number` (vacances, bornes), `switch` (verrou enfant, fenêtre, pré-chauffage).
-- `mqtt_publisher.py` — publication MQTT, modes `discovery` / `zigbee2mqtt`,
-  source `cloud` / `local`.
-- `diagnostics.py` — rédaction stricte des secrets.
+- `api/client.py` — cloud API (path 1a): session, devices, DPs, rooms, schedules.
+- `api/keys.py` — fetching the gateways' localKey (replaces emulator/Frida; verified on real
+  hardware).
+- `api/local/tunnel.py` — Zigbee tunnel DP 198→199 (tinytuya): real schedule, attribute 0x0025, real
+  attributes.
+- `coordinator.py` — conservative cloud polling + overlay of the local truths.
+- Platforms: `climate` (setpoint, presets), `sensor` (battery, valve, heat request, fault code),
+  `binary_sensor` (online, window), `number` (holiday, bounds), `switch` (child lock, window,
+  preheat).
+- `mqtt_publisher.py` — MQTT publishing, modes `discovery` / `zigbee2mqtt`, source `cloud` /
+  `local`.
+- `diagnostics.py` — strict secret redaction.
 
-## Session Tuya partagée avec le connecteur MCP (deviceId commun)
+## Tuya session shared with the MCP connector (common deviceId)
 
-L'intégration `danfoss_ally_cloud` et le connecteur MCP `danfoss-ally-mcp`
-utilisent le **même matériel d'installation capturé de l'application** :
-`deviceId`, `sign_key` et `chKey` (voir README, « Secrets d'installation »).
-Côté serveur Tuya, ce triplet identifie **une seule installation**, donc **une
-seule session active**. Si les deux clients tournent en parallèle contre le
-compte réel, la connexion de l'un **invalide la session de l'autre** : ils se
-délogent mutuellement, chacun déclenchant chez l'autre une ré-authentification,
-d'où une boucle de reconnexions et des erreurs intermittentes (`session_expired`,
-appels refusés) des deux côtés.
+The `danfoss_ally_cloud` integration and the MCP connector `danfoss-ally-mcp` use the **same
+installation material captured from the app**: `deviceId`, `sign_key` and `chKey` (see README,
+"Installation secrets"). On the Tuya server side, this triplet identifies **a single installation**,
+hence **a single active session**. If both clients run in parallel against the real account, one's
+connection **invalidates the other's session**: they log each other out, each triggering a
+re-authentication in the other, hence a loop of reconnections and intermittent errors
+(`session_expired`, refused calls) on both sides.
 
-> Le connecteur `tuya-mcp` (radiateurs du bâtiment F) n'est **pas** concerné : il
-> passe par le SDK de partage Smart Life avec son propre `terminal_id`.
+> The `tuya-mcp` connector (building F radiators) is **not** affected: it goes through the Smart
+> Life sharing SDK with its own `terminal_id`.
 
-### Règle opérationnelle (tant qu'un seul jeu de secrets existe)
+### Operational rule (as long as a single set of secrets exists)
 
-**Ne jamais faire tourner les deux en même temps contre le compte réel.** Un seul
-porteur de session à la fois :
+**Never run both at the same time against the real account.** One session holder at a time:
 
-- tant que le connecteur MCP sert (session Claude active sur `danfoss-ally-mcp`),
-  l'intégration reste **désactivée** côté Home Assistant ;
-- inversement, pour utiliser l'intégration en continu, on arrête d'utiliser le
-  connecteur MCP sur ce compte.
+- as long as the MCP connector is serving (active Claude session on `danfoss-ally-mcp`), the
+  integration stays **disabled** on the Home Assistant side;
+- conversely, to use the integration continuously, stop using the MCP connector on this account.
 
-Désactiver l'intégration côté HA la décharge **et** l'empêche de se recharger au
-démarrage, ce qui libère la session ; un simple « recharger » ne suffit pas. État
-actuel sur le Pi de l'école : l'intégration est `disabled_by: user` (désactivée),
-le connecteur MCP garde donc la main. C'est un **contournement**, pas la cible.
+Disabling the integration on the HA side unloads it **and** prevents it from reloading at startup,
+which frees the session; a simple "reload" is not enough. Current state on the school's Pi: the
+integration is `disabled_by: user` (disabled), so the MCP connector keeps control. This is a
+**workaround**, not the target.
 
-### Piste de fond : une installation virtuelle distincte pour l'intégration
+### Underlying track: a separate virtual installation for the integration
 
-La vraie coexistence suppose de donner à l'intégration **son propre jeu de
-secrets** (`deviceId` / `sign_key` / `chKey` distincts), c.-à-d. une **deuxième
-« installation » virtuelle** de l'application vis-à-vis du serveur Tuya. Deux
-installations = deux sessions indépendantes, qui ne se délogent plus.
+True coexistence requires giving the integration **its own set of secrets** (distinct `deviceId` /
+`sign_key` / `chKey`), i.e. a **second virtual "installation"** of the app as far as the Tuya server
+is concerned. Two installations = two independent sessions, which no longer log each other out.
 
-Marche à suivre, au niveau conceptuel (étape manuelle **à venir**, non réalisée
-ici) :
+Procedure, conceptually (manual step **to come**, not done here):
 
-1. produire un nouveau triplet d'installation à l'aide du dépôt de signature
-   `~/dev/danfoss-ally-signing-re` et de l'application réelle (capture / hook) —
-   l'opération demande **Rémi** et l'app, elle ne peut pas être automatisée depuis
-   ce dépôt ;
-2. enregistrer cette installation sur le compte comme un appareil mobile
-   supplémentaire (le serveur refuse un `chKey` inconnu : le triplet doit être un
-   vrai couple installation ↔ compte, pas une valeur fabriquée) ;
-3. configurer l'intégration avec ce triplet distinct, et réserver le triplet
-   d'origine au connecteur MCP ;
-4. vérifier en réel que les deux sessions coexistent sans se déloger.
+1. produce a new installation triplet using the signature repo `~/dev/danfoss-ally-signing-re` and
+   the real app (capture / hook) — the operation needs **Rémi** and the app, it cannot be automated
+   from this repo;
+2. register this installation on the account as an additional mobile device (the server rejects an
+   unknown `chKey`: the triplet must be a real installation ↔ account pair, not a fabricated value);
+3. configure the integration with this distinct triplet, and reserve the original triplet for the
+   MCP connector;
+4. verify on real hardware that the two sessions coexist without logging each other out.
 
-Tant que cette capture n'est pas faite, la règle opérationnelle ci-dessus reste la
-seule garantie contre les délogements mutuels.
+Until this capture is done, the operational rule above is the only guarantee against mutual
+log-outs.
 
-## Sécurité
+## Security
 
-Jetons de session et localKey sont des secrets : jamais dans les logs, les
-diagnostics ni le dépôt. Défauts de polling conservateurs (sécurité du compte
-réel de l'utilisateur). Re-authentification robuste (Tuya invalide la session
-quand l'app se reconnecte).
+Session tokens and localKey are secrets: never in the logs, the diagnostics or the repository.
+Conservative polling defaults (security of the user's real account). Robust re-authentication (Tuya
+invalidates the session when the app reconnects).
 
-## Codes DP
+## DP codes
 
-Source de vérité : `~/dev/danfoss-app-capture/dp_schema_officiel.md`. Pièges
-repris dans `const.py` (DP 18 = borne haute, 171 = consigne, 114 = manuel,
-1 = pré-chauffage, 30 = verrou enfant, 116 = fenêtre, 162 = demande de chaleur).
+Source of truth: `~/dev/danfoss-app-capture/dp_schema_officiel.md`. Pitfalls captured in `const.py`
+(DP 18 = upper bound, 171 = setpoint, 114 = manual, 1 = preheat, 30 = child lock, 116 = window,
+162 = heat request).

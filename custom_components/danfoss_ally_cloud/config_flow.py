@@ -1,9 +1,9 @@
-"""Config flow et options flow.
+"""Config flow and options flow.
 
-Voie 1a : identifiants du compte de l'application (login email/mot de passe) + matériel
-d'installation capturé une fois (sign_key, deviceId, chKey — voir README). Le login valide les
-identifiants ET les secrets d'un coup. La ré-authentification est gérée par le client (le mot de
-passe est conservé dans l'entrée, chiffré au repos par HA). Les secrets ne sont jamais journalisés.
+Path 1a: the app account's credentials (email/password login) + installation material captured
+once (sign_key, deviceId, chKey - see README). The login validates the credentials AND the secrets
+at once. Re-authentication is handled by the client (the password is kept in the entry, encrypted
+at rest by HA). Secrets are never logged.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ _REGIONS = ["eu", "us", "cn", "in"]
 
 
 class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Première configuration : un compte Danfoss Ally."""
+    """First-time setup: one Danfoss Ally account."""
 
     VERSION = 1
 
@@ -66,8 +66,8 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except CloudError:
                 errors["base"] = "cannot_connect"
-            except Exception:  # noqa: BLE001 - robustesse config_flow
-                _LOGGER.exception("Erreur inattendue à la validation du compte Danfoss Ally")
+            except Exception:  # noqa: BLE001 - config_flow robustness
+                _LOGGER.exception("Unexpected error while validating the Danfoss Ally account")
                 errors["base"] = "unknown"
             else:
                 await client.async_close()
@@ -93,7 +93,7 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class DanfossAllyCloudOptionsFlow(OptionsFlow):
-    """Options : intervalle, tunnel local, mode et source de publication MQTT."""
+    """Options: interval, local tunnel, MQTT publishing mode and source."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
         if user_input is not None:

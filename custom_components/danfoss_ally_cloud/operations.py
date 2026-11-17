@@ -1,13 +1,13 @@
-"""Opérations partagées entre les actions (services) et les commandes WebSocket.
+"""Operations shared between the actions (services) and the WebSocket commands.
 
-Une seule implémentation par opération (contrat §5.3) : pièces (avec états de têtes), lecture /
-écriture du programme, retour au programme. S'appuie sur le modèle de pièces de la PR #12
-(`coordinator.rooms` = RoomState, `coordinator.group_of`) et sur l'édition de programme de la
-couche `api/` (validation R1). Les écritures créent un `WriteJob` suivi par `jobs/subscribe` et
-vérifié de façon différée (jamais bloquante). Erreurs = codes stables du contrat (§5.4).
+One implementation per operation (contract §5.3): rooms (with head states), schedule read / write,
+back to schedule. Built on the room model of PR #12 (`coordinator.rooms` = RoomState,
+`coordinator.group_of`) and on the schedule editing of the `api/` layer (R1 validation). Writes
+create a `WriteJob` tracked by `jobs/subscribe` and verified in a deferred way (never blocking).
+Errors = stable contract codes (§5.4).
 
-La consigne durable de pièce n'est PAS ici : elle est portée par le thermostat de pièce (PR #12,
-`climate.async_set_temperature` → `async_set_group_setpoint`).
+The durable room setpoint is NOT here: it is carried by the room thermostat (PR #12,
+`climate.async_set_temperature` -> `async_set_group_setpoint`).
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_call_later
 
-from .api import ScheduleValidationError, UnknownTargetError, etat_tete
+from .api import ScheduleValidationError, UnknownTargetError, head_state
 from .api import schedule as sch
 from .api.client import CloudError
 from .const import DATA_COORDINATOR, DATA_JOBS, DATA_SCHEDULES
@@ -37,12 +37,12 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-VERIFY_DELAY = 300  # vérification différée de 5 min (R7) ; ne bloque jamais
-SCHEDULE_TTL = 3600  # cache du programme par cible (lecture à la demande)
+VERIFY_DELAY = 300  # deferred verification 5 min later (R7); never blocks
+SCHEDULE_TTL = 3600  # per-target schedule cache (read on demand)
 
 
 class OperationError(Exception):
-    """Erreur portant un code stable du contrat (§5.4), traduite par les wrappers."""
+    """Error carrying a stable contract code (§5.4), translated by the wrappers."""
 
     def __init__(
         self,
@@ -58,32 +58,32 @@ class OperationError(Exception):
 
 
 async def ensure_admin(hass: HomeAssistant, user_id: str | None) -> None:
-    """Refuse un utilisateur non administrateur (contrat §5.2). None = appel interne, autorisé."""
+    """Refuse a non-admin user (contract §5.2). None = internal call, allowed."""
     if user_id is None:
         return
     user = await hass.auth.async_get_user(user_id)
     if user is None or not user.is_admin:
-        raise OperationError("not_admin", "écriture réservée aux administrateurs")
+        raise OperationError("not_admin", "write reserved for administrators")
 
 
 def _heads_of_room(coordinator: DanfossCoordinator, group_id: str) -> list[dict]:
     return [
-        etat_tete(dev, group_id)
+        head_state(dev, group_id)
         for dev in coordinator.data.values()
-        if dev.est_tete and coordinator.group_of(dev.id) == group_id
+        if dev.is_head and coordinator.group_of(dev.id) == group_id
     ]
 
 
 def rooms_payload(store: dict) -> dict:
-    """Pièces (contrat §3.4) : RoomState de #12 + états des têtes membres (HeadState §3.3)."""
+    """Rooms (contract §3.4): RoomState from #12 + member head states (HeadState §3.3)."""
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     rooms = [
         {
             "id": gid,
-            "name": rs.nom,
+            "name": rs.name,
             "product_id": rs.pid,
-            "comfort": rs.consignes.get("confort"),
-            "setback": rs.consignes.get("reduit"),
+            "comfort": rs.setpoints.get("comfort"),
+            "setback": rs.setpoints.get("setback"),
             "heads": _heads_of_room(coordinator, gid),
         }
         for gid, rs in coordinator.rooms.items()
@@ -105,7 +105,7 @@ def _key(target: dict) -> str:
 
 
 async def get_schedule(store: dict, target: dict, refresh: bool = False) -> dict:
-    """Programme d'une cible : cache (≤ 1 h) ou cloud si `refresh` / cache périmé."""
+    """A target's schedule: cache (<= 1 h) or cloud if `refresh` / cache stale."""
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     cache: dict = store[DATA_SCHEDULES]
     key = _key(target)
@@ -133,16 +133,16 @@ def _head_ids(store: dict, target: dict) -> list[str]:
         return [
             dev.id
             for dev in coordinator.data.values()
-            if dev.est_tete and coordinator.group_of(dev.id) == gid
+            if dev.is_head and coordinator.group_of(dev.id) == gid
         ]
     return [str(target.get("id"))]
 
 
 def _check_not_grouped(store: dict, target: dict) -> None:
-    """Une tête groupée visée directement est refusée : viser sa pièce (contrat §5.4)."""
+    """A grouped head targeted directly is refused: target its room (contract §5.4)."""
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     if target.get("type") == "device" and coordinator.group_of(str(target.get("id"))) is not None:
-        raise OperationError("grouped_device", "tête groupée : viser sa pièce")
+        raise OperationError("grouped_device", "grouped head: target its room")
 
 
 async def set_schedule(hass: HomeAssistant, store: dict, target: dict, days: dict) -> dict:
@@ -181,22 +181,22 @@ async def _run_write(func, *args) -> None:
 
 
 def _defer_verification(hass: HomeAssistant, store: dict, job: WriteJob) -> None:
-    """Programme la vérification 5 min plus tard (R7). Ne bloque jamais l'appel."""
+    """Schedule the verification 5 min later (R7). Never blocks the call."""
 
     async def _run(_now) -> None:
         try:
             await verify_job(store, job)
-        except Exception as err:  # noqa: BLE001 - la vérification ne doit jamais remonter
-            _LOGGER.debug("vérification du lot %s : %s", job.job_id, err)
+        except Exception as err:  # noqa: BLE001 - verification must never propagate
+            _LOGGER.debug("verification of job %s: %s", job.job_id, err)
 
     async_call_later(hass, VERIFY_DELAY, _run)
 
 
 async def verify_job(store: dict, job: WriteJob) -> None:
-    """Vérifie un lot : DP 172 pour le mode (R6) ; programme = `unverified`.
+    """Verify a job: DP 172 for the mode (R6); schedule = `unverified`.
 
-    La relecture locale du programme (par le tunnel) est un suivi distinct, éprouvé à la
-    validation réelle des écritures : on ne prétend jamais `applied` sans l'avoir constaté.
+    The local re-read of the schedule (via the tunnel) is a separate follow-up, proven at the real
+    validation of writes: we never claim `applied` without having observed it.
     """
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     jobs: JobManager = store[DATA_JOBS]
@@ -204,13 +204,13 @@ async def verify_job(store: dict, job: WriteJob) -> None:
     devices = coordinator.data
     for head in job.heads:
         dev = devices.get(head.device_id)
-        if dev is None or not dev.en_ligne:
+        if dev is None or not dev.online:
             jobs.set_head(job, head.device_id, HEAD_UNREACHABLE)
             continue
         if job.kind == "restore":
             ok = dev.schedule_active is True
             jobs.set_head(job, head.device_id, HEAD_APPLIED if ok else HEAD_MISMATCH)
-        else:  # set_schedule : relecture du programme non effectuée en cloud seul
+        else:  # set_schedule: schedule re-read not done in cloud-only
             jobs.set_head(
-                job, head.device_id, HEAD_UNVERIFIED, "programme non relu (tunnel local requis)"
+                job, head.device_id, HEAD_UNVERIFIED, "schedule not re-read (local tunnel required)"
             )

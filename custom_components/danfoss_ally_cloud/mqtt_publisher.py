@@ -1,17 +1,17 @@
-"""Publication MQTT des appareils Danfoss (deux modes, configurables).
+"""MQTT publishing of the Danfoss devices (two configurable modes).
 
-mode "discovery"  : publie la config MQTT Discovery de HA
-                    (homeassistant/<composant>/<node>/config + topics d'état)
-                    pour que HA (ou un autre consommateur) crée les entités. Un pont.
-mode "zigbee2mqtt": bridge/state + bridge/devices (avec exposes) et un topic d'état par
-                    friendly_name, aux noms de propriétés z2m (local_temperature,
+mode "discovery"  : publishes HA MQTT Discovery config
+                    (homeassistant/<component>/<node>/config + state topics)
+                    so HA (or another consumer) creates the entities. A bridge.
+mode "zigbee2mqtt": bridge/state + bridge/devices (with exposes) and one state topic per
+                    friendly_name, using z2m property names (local_temperature,
                     occupied_heating_setpoint, battery, pi_heating_demand, window_open).
 
-source ("cloud" | "local") : d'où viennent les valeurs. v0.4 : source cloud, en lecture
-(capteurs + binaire + disponibilité). Le pilotage par MQTT viendra plus tard.
+source ("cloud" | "local"): where the values come from. v0.4: cloud source, read-only
+(sensors + binary + availability). MQTT control will come later.
 
-Les messages de config et d'état sont publiés en `retain` (un abonné tardif reçoit le dernier état).
-La disponibilité suit `en_ligne` (cf. docs/architecture.md : online fait foi, pas update_time).
+Config and state messages are published `retain` (a late subscriber gets the last state).
+Availability follows `online` (cf. docs/architecture.md: online is authoritative, not update_time).
 """
 
 from __future__ import annotations
@@ -28,61 +28,61 @@ DISCOVERY_PREFIX = "homeassistant"
 AVAIL_ONLINE = "online"
 AVAIL_OFFLINE = "offline"
 
-# Capteurs publiés (component, clé, champ du modèle, options de config discovery).
+# Published sensors (component, key, model field, discovery config options).
 _SENSORS: tuple[dict[str, Any], ...] = (
     {
         "key": "temperature",
-        "champ": "temperature",
+        "field": "temperature",
         "device_class": "temperature",
         "unit": "°C",
         "state_class": "measurement",
-        "name": "Température",
+        "name": "Temperature",
     },
     {
-        "key": "consigne",
-        "champ": "consigne",
+        "key": "setpoint",
+        "field": "setpoint",
         "device_class": "temperature",
         "unit": "°C",
         "state_class": "measurement",
-        "name": "Consigne",
+        "name": "Setpoint",
     },
     {
-        "key": "batterie",
-        "champ": "batterie",
+        "key": "battery",
+        "field": "battery",
         "device_class": "battery",
         "unit": "%",
         "state_class": "measurement",
-        "name": "Batterie",
+        "name": "Battery",
     },
     {
-        "key": "ouverture_vanne",
-        "champ": "ouverture_vanne",
+        "key": "valve_opening",
+        "field": "valve_opening",
         "unit": "%",
         "state_class": "measurement",
         "icon": "mdi:radiator",
-        "name": "Ouverture de vanne",
+        "name": "Valve opening",
     },
 )
 _BINARY: tuple[dict[str, Any], ...] = (
-    {"key": "fenetre", "champ": "fenetre_ouverte", "device_class": "window", "name": "Fenêtre"},
+    {"key": "window", "field": "window_open", "device_class": "window", "name": "Window"},
 )
 
 
-def etat_payload(dev: DanfossDevice) -> dict[str, Any]:
-    """Valeurs publiées pour une tête (JSON de l'état). None exclus."""
-    champs = {
+def state_payload(dev: DanfossDevice) -> dict[str, Any]:
+    """Values published for a head (state JSON). None excluded."""
+    fields = {
         "temperature": dev.temperature,
-        "consigne": dev.consigne,
-        "batterie": dev.batterie,
-        "ouverture_vanne": dev.ouverture_vanne,
-        "fenetre_ouverte": dev.fenetre_ouverte,
+        "setpoint": dev.setpoint,
+        "battery": dev.battery,
+        "valve_opening": dev.valve_opening,
+        "window_open": dev.window_open,
     }
-    return {k: v for k, v in champs.items() if v is not None}
+    return {k: v for k, v in fields.items() if v is not None}
 
 
-# --- mode zigbee2mqtt -------------------------------------------------------------------------
-# Propriétés d'état au nom z2m (eTRV Danfoss) et « exposes » minimal pour bridge/devices.
-# access 1 = publié (lecture) : la v0.5 est en lecture, aucun topic de commande n'est traité.
+# --- zigbee2mqtt mode -------------------------------------------------------------------------
+# State properties with z2m names (Danfoss eTRV) and a minimal "exposes" for bridge/devices.
+# access 1 = published (read): v0.5 is read-only, no command topic is handled.
 _EXPOSES_Z2M: tuple[dict[str, Any], ...] = (
     {
         "type": "numeric",
@@ -120,33 +120,33 @@ _EXPOSES_Z2M: tuple[dict[str, Any], ...] = (
 )
 
 
-def etat_z2m(dev: DanfossDevice) -> dict[str, Any]:
-    """État d'une tête aux noms de propriétés zigbee2mqtt. None exclus."""
+def state_z2m(dev: DanfossDevice) -> dict[str, Any]:
+    """A head's state with zigbee2mqtt property names. None excluded."""
     out: dict[str, Any] = {}
     if dev.temperature is not None:
         out["local_temperature"] = dev.temperature
-    if dev.consigne is not None:
-        out["occupied_heating_setpoint"] = dev.consigne
-    if dev.ouverture_vanne is not None:
-        out["pi_heating_demand"] = dev.ouverture_vanne
-        out["running_state"] = "heat" if dev.ouverture_vanne > 0 else "idle"
-    if dev.batterie is not None:
-        out["battery"] = dev.batterie
-    if dev.fenetre_ouverte is not None:
-        out["window_open"] = dev.fenetre_ouverte
+    if dev.setpoint is not None:
+        out["occupied_heating_setpoint"] = dev.setpoint
+    if dev.valve_opening is not None:
+        out["pi_heating_demand"] = dev.valve_opening
+        out["running_state"] = "heat" if dev.valve_opening > 0 else "idle"
+    if dev.battery is not None:
+        out["battery"] = dev.battery
+    if dev.window_open is not None:
+        out["window_open"] = dev.window_open
     return out
 
 
-def nom_z2m(dev: DanfossDevice) -> str:
-    """friendly_name z2m : nom de la tête (ou id), nettoyé des caractères interdits en topic."""
-    nom = (dev.nom or dev.id or "").strip() or dev.id
+def name_z2m(dev: DanfossDevice) -> str:
+    """z2m friendly_name: the head's name (or id), cleaned of topic-forbidden characters."""
+    name = (dev.name or dev.id or "").strip() or dev.id
     for c in ("/", "+", "#"):
-        nom = nom.replace(c, "_")
-    return nom
+        name = name.replace(c, "_")
+    return name
 
 
 class MqttPublisher:
-    """Publie l'état des têtes vers le broker MQTT de HA (mode discovery, source cloud)."""
+    """Publishes the heads' state to HA's MQTT broker (discovery mode, cloud source)."""
 
     def __init__(self, hass, coordinator, mode: str, source: str, base_topic: str) -> None:
         self._hass = hass
@@ -154,7 +154,7 @@ class MqttPublisher:
         self._mode = mode
         self._source = source
         self._base = base_topic.rstrip("/")
-        self._discovery_faite: set[str] = set()
+        self._discovery_done: set[str] = set()
         self._unsub = None
 
     def _state_topic(self, device_id: str) -> str:
@@ -164,14 +164,14 @@ class MqttPublisher:
         return f"{self._base}/{device_id}/availability"
 
     async def async_start(self) -> None:
-        """Vérifie MQTT, publie l'état initial et s'abonne aux mises à jour du coordinateur."""
+        """Check MQTT, publish the initial state and subscribe to coordinator updates."""
         from homeassistant.components import mqtt
 
         if not await mqtt.async_wait_for_mqtt_client(self._hass):
-            _LOGGER.warning("Publication MQTT demandée mais le broker MQTT n'est pas disponible.")
+            _LOGGER.warning("MQTT publishing requested but the MQTT broker is not available.")
             return
         if self._source == "local":
-            _LOGGER.info("Source MQTT « local » pas encore gérée : publication des valeurs cloud.")
+            _LOGGER.info("MQTT source 'local' not handled yet: publishing cloud values.")
         if self._mode == "zigbee2mqtt":
             await self._async_publish_bridge()
         await self._async_publish_all()
@@ -187,7 +187,7 @@ class MqttPublisher:
 
     async def _async_publish_all(self) -> None:
         for dev in self._coordinator.data.values():
-            if not dev.est_tete:
+            if not dev.is_head:
                 continue
             if self._mode == "zigbee2mqtt":
                 await self._async_publish_device_z2m(dev)
@@ -197,37 +197,37 @@ class MqttPublisher:
     async def _async_publish_device(self, dev: DanfossDevice) -> None:
         from homeassistant.components import mqtt
 
-        if dev.id not in self._discovery_faite:
+        if dev.id not in self._discovery_done:
             for cfg in self._discovery_configs(dev):
                 await mqtt.async_publish(
                     self._hass, cfg["topic"], json.dumps(cfg["payload"]), qos=0, retain=True
                 )
-            self._discovery_faite.add(dev.id)
+            self._discovery_done.add(dev.id)
         await mqtt.async_publish(
             self._hass,
             self._avail_topic(dev.id),
-            AVAIL_ONLINE if dev.en_ligne else AVAIL_OFFLINE,
+            AVAIL_ONLINE if dev.online else AVAIL_OFFLINE,
             qos=0,
             retain=True,
         )
         await mqtt.async_publish(
             self._hass,
             self._state_topic(dev.id),
-            json.dumps(etat_payload(dev)),
+            json.dumps(state_payload(dev)),
             qos=0,
             retain=True,
         )
 
-    # --- mode zigbee2mqtt ---------------------------------------------------------------------
+    # --- zigbee2mqtt mode ---------------------------------------------------------------------
 
     def _ieee(self, dev: DanfossDevice) -> str:
         base = dev.node_id or dev.id or ""
         return base if base.startswith("0x") else f"0x{base}"
 
     def device_z2m(self, dev: DanfossDevice) -> dict[str, Any]:
-        """Descripteur z2m d'une tête pour bridge/devices (exposé pour les tests)."""
+        """A head's z2m descriptor for bridge/devices (exposed for the tests)."""
         return {
-            "friendly_name": nom_z2m(dev),
+            "friendly_name": name_z2m(dev),
             "ieee_address": self._ieee(dev),
             "type": "EndDevice",
             "supported": True,
@@ -241,7 +241,7 @@ class MqttPublisher:
         }
 
     def bridge_devices(self) -> list[dict[str, Any]]:
-        return [self.device_z2m(d) for d in self._coordinator.data.values() if d.est_tete]
+        return [self.device_z2m(d) for d in self._coordinator.data.values() if d.is_head]
 
     async def _async_publish_bridge(self) -> None:
         from homeassistant.components import mqtt
@@ -259,29 +259,29 @@ class MqttPublisher:
     async def _async_publish_device_z2m(self, dev: DanfossDevice) -> None:
         from homeassistant.components import mqtt
 
-        nom = nom_z2m(dev)
+        name = name_z2m(dev)
         await mqtt.async_publish(
             self._hass,
-            f"{self._base}/{nom}/availability",
-            AVAIL_ONLINE if dev.en_ligne else AVAIL_OFFLINE,
+            f"{self._base}/{name}/availability",
+            AVAIL_ONLINE if dev.online else AVAIL_OFFLINE,
             retain=True,
         )
         await mqtt.async_publish(
-            self._hass, f"{self._base}/{nom}", json.dumps(etat_z2m(dev)), retain=True
+            self._hass, f"{self._base}/{name}", json.dumps(state_z2m(dev)), retain=True
         )
 
-    # --- mode discovery -----------------------------------------------------------------------
+    # --- discovery mode -----------------------------------------------------------------------
 
     def _device_block(self, dev: DanfossDevice) -> dict[str, Any]:
         return {
             "identifiers": [f"{self._base}_{dev.id}"],
-            "name": dev.nom or dev.id,
+            "name": dev.name or dev.id,
             "manufacturer": "Danfoss",
             "model": dev.product_id,
         }
 
     def discovery_configs(self, dev: DanfossDevice) -> list[dict[str, Any]]:
-        """Messages de config discovery {topic, payload} d'une tête (exposé pour les tests)."""
+        """Discovery config messages {topic, payload} for a head (exposed for the tests)."""
         return self._discovery_configs(dev)
 
     def _discovery_configs(self, dev: DanfossDevice) -> list[dict[str, Any]]:
@@ -299,7 +299,7 @@ class MqttPublisher:
                 "unique_id": f"{self._base}_{dev.id}_{s['key']}",
                 "object_id": f"danfoss_{dev.id}_{s['key']}",
                 "state_topic": state,
-                "value_template": f"{{{{ value_json.{s['champ']} }}}}",
+                "value_template": f"{{{{ value_json.{s['field']} }}}}",
                 "device": device,
                 **avail,
             }
@@ -315,7 +315,7 @@ class MqttPublisher:
                 }
             )
         for b in _BINARY:
-            tpl = f"{{{{ 'ON' if value_json.{b['champ']} else 'OFF' }}}}"
+            tpl = f"{{{{ 'ON' if value_json.{b['field']} else 'OFF' }}}}"
             payload = {
                 "name": b["name"],
                 "unique_id": f"{self._base}_{dev.id}_{b['key']}",
