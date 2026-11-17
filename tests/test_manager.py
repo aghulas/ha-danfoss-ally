@@ -65,6 +65,26 @@ def test_gateway_ids():
     assert LocalTunnelManager(_gw()).gateway_ids == {"gw1"}
 
 
+def test_descale_ok(monkeypatch):
+    """descale opens a link, writes 0x4010/0x4011 and closes (status 0 -> True)."""
+    monkeypatch.setattr(tunnel, "write_descale", lambda link, d, n, day, hour: 0)
+    state = {}
+
+    class _L:
+        def close(self):
+            state["closed"] = True
+
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: _L())
+    assert mgr.descale(Head("dev1", "node1", "gw1"), "wednesday", "13:00") is True
+    assert state["closed"] is True
+
+
+def test_descale_unknown_gateway():
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: None)
+    with pytest.raises(tunnel.LocalUnavailable):
+        mgr.descale(Head("devX", "nodeX", "gw-inconnue"), "monday", "08:00")
+
+
 def test_survey_heads_summarizes(monkeypatch):
     """survey_heads runs the tunnel survey and summarizes each head (read-only)."""
     raw = {

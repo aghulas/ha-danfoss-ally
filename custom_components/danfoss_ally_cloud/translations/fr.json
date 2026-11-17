@@ -90,6 +90,28 @@
     }
    }
   },
+  "set_descaling": {
+   "name": "Régler le dégommage de vanne",
+   "description": "Définit le jour et l'heure hebdomadaires de dégommage de la vanne de la tête, via le tunnel Zigbee local (têtes isolées d'un produit vérifié).",
+   "fields": {
+    "target": {
+     "name": "Tête",
+     "description": "Tête cible : type device et son identifiant d'appareil (voir l'exemple du service)."
+    },
+    "day": {
+     "name": "Jour",
+     "description": "Jour de la semaine du cycle de dégommage."
+    },
+    "time": {
+     "name": "Heure",
+     "description": "Heure (HH:MM) du cycle de dégommage."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
+  },
   "get_schedule": {
    "name": "Lire le programme",
    "description": "Programme hebdomadaire d'une pièce ou d'une tête isolée.",
@@ -207,6 +229,21 @@
   },
   "local_disabled": {
    "message": "Le tunnel local n'est pas activé sur ce compte."
+  },
+  "device_only": {
+   "message": "Cette action par tunnel local vise une tête (type « device »)."
+  },
+  "unverified_product": {
+   "message": "L'écriture n'est pas vérifiée pour ce produit."
+  },
+  "local_unreachable": {
+   "message": "La tête n'est pas joignable par le tunnel local."
+  },
+  "local_write_failed": {
+   "message": "L'écriture par tunnel local a été refusée par la tête."
+  },
+  "invalid_day": {
+   "message": "Jour inconnu (attendu : mon, tue, wed, thu, fri, sat ou sun)."
   }
  }
 }

@@ -90,6 +90,28 @@
         }
       }
     },
+    "set_descaling": {
+      "name": "Set valve descaling",
+      "description": "Set the head's weekly valve-descaling day and time, over the local Zigbee tunnel (isolated heads of a verified product).",
+      "fields": {
+        "target": {
+          "name": "Head",
+          "description": "Target head: type device and its device id (see the service example)."
+        },
+        "day": {
+          "name": "Day",
+          "description": "Weekday of the descaling cycle."
+        },
+        "time": {
+          "name": "Time",
+          "description": "Time of day (HH:MM) of the descaling cycle."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
     "get_schedule": {
       "name": "Get schedule",
       "description": "Weekly schedule of a room or an isolated head.",
@@ -207,6 +229,21 @@
     },
     "local_disabled": {
       "message": "The local tunnel is not enabled on this account."
+    },
+    "device_only": {
+      "message": "This local-tunnel action targets a head (type 'device')."
+    },
+    "unverified_product": {
+      "message": "Writing is not verified for this product."
+    },
+    "local_unreachable": {
+      "message": "The head is not reachable through the local tunnel."
+    },
+    "local_write_failed": {
+      "message": "The local-tunnel write was refused by the head."
+    },
+    "invalid_day": {
+      "message": "Unknown day (expected mon, tue, wed, thu, fri, sat or sun)."
     }
   }
 }

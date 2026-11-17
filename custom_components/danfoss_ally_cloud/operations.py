@@ -13,6 +13,7 @@ The durable room setpoint is NOT here: it is carried by the room thermostat (PR 
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -20,9 +21,11 @@ from typing import TYPE_CHECKING
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_call_later
 
-from .api import ScheduleValidationError, UnknownTargetError, head_state
+from .api import ScheduleValidationError, UnknownTargetError, head_state, write_allowed
 from .api import schedule as sch
 from .api.client import CloudError
+from .api.local import tunnel
+from .api.local.manager import Head
 from .const import DATA_COORDINATOR, DATA_JOBS, DATA_LOCAL, DATA_SCHEDULES
 from .writejob import (
     HEAD_APPLIED,
@@ -112,6 +115,63 @@ async def local_survey(hass: HomeAssistant, store: dict) -> dict:
         "reachable": reachable,
         "heads": summaries,
     }
+
+
+def _tunnel_head(coordinator: DanfossCoordinator, local, target: dict) -> Head:
+    """Resolve a {type:"device", id} target to a tunnel-addressable Head, or raise.
+
+    Guards shared by every local-tunnel write (contract write-safety): the target must be an
+    isolated head (type=device), of a write-verified product, with a known Zigbee node and a
+    gateway the local manager can reach. Errors are stable contract codes.
+    """
+    if target.get("type") != "device":
+        raise OperationError("device_only", "a local tunnel write targets a head (type=device)")
+    dev = coordinator.data.get(str(target.get("id")))
+    if dev is None or not dev.is_head:
+        raise OperationError("unknown_target", f"head not found: {target.get('id')}")
+    if not write_allowed(dev):
+        raise OperationError("unverified_product", "write not verified for this product")
+    if not dev.node_id or not dev.mesh_id or dev.mesh_id not in local.manager.gateway_ids:
+        raise OperationError("local_unreachable", "head not reachable through the local tunnel")
+    return Head(dev.id, dev.node_id, dev.mesh_id)
+
+
+def _require_local(store: dict):
+    local = store.get(DATA_LOCAL)
+    if local is None:
+        raise OperationError("local_disabled", "local tunnel not enabled on this account")
+    return local
+
+
+async def _run_tunnel(hass: HomeAssistant, func, *args) -> bool:
+    """Run a blocking tunnel write off-thread, mapping tunnel errors to contract codes."""
+    try:
+        return await hass.async_add_executor_job(func, *args)
+    except tunnel.LocalUnavailable as err:
+        raise OperationError("local_unreachable", str(err)) from err
+    except tunnel.LocalError as err:
+        raise OperationError("local_write_failed", str(err)) from err
+
+
+_HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+async def set_descaling(
+    hass: HomeAssistant, store: dict, target: dict, day: str, hour: str
+) -> dict:
+    """C2 — set the head's weekly valve-descaling day/time via the local tunnel (contract §4.4).
+
+    ``day`` is a 3-letter key ("mon".."sun", as the schedule services use); ``hour`` is "HH:MM".
+    """
+    local = _require_local(store)
+    head = _tunnel_head(store[DATA_COORDINATOR], local, target)
+    if day not in sch.DAYS:
+        raise OperationError("invalid_day", f"unknown day: {day}")
+    if not _HHMM.match(hour or ""):
+        raise OperationError("invalid_time", f"invalid time: {hour}")
+    tunnel_day = tunnel.WEEKDAYS[sch.DAYS.index(day)]
+    accepted = await _run_tunnel(hass, local.manager.descale, head, tunnel_day, hour)
+    return {"target": target, "day": day, "time": hour, "accepted": accepted}
 
 
 def validate_payload(days: dict) -> dict:

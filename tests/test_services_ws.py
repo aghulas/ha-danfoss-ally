@@ -76,6 +76,19 @@ async def test_service_get_local_survey_disabled(setup):
         )
 
 
+async def test_service_set_descaling_disabled(setup):
+    """With the local tunnel off, set_descaling raises the translated local_disabled error."""
+    hass, _, _ = setup
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            "set_descaling",
+            {"target": {"type": "device", "id": "a"}, "day": "wed", "time": "13:00"},
+            blocking=True,
+            return_response=True,
+        )
+
+
 async def test_service_set_schedule_invalide(setup):
     hass, _, fake = setup
     with pytest.raises(ServiceValidationError):
@@ -181,6 +194,18 @@ async def test_ws_local_survey_disabled(setup):
     hass, _, _ = setup
     conn = _FakeConn()
     ws.ws_local_survey(hass, conn, {"id": 9, "type": "danfoss_ally_cloud/local_survey"})
+    await hass.async_block_till_done()
+    assert conn.errors and conn.errors[-1][0] == "local_disabled"
+
+
+async def test_ws_set_descaling_disabled(setup):
+    hass, _, _ = setup
+    conn = _FakeConn(is_admin=True)
+    ws.ws_set_descaling(
+        hass,
+        conn,
+        {"id": 10, "target": {"type": "device", "id": "a"}, "day": "wed", "time": "13:00"},
+    )
     await hass.async_block_till_done()
     assert conn.errors and conn.errors[-1][0] == "local_disabled"
 
