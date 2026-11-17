@@ -37,7 +37,7 @@ DOMAIN = "danfoss_ally_cloud"
 
 # Plateformes exposées. v0.2 : climate (consigne) + capteurs + switch (verrou enfant,
 # détection fenêtre). number viendra avec d'autres réglages numériques (borne haute…).
-PLATFORMS = ["climate", "sensor", "binary_sensor", "switch"]
+PLATFORMS = ["climate", "sensor", "binary_sensor", "switch", "number"]
 
 # Clés de hass.data[DOMAIN][entry_id].
 DATA_COORDINATOR = "coordinator"

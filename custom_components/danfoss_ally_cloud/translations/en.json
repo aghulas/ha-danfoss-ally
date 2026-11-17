@@ -65,6 +65,14 @@
       "pre_chauffage": {
         "name": "Pre-heating"
       }
+    },
+    "number": {
+      "consigne_confort": {
+        "name": "Comfort setpoint"
+      },
+      "consigne_reduit": {
+        "name": "Setback setpoint"
+      }
     }
   },
   "services": {
