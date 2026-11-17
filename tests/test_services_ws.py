@@ -110,6 +110,18 @@ async def test_service_overrides_disabled(setup):
         )
 
 
+async def test_service_set_window_detection_disabled(setup):
+    hass, _, _ = setup
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            "set_window_detection",
+            {"target": {"type": "device", "id": "a"}, "enabled": True},
+            blocking=True,
+            return_response=True,
+        )
+
+
 async def test_service_set_schedule_invalide(setup):
     hass, _, fake = setup
     with pytest.raises(ServiceValidationError):
@@ -241,6 +253,16 @@ async def test_ws_overrides_disabled(setup):
     ws.ws_clear_override(hass, conn, {"id": 12, "target": {"type": "device", "id": "a"}})
     await hass.async_block_till_done()
     assert [c for c, _ in conn.errors].count("local_disabled") == 2
+
+
+async def test_ws_set_window_detection_disabled(setup):
+    hass, _, _ = setup
+    conn = _FakeConn(is_admin=True)
+    ws.ws_set_window_detection(
+        hass, conn, {"id": 13, "target": {"type": "device", "id": "a"}, "enabled": True}
+    )
+    await hass.async_block_till_done()
+    assert conn.errors and conn.errors[-1][0] == "local_disabled"
 
 
 async def test_ws_jobs_subscribe(setup):

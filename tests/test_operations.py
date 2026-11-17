@@ -128,6 +128,10 @@ class _FakeManagerW:
     def read_schedule(self, head):
         return self.schedule
 
+    def write_window_detection(self, head, enabled):
+        self.calls.append(("window", head.dev_id, enabled))
+        return enabled
+
 
 class _FakeLocalW:
     def __init__(self, gateways=("gw-1",)):
@@ -278,6 +282,25 @@ async def test_clear_override_no_schedule():
     with pytest.raises(ops.OperationError) as exc:
         await ops.clear_override(_FakeHass(), store, _DEVICE)
     assert exc.value.code == "no_schedule"
+
+
+# --- C3: window detection (local write) --------------------------------------------------------
+
+
+async def test_set_window_detection_ok():
+    store, _ = _store()
+    local = _FakeLocalW()
+    store[DATA_LOCAL] = local
+    res = await ops.set_window_detection(_FakeHass(), store, _DEVICE, True)
+    assert res["window_detection"] is True and res["published"] is True
+    assert local.manager.calls == [("window", "a", True)]
+
+
+async def test_set_window_detection_disabled():
+    store, _ = _store()
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.set_window_detection(_FakeHass(), store, _DEVICE, True)
+    assert exc.value.code == "local_disabled"
 
 
 # --- Lecture -----------------------------------------------------------------------------------

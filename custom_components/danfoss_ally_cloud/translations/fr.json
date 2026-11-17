@@ -144,6 +144,24 @@
     }
    }
   },
+  "set_window_detection": {
+   "name": "Régler la détection de fenêtre (local)",
+   "description": "Écrit la détection de fenêtre ouverte d'une tête via le tunnel Zigbee local (têtes isolées d'un produit vérifié).",
+   "fields": {
+    "target": {
+     "name": "Tête",
+     "description": "Tête cible : type device et son identifiant d'appareil (voir l'exemple du service)."
+    },
+    "enabled": {
+     "name": "Activée",
+     "description": "Active ou désactive la détection de fenêtre ouverte."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
+  },
   "get_schedule": {
    "name": "Lire le programme",
    "description": "Programme hebdomadaire d'une pièce ou d'une tête isolée.",

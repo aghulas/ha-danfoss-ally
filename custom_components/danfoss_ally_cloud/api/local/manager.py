@@ -133,6 +133,20 @@ class LocalTunnelManager:
         finally:
             link.close()
 
+    def write_window_detection(self, head: Head, enabled: bool) -> Any:
+        """Write open-window detection (DP 116) through the local tunnel. Returns the published
+        value. Raises LocalError/LocalUnavailable. The authoritative read is attribute 0x4051
+        (``tunnel.read_window_detection`` / the local survey)."""
+        if head.gateway_id not in self._gateways:
+            raise tunnel.LocalUnavailable(f"unknown gateway: {head.gateway_id}")
+        link = self._open_link(self._gateways[head.gateway_id])
+        try:
+            return tunnel.write_setting_dp(
+                link, head.dev_id, head.node_id, "window_detection", bool(enabled)
+            )
+        finally:
+            link.close()
+
     def descale(self, head: Head, day: str, hour: str) -> bool:
         """Set the weekly valve descaling day/time (0x4010/0x4011).
 
