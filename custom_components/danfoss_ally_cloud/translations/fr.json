@@ -65,6 +65,14 @@
    "pre_chauffage": {
     "name": "Pré-chauffage"
    }
+  },
+  "number": {
+   "consigne_confort": {
+    "name": "Consigne confort"
+   },
+   "consigne_reduit": {
+    "name": "Consigne réduit"
+   }
   }
  },
  "services": {
