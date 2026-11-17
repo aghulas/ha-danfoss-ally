@@ -13,15 +13,29 @@ version = "0.1.0"
 description = "Accès à l'API cloud non officielle Danfoss Ally (voie 1a) : client, décodage DP, écritures gardées, clés passerelles, tunnel Zigbee local."
 readme = "custom_components/danfoss_ally_cloud/api/README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "aghulas" }]
-dependencies = ["pycryptodome", "requests"]
+keywords = ["danfoss", "ally", "thermostat", "zigbee", "tuya", "home-assistant", "heating"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Home Automation",
+  "Typing :: Typed",
+]
+dependencies = ["pycryptodome>=3.20", "requests>=2.31"]
 
 [project.optional-dependencies]
-local = ["tinytuya"]
+local = ["tinytuya>=1.15"]
 
 [project.urls]
 Homepage = "https://github.com/aghulas/ha-danfoss-ally"
+Repository = "https://github.com/aghulas/ha-danfoss-ally"
+Issues = "https://github.com/aghulas/ha-danfoss-ally/issues"
 
 [tool.setuptools]
 packages = ["pydanfoss_cloud", "pydanfoss_cloud._tuya", "pydanfoss_cloud.local"]
