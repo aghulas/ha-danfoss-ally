@@ -34,6 +34,13 @@ liste de groupes `{id, children: {"6": [{id: devId}, …]}}`. Liste des pièces 
 Un jour est **valide si ce décompte est ≤ 6** (au plus trois plages séparées). Au-delà, **le cloud accepte et
 affiche le programme, mais la tête perd toutes les transitions du jour**. Le backend refuse avant tout envoi.
 
+> **Même limite matérielle des deux côtés.** « R1 au niveau cloud : ≤ 6 transitions/jour, règle de bord à
+> `00:00` » (ce document) et la formulation côté tunnel local du connecteur MCP (« 1 à 6 transitions,
+> la 1ʳᵉ à `00:00` ») décrivent **la même contrainte de la tête** (le firmware Danfoss ne retient que six
+> transitions par jour, la première posée à minuit), vue respectivement par l'API cloud et par le programme
+> relu dans la tête par le tunnel. Elles doivent rester cohérentes : un correctif d'un côté (décompte, règle
+> de bord, nombre maximal) doit être reporté de l'autre, et non traité comme une divergence à arbitrer.
+
 **R2 — Écrire un jour renvoie toute la semaine** aux têtes, avec les consignes confort / réduit du moment.
 
 **R3 — Le programme porte ses propres consignes.** Après tout changement de la consigne confort ou réduit
@@ -157,8 +164,20 @@ Tous passent par `CloudClient._request(api, version, body)`. Formes relevées su
 
 ### 4.1 Programme hebdomadaire
 
-Corps commun : `{"devId": R, "gwId": R, "pid": <product id>, "resId": R, "resType": T}` avec, pour une pièce,
-`R` = `group_id` en chaîne et `T` = 2 ; pour une tête isolée, `R` = `devId` et `T` = 1.
+Corps commun : `{"devId": R, "gwId": G, "pid": <product id>, "resId": R, "resType": T}`.
+
+| Cible | `R` (= `devId`/`resId`) | `G` (= `gwId`) | `T` (= `resType`) |
+|---|---|---|---|
+| Pièce | `group_id` (chaîne) | `group_id` (= `R`) | 2 |
+| Tête isolée | `devId` | `meshId` (le `devId` de la passerelle de la tête) | 1 |
+
+Pour une tête isolée, `gwId` est le **`meshId`** (la passerelle), **pas** le `devId` de la tête : c'est la
+forme relevée sur l'application et **rejouée en réel**, implémentée par `_resolve_target` dans
+`api/client.py` (`gw_id = dev.mesh_id or devId`, avec repli sur le `devId` si le `meshId` manque). Le code
+reste la référence ; ce tableau a été aligné sur lui le 17/11/2026 (une version antérieure du contrat
+indiquait `gwId = devId` pour la tête isolée). Réserve : la voie « tête isolée » a été relevée sur l'app
+mais pas encore éprouvée bout-en-bout en réel (les essais du 16/11/2026 portaient sur des pièces) — à
+confirmer lors d'un essai sur une tête non groupée.
 
 | Opération | API | Version | Corps (en plus du corps commun) |
 |---|---|---|---|
