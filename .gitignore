@@ -5,6 +5,9 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 *.egg-info/
+# Artefacts de build du paquet pydanfoss-cloud (python -m build)
+dist/
+build/
 .coverage
 .coverage.*
 htmlcov/
