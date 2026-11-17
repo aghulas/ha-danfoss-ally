@@ -6,7 +6,17 @@
  * absence, ces fonctions se dégradent proprement (null / liste vide) au lieu de
  * remonter une erreur bloquante.
  */
-import type { HassLike, Info, Room, Schedule, Target } from "./types";
+import type {
+  DayKey,
+  HassLike,
+  Info,
+  Room,
+  Schedule,
+  Target,
+  TimeRange,
+  ValidateResponse,
+  WriteJob,
+} from "./types";
 
 /** Récupère la version/les droits côté serveur, ou `null` si la commande manque. */
 export async function fetchInfo(hass: HassLike): Promise<Info | null> {
@@ -55,5 +65,99 @@ export async function fetchSchedule(
     });
   } catch {
     return null;
+  }
+}
+
+/** Erreur typée d'une commande d'écriture (code stable du contrat §5.4). */
+export class ScheduleCommandError extends Error {
+  public readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+    this.name = "ScheduleCommandError";
+  }
+}
+
+function toCommandError(err: unknown): ScheduleCommandError {
+  // Home Assistant renvoie `{ code, message }` sur un échec de commande WS.
+  if (err && typeof err === "object" && "code" in err) {
+    const e = err as { code?: unknown; message?: unknown };
+    return new ScheduleCommandError(
+      typeof e.code === "string" ? e.code : "unknown",
+      typeof e.message === "string" ? e.message : String(e.code),
+    );
+  }
+  return new ScheduleCommandError("unknown", err instanceof Error ? err.message : String(err));
+}
+
+/**
+ * Valide un ensemble de jours côté serveur (contrat §5.3 `schedule/validate`).
+ * Renvoie `null` si la commande manque : l'interface retombe alors sur sa
+ * validation locale (R1 portée en TS).
+ */
+export async function validateSchedule(
+  hass: HassLike,
+  days: Partial<Record<DayKey, TimeRange[]>>,
+): Promise<ValidateResponse | null> {
+  try {
+    return await hass.callWS<ValidateResponse>({
+      type: "danfoss_ally_cloud/schedule/validate",
+      days,
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Écrit les jours fournis (contrat §5.3 `schedule/set`, administrateur). Lève une
+ * `ScheduleCommandError` au code stable en cas de refus (droits, R1, cloud…).
+ */
+export async function setSchedule(
+  hass: HassLike,
+  target: Target,
+  days: Partial<Record<DayKey, TimeRange[]>>,
+): Promise<WriteJob> {
+  try {
+    return await hass.callWS<WriteJob>({
+      type: "danfoss_ally_cloud/schedule/set",
+      target,
+      days,
+    });
+  } catch (err) {
+    throw toCommandError(err);
+  }
+}
+
+/** Réécrit les sept jours puis publie `at_home` (contrat §5.3 `schedule/restore`, R4). */
+export async function restoreSchedule(hass: HassLike, target: Target): Promise<WriteJob> {
+  try {
+    return await hass.callWS<WriteJob>({
+      type: "danfoss_ally_cloud/schedule/restore",
+      target,
+    });
+  } catch (err) {
+    throw toCommandError(err);
+  }
+}
+
+/**
+ * S'abonne au flux des lots d'écriture (contrat §5.3 `jobs/subscribe`). Renvoie
+ * une fonction de désabonnement. Sans connexion WS (démo, tests), l'abonnement
+ * ne fait rien et la fonction renvoyée est un no-op.
+ */
+export async function subscribeJobs(
+  hass: HassLike,
+  callback: (job: WriteJob) => void,
+): Promise<() => void> {
+  if (!hass.connection) {
+    return () => {};
+  }
+  try {
+    return await hass.connection.subscribeMessage<WriteJob>(callback, {
+      type: "danfoss_ally_cloud/jobs/subscribe",
+    });
+  } catch {
+    return () => {};
   }
 }

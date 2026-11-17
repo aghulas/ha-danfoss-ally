@@ -603,7 +603,58 @@ const STRINGS = {
     day_sat: "Sat",
     day_sun: "Sun",
     range_label: "Comfort {start}–{end}",
-    degree: "{value} °C"
+    degree: "{value} °C",
+    // --- Lot 5 : édition ---
+    edit: "Edit",
+    cancel: "Cancel",
+    save: "Save",
+    saving: "Saving…",
+    discard: "Discard changes",
+    add_range: "Add a range",
+    delete_range: "Delete this range",
+    range_start: "Start",
+    range_end: "End",
+    transitions_count: "{n} / {max}",
+    transitions_aria: "{day}: {n} of {max} transitions",
+    transitions_label: "transitions",
+    midnight_note: "The thermostat drops the midnight step and keeps the previous evening setpoint until the first range.",
+    copy_day: "Copy to…",
+    copy_apply: "Copy",
+    copy_cancel: "Close",
+    copy_heading: "Copy {day} to:",
+    copy_select_all: "All days",
+    no_changes: "No unsaved changes.",
+    save_blocked: "Fix the invalid days before saving.",
+    unsaved_hint: "Unsaved changes — save or discard.",
+    leave_confirm: "Discard your unsaved schedule changes?",
+    beforeunload: "You have unsaved schedule changes.",
+    // Erreurs (contrat §5.4)
+    err_invalid_time: "Invalid time",
+    err_empty_or_reversed: "Empty or reversed range",
+    err_overlap: "Overlapping ranges",
+    err_too_many_transitions: "Too many transitions (max {max})",
+    err_unknown_target: "Unknown room",
+    err_grouped_device: "Grouped thermostat: target its room",
+    err_not_admin: "You are not an administrator",
+    err_cloud_refused: "The cloud refused the change",
+    err_session_expired: "Session expired, retry shortly",
+    err_unknown: "The change could not be sent",
+    // Suivi du lot
+    job_heading: "Last send",
+    job_status_sent: "Sent to the cloud",
+    job_status_applied: "Applied to all thermostats",
+    job_status_partial: "Applied to some thermostats",
+    job_status_unverified: "Sent (not verified)",
+    job_status_failed: "Refused by the cloud",
+    head_job_pending: "Pending",
+    head_job_applied: "Applied",
+    head_job_mismatch: "Different",
+    head_job_unreachable: "Unreachable",
+    head_job_unverified: "Not verified",
+    // Retour au programme (R4)
+    restore_schedule: "Back to schedule",
+    restore_hint: "A thermostat no longer follows its schedule.",
+    restore_done: "Restore sent."
   },
   fr: {
     card_name: "Danfoss Ally — Programme",
@@ -639,7 +690,58 @@ const STRINGS = {
     day_sat: "Sam",
     day_sun: "Dim",
     range_label: "Confort {start}–{end}",
-    degree: "{value} °C"
+    degree: "{value} °C",
+    // --- Lot 5 : édition ---
+    edit: "Modifier",
+    cancel: "Annuler",
+    save: "Enregistrer",
+    saving: "Enregistrement…",
+    discard: "Annuler les modifications",
+    add_range: "Ajouter une plage",
+    delete_range: "Supprimer cette plage",
+    range_start: "Début",
+    range_end: "Fin",
+    transitions_count: "{n} / {max}",
+    transitions_aria: "{day} : {n} transitions sur {max}",
+    transitions_label: "transitions",
+    midnight_note: "La tête abandonne la transition de minuit et garde, jusqu'à la première plage, la consigne de la veille au soir.",
+    copy_day: "Copier vers…",
+    copy_apply: "Copier",
+    copy_cancel: "Fermer",
+    copy_heading: "Copier {day} vers :",
+    copy_select_all: "Tous les jours",
+    no_changes: "Aucune modification à enregistrer.",
+    save_blocked: "Corrigez les jours invalides avant d'enregistrer.",
+    unsaved_hint: "Modifications non enregistrées — enregistrez ou annulez.",
+    leave_confirm: "Abandonner les modifications non enregistrées du programme ?",
+    beforeunload: "Des modifications du programme ne sont pas enregistrées.",
+    // Erreurs (contrat §5.4)
+    err_invalid_time: "Heure invalide",
+    err_empty_or_reversed: "Plage vide ou inversée",
+    err_overlap: "Plages qui se chevauchent",
+    err_too_many_transitions: "Trop de transitions (max {max})",
+    err_unknown_target: "Pièce inconnue",
+    err_grouped_device: "Tête groupée : visez sa pièce",
+    err_not_admin: "Vous n'êtes pas administrateur",
+    err_cloud_refused: "Le cloud a refusé la modification",
+    err_session_expired: "Session expirée, réessayez dans un instant",
+    err_unknown: "La modification n'a pas pu être envoyée",
+    // Suivi du lot
+    job_heading: "Dernier envoi",
+    job_status_sent: "Envoyé au cloud",
+    job_status_applied: "Appliqué sur toutes les têtes",
+    job_status_partial: "Appliqué sur une partie des têtes",
+    job_status_unverified: "Envoyé (non vérifié)",
+    job_status_failed: "Refusé par le cloud",
+    head_job_pending: "En attente",
+    head_job_applied: "Appliqué",
+    head_job_mismatch: "Différent",
+    head_job_unreachable: "Injoignable",
+    head_job_unverified: "Non vérifié",
+    // Retour au programme (R4)
+    restore_schedule: "Revenir au programme",
+    restore_hint: "Une tête ne suit plus son programme.",
+    restore_done: "Retour au programme envoyé."
   }
 };
 function lang(hass) {
@@ -668,6 +770,22 @@ function dayLabel(hass, day) {
 }
 function language(hass) {
   return lang(hass);
+}
+const ERROR_KEYS = /* @__PURE__ */ new Set([
+  "err_invalid_time",
+  "err_empty_or_reversed",
+  "err_overlap",
+  "err_too_many_transitions",
+  "err_unknown_target",
+  "err_grouped_device",
+  "err_not_admin",
+  "err_cloud_refused",
+  "err_session_expired",
+  "err_unknown"
+]);
+function errorText(hass, code, vars = {}) {
+  const key = `err_${code}`;
+  return t(hass, ERROR_KEYS.has(key) ? key : "err_unknown", vars);
 }
 async function fetchInfo(hass) {
   try {
@@ -701,6 +819,68 @@ async function fetchSchedule(hass, target, refresh = false) {
     });
   } catch {
     return null;
+  }
+}
+class ScheduleCommandError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "ScheduleCommandError";
+  }
+}
+function toCommandError(err) {
+  if (err && typeof err === "object" && "code" in err) {
+    const e2 = err;
+    return new ScheduleCommandError(
+      typeof e2.code === "string" ? e2.code : "unknown",
+      typeof e2.message === "string" ? e2.message : String(e2.code)
+    );
+  }
+  return new ScheduleCommandError("unknown", err instanceof Error ? err.message : String(err));
+}
+async function validateSchedule(hass, days) {
+  try {
+    return await hass.callWS({
+      type: "danfoss_ally_cloud/schedule/validate",
+      days
+    });
+  } catch {
+    return null;
+  }
+}
+async function setSchedule(hass, target, days) {
+  try {
+    return await hass.callWS({
+      type: "danfoss_ally_cloud/schedule/set",
+      target,
+      days
+    });
+  } catch (err) {
+    throw toCommandError(err);
+  }
+}
+async function restoreSchedule(hass, target) {
+  try {
+    return await hass.callWS({
+      type: "danfoss_ally_cloud/schedule/restore",
+      target
+    });
+  } catch (err) {
+    throw toCommandError(err);
+  }
+}
+async function subscribeJobs(hass, callback) {
+  if (!hass.connection) {
+    return () => {
+    };
+  }
+  try {
+    return await hass.connection.subscribeMessage(callback, {
+      type: "danfoss_ally_cloud/jobs/subscribe"
+    });
+  } catch {
+    return () => {
+    };
   }
 }
 var __defProp$1 = Object.defineProperty;
@@ -855,6 +1035,176 @@ function formatReadAt(iso, lang2) {
     timeStyle: "short"
   }).format(date);
 }
+const SNAP_MINUTES = 5;
+const MIN_RANGE_MINUTES = SNAP_MINUTES;
+const LAST_MINUTE = 23 * 60 + 59;
+function formatHHMM(minutes) {
+  const m2 = (Math.round(minutes) % 1440 + 1440) % 1440;
+  const h2 = Math.floor(m2 / 60);
+  return `${String(h2).padStart(2, "0")}:${String(m2 % 60).padStart(2, "0")}`;
+}
+function snapMinutes(minutes) {
+  const snapped = Math.round(minutes / SNAP_MINUTES) * SNAP_MINUTES;
+  return Math.max(0, Math.min(LAST_MINUTE, snapped));
+}
+function replace(ranges, index, next) {
+  return ranges.map((r2, i2) => i2 === index ? next : r2);
+}
+function sortRanges(ranges) {
+  return [...ranges].sort(
+    (a2, b2) => (parseHHMM(a2.start) ?? Infinity) - (parseHHMM(b2.start) ?? Infinity)
+  );
+}
+function firstFreeSlot(ranges, durationMin = 60) {
+  const parsed = ranges.map((r2) => ({ s: parseHHMM(r2.start), e: parseHHMM(r2.end) })).filter(
+    (r2) => r2.s !== null && r2.e !== null && r2.e > r2.s
+  ).sort((a2, b2) => a2.s - b2.s);
+  let cursor = 0;
+  for (const r2 of parsed) {
+    if (r2.s - cursor >= durationMin) {
+      return { start: cursor, end: cursor + durationMin };
+    }
+    cursor = Math.max(cursor, r2.e);
+  }
+  if (1440 - cursor >= durationMin) {
+    return { start: cursor, end: cursor + durationMin };
+  }
+  return null;
+}
+function addRange(ranges) {
+  if (ranges.length === 0) {
+    return [{ start: "08:00", end: "17:00" }];
+  }
+  const slot = firstFreeSlot(ranges, 60);
+  if (!slot) {
+    return ranges;
+  }
+  return sortRanges([
+    ...ranges,
+    { start: formatHHMM(slot.start), end: formatHHMM(slot.end) }
+  ]);
+}
+function deleteRange(ranges, index) {
+  return ranges.filter((_2, i2) => i2 !== index);
+}
+function moveRange(ranges, index, deltaMin) {
+  const r2 = ranges[index];
+  if (!r2) {
+    return ranges;
+  }
+  const s2 = parseHHMM(r2.start);
+  const e2 = parseHHMM(r2.end);
+  if (s2 === null || e2 === null) {
+    return ranges;
+  }
+  const dur = e2 - s2;
+  let ns = snapMinutes(s2 + deltaMin);
+  if (ns + dur > LAST_MINUTE) {
+    ns = LAST_MINUTE - dur;
+  }
+  if (ns < 0) {
+    ns = 0;
+  }
+  return replace(ranges, index, { start: formatHHMM(ns), end: formatHHMM(ns + dur) });
+}
+function resizeRange(ranges, index, edge, deltaMin) {
+  const r2 = ranges[index];
+  if (!r2) {
+    return ranges;
+  }
+  const s2 = parseHHMM(r2.start);
+  const e2 = parseHHMM(r2.end);
+  if (s2 === null || e2 === null) {
+    return ranges;
+  }
+  if (edge === "start") {
+    const ns = Math.min(snapMinutes(s2 + deltaMin), e2 - MIN_RANGE_MINUTES);
+    return replace(ranges, index, { start: formatHHMM(Math.max(0, ns)), end: r2.end });
+  }
+  const ne = Math.max(snapMinutes(e2 + deltaMin), s2 + MIN_RANGE_MINUTES);
+  return replace(ranges, index, { start: r2.start, end: formatHHMM(Math.min(LAST_MINUTE, ne)) });
+}
+function setRangeTime(ranges, index, edge, value) {
+  const r2 = ranges[index];
+  if (!r2) {
+    return ranges;
+  }
+  return replace(ranges, index, edge === "start" ? { ...r2, start: value } : { ...r2, end: value });
+}
+function cloneDays(days) {
+  const out = {};
+  for (const [day, ranges] of Object.entries(days)) {
+    out[day] = ranges.map((r2) => ({ ...r2 }));
+  }
+  return out;
+}
+function copyDay(days, from, targets) {
+  const source = (days[from] ?? []).map((r2) => ({ ...r2 }));
+  const out = cloneDays(days);
+  for (const target of targets) {
+    if (target !== from) {
+      out[target] = source.map((r2) => ({ ...r2 }));
+    }
+  }
+  return out;
+}
+function fingerprint(ranges) {
+  return sortRanges(ranges).map((r2) => `${r2.start}-${r2.end}`).join("|");
+}
+function rangesEqual(a2, b2) {
+  return fingerprint(a2) === fingerprint(b2);
+}
+function modifiedDays(original, draft, dayKeys) {
+  return dayKeys.filter((day) => !rangesEqual(original[day] ?? [], draft[day] ?? []));
+}
+const MAX_TRANSITIONS_PER_DAY = 6;
+function countTransitions(ranges) {
+  const starts = new Set(ranges.map((r2) => r2.start));
+  let count = 0;
+  for (const r2 of ranges) {
+    if (r2.start !== 0) {
+      count += 1;
+    }
+    if (!starts.has(r2.end)) {
+      count += 1;
+    }
+  }
+  return { count, impliedMidnight: ranges.length > 0 && !starts.has(0) };
+}
+function validateDay(ranges, day = null) {
+  const errors = [];
+  const parsed = [];
+  for (const range of ranges) {
+    const start = parseHHMM(range.start);
+    const end = parseHHMM(range.end);
+    if (start === null || end === null) {
+      errors.push({ code: "invalid_time", day });
+      continue;
+    }
+    if (start >= end) {
+      errors.push({ code: "empty_or_reversed", day });
+      continue;
+    }
+    parsed.push({ start, end });
+  }
+  parsed.sort((a2, b2) => a2.start - b2.start);
+  for (let i2 = 1; i2 < parsed.length; i2 += 1) {
+    if (parsed[i2].start < parsed[i2 - 1].end) {
+      errors.push({ code: "overlap", day });
+      break;
+    }
+  }
+  const { count, impliedMidnight } = countTransitions(parsed);
+  if (count > MAX_TRANSITIONS_PER_DAY) {
+    errors.push({ code: "too_many_transitions", day });
+  }
+  return {
+    transitions: count,
+    impliedMidnight,
+    valid: errors.length === 0,
+    errors
+  };
+}
 const CARD_VERSION = "0.1.0";
 function needsReload(cardVersion, serverVersion) {
   if (!serverVersion) {
@@ -880,6 +1230,39 @@ let DanfossAllyScheduleCard = class extends i {
     this._schedule = null;
     this._loaded = false;
     this._refreshing = false;
+    this._editing = false;
+    this._draft = null;
+    this._saving = false;
+    this._error = null;
+    this._job = null;
+    this._restoring = false;
+    this._copyFrom = null;
+    this._copyTargets = /* @__PURE__ */ new Set();
+    this._serverValidation = null;
+    this._unsubscribe = null;
+    this._validateTimer = null;
+    this._onBeforeUnload = (ev) => {
+      if (this._editing && this._modified.length > 0) {
+        ev.preventDefault();
+        ev.returnValue = t(this.hass, "beforeunload");
+      }
+    };
+    this._onDragMove = (ev) => {
+      if (!this._drag || !this._draft) {
+        return;
+      }
+      const { day, index, mode, startX, trackWidth, orig } = this._drag;
+      const deltaMin = (ev.clientX - startX) / trackWidth * 1440;
+      const next = mode === "move" ? moveRange(orig, index, deltaMin) : resizeRange(orig, index, mode, deltaMin);
+      this._setDay(day, next);
+    };
+    this._onDragEnd = () => {
+      if (this._drag && this._draft) {
+        const day = this._drag.day;
+        this._setDay(day, sortRanges(this._draft[day] ?? []));
+      }
+      this._teardownDrag();
+    };
   }
   static getConfigElement() {
     return document.createElement("danfoss-ally-schedule-card-editor");
@@ -891,10 +1274,20 @@ let DanfossAllyScheduleCard = class extends i {
     if (!config) {
       throw new Error("Configuration invalide");
     }
+    if (this._editing && config.room_id !== this._config?.room_id) {
+      this._leaveEdit();
+    }
     this._config = config;
   }
   getCardSize() {
-    return 6;
+    return this._editing ? 12 : 6;
+  }
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this._unsubscribe?.();
+    this._unsubscribe = null;
+    this._teardownDrag();
+    globalThis.removeEventListener?.("beforeunload", this._onBeforeUnload);
   }
   updated(changed) {
     if (changed.has("hass") && this.hass && !this._loaded) {
@@ -919,6 +1312,14 @@ let DanfossAllyScheduleCard = class extends i {
     this._info = info;
     this._rooms = rooms;
     this._schedule = schedule;
+    if (!this._unsubscribe) {
+      this._unsubscribe = await subscribeJobs(this.hass, (job) => this._onJob(job));
+    }
+  }
+  _onJob(job) {
+    if (job.target?.id === this._config?.room_id) {
+      this._job = job;
+    }
   }
   async _refresh() {
     const target = this._target;
@@ -938,6 +1339,211 @@ let DanfossAllyScheduleCard = class extends i {
   _reload() {
     globalThis.location?.reload();
   }
+  // --- Cycle d'édition ---
+  get _isAdmin() {
+    return this._info !== null && this._info.is_admin;
+  }
+  get _modified() {
+    if (!this._draft || !this._schedule) {
+      return [];
+    }
+    return modifiedDays(this._schedule.days, this._draft, DAY_KEYS);
+  }
+  get _allValid() {
+    if (!this._draft) {
+      return true;
+    }
+    return DAY_KEYS.every((day) => validateDay(this._draft[day] ?? [], day).valid);
+  }
+  _beginEdit() {
+    if (!this._schedule || !this._isAdmin) {
+      return;
+    }
+    this._draft = cloneDays(this._schedule.days);
+    this._editing = true;
+    this._error = null;
+    this._copyFrom = null;
+    globalThis.addEventListener?.("beforeunload", this._onBeforeUnload);
+  }
+  _leaveEdit() {
+    this._editing = false;
+    this._draft = null;
+    this._copyFrom = null;
+    this._serverValidation = null;
+    this._error = null;
+    if (this._validateTimer) {
+      clearTimeout(this._validateTimer);
+      this._validateTimer = null;
+    }
+    globalThis.removeEventListener?.("beforeunload", this._onBeforeUnload);
+  }
+  _cancelEdit() {
+    if (this._modified.length > 0) {
+      const ok = globalThis.confirm?.(t(this.hass, "leave_confirm"));
+      if (ok === false) {
+        return;
+      }
+    }
+    this._leaveEdit();
+  }
+  _setDay(day, ranges) {
+    if (!this._draft) {
+      return;
+    }
+    this._draft = { ...this._draft, [day]: ranges };
+    this._queueServerValidate();
+  }
+  /** Validation serveur (débatée) des jours modifiés, en plus de la locale. */
+  _queueServerValidate() {
+    if (!this.hass) {
+      return;
+    }
+    if (this._validateTimer) {
+      clearTimeout(this._validateTimer);
+    }
+    this._validateTimer = setTimeout(() => {
+      void this._runServerValidate();
+    }, 300);
+  }
+  async _runServerValidate() {
+    if (!this.hass || !this._draft) {
+      return;
+    }
+    const days = {};
+    for (const day of this._modified) {
+      days[day] = this._draft[day];
+    }
+    this._serverValidation = await validateSchedule(this.hass, days);
+  }
+  // --- Opérations d'édition ---
+  _addRange(day) {
+    if (!this._draft) {
+      return;
+    }
+    this._setDay(day, addRange(this._draft[day] ?? []));
+  }
+  _deleteRange(day, index) {
+    if (!this._draft) {
+      return;
+    }
+    this._setDay(day, deleteRange(this._draft[day] ?? [], index));
+  }
+  _onTimeInput(day, index, edge, ev) {
+    if (!this._draft) {
+      return;
+    }
+    const value = ev.target.value;
+    if (!value) {
+      return;
+    }
+    this._setDay(day, setRangeTime(this._draft[day] ?? [], index, edge, value));
+  }
+  // --- Copier un jour ---
+  _openCopy(day) {
+    this._copyFrom = this._copyFrom === day ? null : day;
+    this._copyTargets = /* @__PURE__ */ new Set();
+  }
+  _toggleCopyTarget(day) {
+    const next = new Set(this._copyTargets);
+    if (next.has(day)) {
+      next.delete(day);
+    } else {
+      next.add(day);
+    }
+    this._copyTargets = next;
+  }
+  _toggleCopyAll() {
+    if (!this._copyFrom) {
+      return;
+    }
+    const others = DAY_KEYS.filter((d2) => d2 !== this._copyFrom);
+    this._copyTargets = this._copyTargets.size === others.length ? /* @__PURE__ */ new Set() : new Set(others);
+  }
+  _applyCopy() {
+    if (!this._draft || !this._copyFrom || this._copyTargets.size === 0) {
+      return;
+    }
+    this._draft = copyDay(this._draft, this._copyFrom, [...this._copyTargets]);
+    this._copyFrom = null;
+    this._copyTargets = /* @__PURE__ */ new Set();
+    this._queueServerValidate();
+  }
+  // --- Enregistrement / retour au programme ---
+  async _save() {
+    const target = this._target;
+    if (!this.hass || !target || !this._draft || this._saving) {
+      return;
+    }
+    const modified = this._modified;
+    if (modified.length === 0 || !this._allValid) {
+      return;
+    }
+    this._saving = true;
+    this._error = null;
+    const days = {};
+    for (const day of modified) {
+      days[day] = sortRanges(this._draft[day] ?? []);
+    }
+    try {
+      const job = await setSchedule(this.hass, target, days);
+      this._job = job;
+      if (this._schedule) {
+        this._schedule = { ...this._schedule, days: cloneDays(this._draft) };
+      }
+      this._leaveEdit();
+    } catch (err) {
+      const code = err instanceof ScheduleCommandError ? err.code : "unknown";
+      this._error = errorText(this.hass, code, { max: MAX_TRANSITIONS_PER_DAY });
+    } finally {
+      this._saving = false;
+    }
+  }
+  async _restore() {
+    const target = this._target;
+    if (!this.hass || !target || this._restoring) {
+      return;
+    }
+    this._restoring = true;
+    this._error = null;
+    try {
+      this._job = await restoreSchedule(this.hass, target);
+    } catch (err) {
+      const code = err instanceof ScheduleCommandError ? err.code : "unknown";
+      this._error = errorText(this.hass, code);
+    } finally {
+      this._restoring = false;
+    }
+  }
+  // --- Glisser-déposer (pointeur) : déplacer / redimensionner une plage ---
+  _onBarPointerDown(day, index, mode, ev) {
+    if (!this._draft) {
+      return;
+    }
+    ev.preventDefault();
+    ev.stopPropagation();
+    const handle = ev.currentTarget;
+    const track = handle.closest(".track");
+    if (!track) {
+      return;
+    }
+    this._drag = {
+      day,
+      index,
+      mode,
+      startX: ev.clientX,
+      trackWidth: track.getBoundingClientRect().width || 1,
+      orig: (this._draft[day] ?? []).map((r2) => ({ ...r2 }))
+    };
+    handle.setPointerCapture?.(ev.pointerId);
+    globalThis.addEventListener?.("pointermove", this._onDragMove);
+    globalThis.addEventListener?.("pointerup", this._onDragEnd);
+  }
+  _teardownDrag() {
+    this._drag = void 0;
+    globalThis.removeEventListener?.("pointermove", this._onDragMove);
+    globalThis.removeEventListener?.("pointerup", this._onDragEnd);
+  }
+  // --- Rendu ---
   render() {
     const room = pickRoom(this._rooms, this._config?.room_id);
     const showReload = needsReload(CARD_VERSION, this._info?.version);
@@ -946,11 +1552,49 @@ let DanfossAllyScheduleCard = class extends i {
       <ha-card>
         <div class="content">
           ${showReload ? this._renderReloadBanner() : A}
-          <div class="room">${this._roomTitle(room)}</div>
+          <div class="titlebar">
+            <div class="room">${this._roomTitle(room)}</div>
+            ${this._renderActions(room)}
+          </div>
           ${readOnly ? b`<div class="hint">${t(this.hass, "read_only")}</div>` : A}
+          ${this._error ? b`<div class="banner error" role="alert">${this._error}</div>` : A}
           ${this._renderBody(room)}
         </div>
       </ha-card>
+    `;
+  }
+  _renderActions(room) {
+    if (!this._isAdmin || !this._schedule) {
+      return A;
+    }
+    if (this._editing) {
+      const canSave = this._modified.length > 0 && this._allValid && !this._saving;
+      return b`
+        <div class="actions">
+          <button class="btn ghost" @click=${this._cancelEdit} ?disabled=${this._saving}>
+            ${t(this.hass, "cancel")}
+          </button>
+          <button class="btn primary" @click=${this._save} ?disabled=${!canSave}>
+            ${ICON_SAVE}<span>${this._saving ? t(this.hass, "saving") : t(this.hass, "save")}</span>
+          </button>
+        </div>
+      `;
+    }
+    const needsRestore = (room?.heads ?? []).some((h2) => h2.schedule_active === false);
+    return b`
+      <div class="actions">
+        ${needsRestore ? b`<button
+              class="btn ghost"
+              @click=${this._restore}
+              ?disabled=${this._restoring}
+              title=${t(this.hass, "restore_hint")}
+            >
+              ${ICON_RESTORE}<span>${t(this.hass, "restore_schedule")}</span>
+            </button>` : A}
+        <button class="btn primary" @click=${this._beginEdit}>
+          ${ICON_EDIT}<span>${t(this.hass, "edit")}</span>
+        </button>
+      </div>
     `;
   }
   _renderBody(room) {
@@ -962,9 +1606,10 @@ let DanfossAllyScheduleCard = class extends i {
     const setback = schedule?.setback ?? room?.setback ?? null;
     return b`
       ${this._renderSetpoints(comfort, setback)}
-      ${schedule ? this._renderGrid(schedule) : b`<div class="hint">${t(this.hass, "schedule_unavailable")}</div>`}
+      ${this._editing && this._draft ? this._renderEditor() : schedule ? this._renderGrid(schedule) : b`<div class="hint">${t(this.hass, "schedule_unavailable")}</div>`}
       ${this._renderHeads(room)}
-      ${this._renderFooter(schedule)}
+      ${this._renderJob()}
+      ${this._editing ? this._renderUnsavedHint() : this._renderFooter(schedule)}
     `;
   }
   _roomTitle(room) {
@@ -992,13 +1637,19 @@ let DanfossAllyScheduleCard = class extends i {
       </div>
     `;
   }
+  // --- Grille de lecture (lot 4) ---
   _renderGrid(schedule) {
     return b`
       <div class="grid">
-        <div class="scale" aria-hidden="true">
-          <span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span>
-        </div>
+        ${this._renderScale()}
         ${DAY_KEYS.map((day) => this._renderDay(day, schedule.days[day] ?? []))}
+      </div>
+    `;
+  }
+  _renderScale() {
+    return b`
+      <div class="scale" aria-hidden="true">
+        <span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span>
       </div>
     `;
   }
@@ -1027,27 +1678,199 @@ let DanfossAllyScheduleCard = class extends i {
     if (setbackOnly) {
       return `${name} — ${t(this.hass, "setback_all_day")}`;
     }
-    const parts = bars.map(
-      (bar) => t(this.hass, "range_label", { start: bar.start, end: bar.end })
-    );
+    const parts = bars.map((bar) => t(this.hass, "range_label", { start: bar.start, end: bar.end }));
     return `${name} — ${parts.join(", ")}`;
   }
+  // --- Grille d'édition (lot 5) ---
+  _renderEditor() {
+    return b`
+      <div class="grid editing">
+        ${this._renderScale()}
+        ${DAY_KEYS.map((day) => this._renderEditDay(day))}
+      </div>
+    `;
+  }
+  _renderEditDay(day) {
+    const ranges = this._draft[day] ?? [];
+    const result = validateDay(ranges, day);
+    const bars = dayBars(ranges);
+    const counterClass = result.valid ? "counter" : "counter invalid";
+    const codes = this._dayErrorCodes(day, result.errors.map((e2) => e2.code));
+    return b`
+      <div class="eday ${result.valid ? "" : "invalid"}">
+        <div class="eday-row">
+          <span class="day-label">${dayLabel(this.hass, day)}</span>
+          <div class="track editable">
+            ${bars.map((bar, i2) => this._renderEditBar(day, i2, bar))}
+          </div>
+          <span
+            class=${counterClass}
+            aria-label=${t(this.hass, "transitions_aria", {
+      day: dayLabel(this.hass, day),
+      n: result.transitions,
+      max: MAX_TRANSITIONS_PER_DAY
+    })}
+          >
+            ${t(this.hass, "transitions_count", {
+      n: result.transitions,
+      max: MAX_TRANSITIONS_PER_DAY
+    })}
+          </span>
+        </div>
+        <div class="ranges">
+          ${sortRanges(ranges).map((r2) => this._rangeRow(day, ranges.indexOf(r2), r2))}
+          <div class="range-tools">
+            <button class="btn tiny" @click=${() => this._addRange(day)}>
+              ${ICON_PLUS}<span>${t(this.hass, "add_range")}</span>
+            </button>
+            <button
+              class="btn tiny"
+              @click=${() => this._openCopy(day)}
+              ?disabled=${ranges.length === 0 && (this._draft[day]?.length ?? 0) === 0}
+              aria-expanded=${this._copyFrom === day ? "true" : "false"}
+            >
+              ${ICON_COPY}<span>${t(this.hass, "copy_day")}</span>
+            </button>
+          </div>
+        </div>
+        ${codes.length > 0 ? b`<div class="errors">
+              ${codes.map(
+      (code) => b`<span class="err">${errorText(this.hass, code, {
+        max: MAX_TRANSITIONS_PER_DAY
+      })}</span>`
+    )}
+            </div>` : result.impliedMidnight && result.transitions === MAX_TRANSITIONS_PER_DAY ? b`<div class="note">${t(this.hass, "midnight_note")}</div>` : A}
+        ${this._copyFrom === day ? this._renderCopyPanel(day) : A}
+      </div>
+    `;
+  }
+  /** Codes d'erreur à afficher : union locale + serveur, sans doublon. */
+  _dayErrorCodes(day, localCodes) {
+    const codes = new Set(localCodes);
+    for (const e2 of this._serverValidation?.errors ?? []) {
+      if (e2.day === day) {
+        codes.add(e2.code);
+      }
+    }
+    return [...codes];
+  }
+  _renderEditBar(day, index, bar) {
+    return b`
+      <div class="bar edit" style="left:${bar.leftPct}%;width:${bar.widthPct}%">
+        <span
+          class="grip start"
+          @pointerdown=${(ev) => this._onBarPointerDown(day, index, "start", ev)}
+        ></span>
+        <span
+          class="grip body"
+          @pointerdown=${(ev) => this._onBarPointerDown(day, index, "move", ev)}
+          title=${t(this.hass, "range_label", { start: bar.start, end: bar.end })}
+        ></span>
+        <span
+          class="grip end"
+          @pointerdown=${(ev) => this._onBarPointerDown(day, index, "end", ev)}
+        ></span>
+      </div>
+    `;
+  }
+  _rangeRow(day, index, r2) {
+    return b`
+      <div class="range">
+        <label class="field">
+          <span class="field-label">${t(this.hass, "range_start")}</span>
+          <input
+            type="time"
+            step="300"
+            .value=${r2.start}
+            @change=${(ev) => this._onTimeInput(day, index, "start", ev)}
+          />
+        </label>
+        <span class="dash">–</span>
+        <label class="field">
+          <span class="field-label">${t(this.hass, "range_end")}</span>
+          <input
+            type="time"
+            step="300"
+            .value=${r2.end}
+            @change=${(ev) => this._onTimeInput(day, index, "end", ev)}
+          />
+        </label>
+        <button
+          class="btn icon"
+          @click=${() => this._deleteRange(day, index)}
+          aria-label=${t(this.hass, "delete_range")}
+          title=${t(this.hass, "delete_range")}
+        >
+          ${ICON_TRASH}
+        </button>
+      </div>
+    `;
+  }
+  _renderCopyPanel(day) {
+    const others = DAY_KEYS.filter((d2) => d2 !== day);
+    const allSelected = this._copyTargets.size === others.length;
+    return b`
+      <div class="copy-panel">
+        <div class="copy-head">${t(this.hass, "copy_heading", { day: dayLabel(this.hass, day) })}</div>
+        <div class="copy-days">
+          <label class="copy-opt all">
+            <input type="checkbox" .checked=${allSelected} @change=${this._toggleCopyAll} />
+            <span>${t(this.hass, "copy_select_all")}</span>
+          </label>
+          ${others.map(
+      (d2) => b`
+              <label class="copy-opt">
+                <input
+                  type="checkbox"
+                  .checked=${this._copyTargets.has(d2)}
+                  @change=${() => this._toggleCopyTarget(d2)}
+                />
+                <span>${dayLabel(this.hass, d2)}</span>
+              </label>
+            `
+    )}
+        </div>
+        <div class="copy-actions">
+          <button class="btn ghost tiny" @click=${() => this._openCopy(day)}>
+            ${t(this.hass, "copy_cancel")}
+          </button>
+          <button
+            class="btn primary tiny"
+            @click=${this._applyCopy}
+            ?disabled=${this._copyTargets.size === 0}
+          >
+            ${t(this.hass, "copy_apply")}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+  _renderUnsavedHint() {
+    const dirty = this._modified.length > 0;
+    return b`
+      <div class="footer edit-footer">
+        <span class="read-at">${dirty ? t(this.hass, "unsaved_hint") : t(this.hass, "no_changes")}</span>
+        <span class="version">${t(this.hass, "version", { version: CARD_VERSION })}</span>
+      </div>
+    `;
+  }
+  // --- Têtes, lot, pied ---
   _renderHeads(room) {
     const heads = room?.heads ?? [];
     return b`
       <div class="heads">
         <div class="heads-title">${t(this.hass, "heads_heading")}</div>
-        ${heads.length === 0 ? b`<div class="hint">${t(this.hass, "heads_none")}</div>` : b`<div class="heads-list">
-              ${heads.map((head) => this._renderHead(head))}
-            </div>`}
+        ${heads.length === 0 ? b`<div class="hint">${t(this.hass, "heads_none")}</div>` : b`<div class="heads-list">${heads.map((head) => this._renderHead(head))}</div>`}
       </div>
     `;
   }
   _renderHead(head) {
+    const jobHead = this._job?.heads.find((h2) => h2.device_id === head.device_id);
     return b`
       <div class="head">
         <span class="head-name">${head.name}</span>
         <span class="badges">
+          ${jobHead ? this._renderJobBadge(jobHead.status) : A}
           ${this._badge(
       head.online ? "ok" : "off",
       head.online ? ICON_WIFI : ICON_WIFI_OFF,
@@ -1064,10 +1887,47 @@ let DanfossAllyScheduleCard = class extends i {
       </div>
     `;
   }
+  _renderJobBadge(status) {
+    const map = {
+      pending: { kind: "muted", key: "head_job_pending" },
+      applied: { kind: "ok", key: "head_job_applied" },
+      mismatch: { kind: "warn", key: "head_job_mismatch" },
+      unreachable: { kind: "off", key: "head_job_unreachable" },
+      unverified: { kind: "muted", key: "head_job_unverified" }
+    };
+    const m2 = map[status] ?? map.pending;
+    const label = t(this.hass, m2.key);
+    return b`<span class="pill ${m2.kind}" title=${label}>${label}</span>`;
+  }
   _badge(kind, icon, label) {
     return b`
       <span class="badge ${kind}" title=${label} role="img" aria-label=${label}>${icon}</span>
     `;
+  }
+  _renderJob() {
+    const job = this._job;
+    if (!job) {
+      return A;
+    }
+    const key = `job_status_${job.status}`;
+    return b`
+      <div class="job">
+        <span class="job-title">${t(this.hass, "job_heading")}</span>
+        <span class="pill ${this._jobKind(job.status)}">${t(this.hass, key)}</span>
+      </div>
+    `;
+  }
+  _jobKind(status) {
+    switch (status) {
+      case "applied":
+        return "ok";
+      case "partial":
+        return "warn";
+      case "failed":
+        return "off";
+      default:
+        return "muted";
+    }
   }
   _renderFooter(schedule) {
     const when = formatReadAt(schedule?.read_at, language(this.hass));
@@ -1104,16 +1964,82 @@ DanfossAllyScheduleCard.styles = i$3`
     .content {
       padding: 0 16px 16px;
     }
+    .titlebar {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding-top: 16px;
+    }
     .room {
       font-size: 1.4rem;
       font-weight: 500;
       color: var(--primary-text-color);
-      padding-top: 16px;
+    }
+    .actions {
+      display: inline-flex;
+      gap: 8px;
+      flex-wrap: wrap;
     }
     .hint {
       margin-top: 8px;
       color: var(--secondary-text-color);
       font-size: 0.9rem;
+    }
+    .banner {
+      margin-top: 10px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+    }
+    .banner.error {
+      background: var(--error-color, #c62828);
+      color: var(--text-primary-color, #fff);
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-radius: 16px;
+      padding: 6px 12px;
+      background: var(--card-background-color, #fff);
+      color: var(--primary-text-color);
+      font: inherit;
+      font-size: 0.85rem;
+    }
+    .btn svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+    .btn:hover:not(:disabled) {
+      background: var(--secondary-background-color, #f0f0f0);
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .btn.primary {
+      background: var(--primary-color, #03a9f4);
+      color: var(--text-primary-color, #fff);
+      border-color: transparent;
+    }
+    .btn.primary:hover:not(:disabled) {
+      filter: brightness(0.95);
+    }
+    .btn.ghost {
+      background: transparent;
+    }
+    .btn.tiny {
+      padding: 4px 10px;
+      font-size: 0.8rem;
+    }
+    .btn.icon {
+      padding: 4px;
+      border-radius: 8px;
     }
     .setpoints {
       display: flex;
@@ -1180,12 +2106,152 @@ DanfossAllyScheduleCard.styles = i$3`
       background-size: 25% 100%;
       overflow: hidden;
     }
+    .track.editable {
+      height: 22px;
+      overflow: visible;
+    }
     .bar {
       position: absolute;
       top: 0;
       bottom: 0;
       border-radius: 3px;
       min-width: 2px;
+    }
+    .bar.edit {
+      display: flex;
+      touch-action: none;
+    }
+    .grip {
+      display: block;
+    }
+    .grip.body {
+      flex: 1 1 auto;
+      cursor: grab;
+    }
+    .grip.start,
+    .grip.end {
+      flex: 0 0 8px;
+      cursor: ew-resize;
+      background: rgba(0, 0, 0, 0.25);
+    }
+    .grip.start {
+      border-radius: 3px 0 0 3px;
+    }
+    .grip.end {
+      border-radius: 0 3px 3px 0;
+    }
+    .eday {
+      padding: 6px 0;
+      border-bottom: 1px solid var(--divider-color, #eee);
+    }
+    .eday.invalid {
+      background: var(--danfoss-invalid-bg, rgba(198, 40, 40, 0.06));
+      border-radius: 6px;
+    }
+    .eday-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .counter {
+      flex: 0 0 auto;
+      font-size: 0.75rem;
+      font-variant-numeric: tabular-nums;
+      color: var(--secondary-text-color);
+      min-width: 2.4rem;
+      text-align: right;
+    }
+    .counter.invalid {
+      color: var(--error-color, #c62828);
+      font-weight: 600;
+    }
+    .ranges {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin: 6px 0 0 calc(2.6rem + 8px);
+    }
+    .range {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .field {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .field-label {
+      font-size: 0.7rem;
+      color: var(--secondary-text-color);
+    }
+    input[type="time"] {
+      font: inherit;
+      font-size: 0.85rem;
+      padding: 4px 6px;
+      border-radius: 6px;
+      border: 1px solid var(--divider-color, #ccc);
+      background: var(--card-background-color, #fff);
+      color: var(--primary-text-color, #000);
+      color-scheme: light dark;
+    }
+    .dash {
+      color: var(--secondary-text-color);
+    }
+    .range-tools {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 2px;
+    }
+    .errors {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 6px 0 0 calc(2.6rem + 8px);
+    }
+    .err {
+      font-size: 0.75rem;
+      color: var(--error-color, #c62828);
+    }
+    .note {
+      font-size: 0.72rem;
+      color: var(--secondary-text-color);
+      margin: 6px 0 0 calc(2.6rem + 8px);
+    }
+    .copy-panel {
+      margin: 8px 0 2px calc(2.6rem + 8px);
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: var(--secondary-background-color, #f3f3f3);
+    }
+    .copy-head {
+      font-size: 0.8rem;
+      font-weight: 500;
+      margin-bottom: 6px;
+    }
+    .copy-days {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 12px;
+    }
+    .copy-opt {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.8rem;
+      color: var(--primary-text-color);
+    }
+    .copy-opt.all {
+      font-weight: 500;
+      flex: 0 0 100%;
+    }
+    .copy-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 8px;
     }
     .heads {
       margin-top: 14px;
@@ -1242,6 +2308,36 @@ DanfossAllyScheduleCard.styles = i$3`
     .badge.off,
     .badge.muted {
       color: var(--disabled-text-color, #9e9e9e);
+    }
+    .pill {
+      font-size: 0.7rem;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: var(--secondary-background-color, #eee);
+      color: var(--primary-text-color);
+      white-space: nowrap;
+    }
+    .pill.ok {
+      background: var(--success-color, #2e7d32);
+      color: var(--text-primary-color, #fff);
+    }
+    .pill.warn {
+      background: var(--warning-color, #ffa600);
+      color: var(--text-primary-color, #fff);
+    }
+    .pill.off {
+      background: var(--disabled-text-color, #9e9e9e);
+      color: var(--text-primary-color, #fff);
+    }
+    .job {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .job-title {
+      font-size: 0.8rem;
+      color: var(--secondary-text-color);
     }
     .footer {
       display: flex;
@@ -1304,6 +2400,17 @@ DanfossAllyScheduleCard.styles = i$3`
       color: var(--text-primary-color, #fff);
       font: inherit;
     }
+    @media (max-width: 480px) {
+      .range {
+        gap: 6px;
+      }
+      .ranges,
+      .errors,
+      .note,
+      .copy-panel {
+        margin-left: 0;
+      }
+    }
   `;
 __decorateClass([
   n2({ attribute: false })
@@ -1326,6 +2433,33 @@ __decorateClass([
 __decorateClass([
   r()
 ], DanfossAllyScheduleCard.prototype, "_refreshing", 2);
+__decorateClass([
+  r()
+], DanfossAllyScheduleCard.prototype, "_editing", 2);
+__decorateClass([
+  r()
+], DanfossAllyScheduleCard.prototype, "_draft", 2);
+__decorateClass([
+  r()
+], DanfossAllyScheduleCard.prototype, "_saving", 2);
+__decorateClass([
+  r()
+], DanfossAllyScheduleCard.prototype, "_error", 2);
+__decorateClass([
+  r()
+], DanfossAllyScheduleCard.prototype, "_job", 2);
+__decorateClass([
+  r()
+], DanfossAllyScheduleCard.prototype, "_restoring", 2);
+__decorateClass([
+  r()
+], DanfossAllyScheduleCard.prototype, "_copyFrom", 2);
+__decorateClass([
+  r()
+], DanfossAllyScheduleCard.prototype, "_copyTargets", 2);
+__decorateClass([
+  r()
+], DanfossAllyScheduleCard.prototype, "_serverValidation", 2);
 DanfossAllyScheduleCard = __decorateClass([
   t$1("danfoss-ally-schedule-card")
 ], DanfossAllyScheduleCard);
@@ -1336,6 +2470,12 @@ const ICON_WRENCH = w`<svg viewBox="0 0 24 24"><path d="M22.7 19 13.6 9.9c.9-2.3
 const ICON_WIFI = w`<svg viewBox="0 0 24 24"><path d="M12 21 2 9c5.5-5 14.5-5 20 0zm0-3.5 3.5-4.2a5.3 5.3 0 0 0-7 0z" /></svg>`;
 const ICON_WIFI_OFF = w`<svg viewBox="0 0 24 24"><path d="M2.3 4.3 1 5.6l2.3 2.3C2.8 8.3 2.4 8.6 2 9l10 12 3.3-4L18 19.7l1.3-1.4zM12 21ZM20.6 8.3A14 14 0 0 0 9.9 5.8l9.1 9.1 2.9-3.6c-.4-.3-.8-.7-1.3-1z" /></svg>`;
 const ICON_REFRESH = w`<svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z" /></svg>`;
+const ICON_EDIT = w`<svg viewBox="0 0 24 24"><path d="M20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.93l-3.75-3.75z" /></svg>`;
+const ICON_SAVE = w`<svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6m3-10H5V5h10z" /></svg>`;
+const ICON_PLUS = w`<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z" /></svg>`;
+const ICON_TRASH = w`<svg viewBox="0 0 24 24"><path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14zM6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6z" /></svg>`;
+const ICON_COPY = w`<svg viewBox="0 0 24 24"><path d="M19 21H8V7h11m0-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2m-3-4H4a2 2 0 0 0-2 2v14h2V3h12z" /></svg>`;
+const ICON_RESTORE = w`<svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l4 4 4-4H6a7 7 0 1 1 7 7c-1.9 0-3.6-.8-4.9-2l-1.4 1.4A9 9 0 1 0 13 3m-1 5v5l4 2 .7-1.2-3.2-1.9V8z" /></svg>`;
 const CARD_TYPE = "danfoss-ally-schedule-card";
 window.customCards = window.customCards ?? [];
 if (!window.customCards.some((card) => card.type === CARD_TYPE)) {

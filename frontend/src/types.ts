@@ -63,6 +63,30 @@ export interface Info {
   is_admin: boolean;
 }
 
+/** État d'une tête dans le suivi d'un lot d'écriture (contrat §3.5). */
+export interface JobHead {
+  device_id: string;
+  status: "pending" | "applied" | "mismatch" | "unreachable" | "unverified";
+  detail: string | null;
+}
+
+/** Suivi d'une écriture de programme (contrat §3.5). */
+export interface WriteJob {
+  job_id: string;
+  kind: string;
+  target: Target;
+  status: "sent" | "applied" | "partial" | "unverified" | "failed";
+  created_at: string;
+  heads: JobHead[];
+}
+
+/** Réponse de `danfoss_ally_cloud/schedule/validate` (contrat §5.3 / §5.4). */
+export interface ValidateResponse {
+  valid: boolean;
+  errors: { code: string; message: string; day: string | null }[];
+  transitions: Record<string, number>;
+}
+
 /**
  * Sous-ensemble de l'objet `hass` de Home Assistant dont la carte a besoin.
  * Volontairement minimal pour rester testable et utilisable par la page de démo.
@@ -72,6 +96,17 @@ export interface HassLike {
   // Fonction de localisation du frontend HA (clé -> texte). Optionnelle : repli en dur.
   localize?: (key: string, ...args: unknown[]) => string;
   language?: string;
+  /**
+   * Connexion WebSocket de Home Assistant, pour les commandes à abonnement
+   * (`jobs/subscribe`). Optionnelle : absente dans la démo et les tests, auquel
+   * cas l'abonnement se dégrade en « rien » (unsubscribe sans effet).
+   */
+  connection?: {
+    subscribeMessage<T = unknown>(
+      callback: (message: T) => void,
+      subscription: Record<string, unknown>,
+    ): Promise<() => void>;
+  };
 }
 
 /** Configuration de la carte `danfoss-ally-schedule-card`. */
