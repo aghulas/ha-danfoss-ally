@@ -388,7 +388,9 @@ def ecrire_prechauffage(
 ) -> int | None:
     """Active/désactive le pré-chauffage réel (0x0025 bit 1), bit programme préservé.
 
-    ⚠ Mécanisme d'écriture d'attribut non confirmé en réel pour 0x0025 : à valider sur l'install.
+    L'attribut 0x0025 « Programming Operation Mode » du cluster thermostat est un bitmap8 : il doit
+    s'écrire avec le type ZCL 0x18 (et non 0x30 enum8, que la tête rejette). Type validé par le
+    connecteur MCP de référence (constat réel du 15/11/2026).
     """
     nouveau = nouveau_mode_prechauffage(mode_actuel, actif)
-    return ecrire_attributs(lien, dev_id, node_id, [(0x0025, 0x30, nouveau)], fabricant=False)
+    return ecrire_attributs(lien, dev_id, node_id, [(0x0025, 0x18, nouveau)], fabricant=False)

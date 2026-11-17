@@ -107,3 +107,34 @@ def test_categorie_mapping():
 def test_dp_inconnu_reste_dans_dps():
     d = decode.decoder(_tete({"999": "mystere", "24": 200}))
     assert d.dps["999"] == "mystere"
+
+
+def test_decode_operation_mode_dp172():
+    assert decode.decoder_operation(1) == (True, False)
+    assert decode.decoder_operation(3) == (True, True)
+    assert decode.decoder_operation(0) == (False, False)
+    assert decode.decoder_operation("2") == (False, True)
+    assert decode.decoder_operation(None) == (None, None)
+
+
+def test_decode_schedule_active_montage_incoherence():
+    d = decode.decoder(_tete({"172": 1, "149": True}))
+    assert d.schedule_active is True and d.preheat is False and d.mounting is True
+    assert decode.decoder(_tete({"2": "at_home", "172": 0})).inconsistent is True
+    assert decode.decoder(_tete({"2": "at_home", "172": 1})).inconsistent is False
+    assert decode.decoder(_tete({"2": "at_home"})).inconsistent is False
+
+
+def test_etat_tete_forme_contrat():
+    d = decode.decoder(_tete({"2": "at_home", "172": 1, "149": False}))
+    assert decode.etat_tete(d, room_id="13000000") == {
+        "device_id": "dev-synth-1",
+        "name": "Salon",
+        "room_id": "13000000",
+        "online": True,
+        "mode_displayed": "at_home",
+        "schedule_active": True,
+        "preheat": False,
+        "mounting": False,
+        "inconsistent": False,
+    }

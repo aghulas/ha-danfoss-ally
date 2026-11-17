@@ -208,6 +208,11 @@ def test_ecrire_prechauffage():
     lien = _L()
     assert tunnel.ecrire_prechauffage(lien, "dev-1", "node-1", True, 0x01) == 0
     assert lien.envois
+    # La trame écrit 0x0025 en bitmap8 (type ZCL 0x18, pas 0x30 enum8), bit programme préservé :
+    # 0x01 (programme seul) | 0x02 (pré-chauffage) = 0x03.
+    enreg = tunnel.entete(tunnel.CLUSTER_THERMOSTAT) + bytes([0x00, 0x40, 0x02])
+    enreg += (0x0025).to_bytes(2, "little") + bytes([0x18, 0x03])
+    assert lien.envois[-1] == enreg
 
 
 # --- LocalLink (faux tinytuya injecté dans sys.modules) ---------------------------------------

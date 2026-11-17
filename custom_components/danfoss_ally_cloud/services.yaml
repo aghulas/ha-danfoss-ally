@@ -1,0 +1,91 @@
+get_rooms:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+get_schedule:
+  fields:
+    target:
+      required: true
+      example: '{"type": "room", "id": "13000000"}'
+      selector:
+        object:
+    refresh:
+      required: false
+      default: false
+      selector:
+        boolean:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+set_schedule:
+  fields:
+    target:
+      required: true
+      example: '{"type": "room", "id": "13000000"}'
+      selector:
+        object:
+    days:
+      required: true
+      example: '{"mon": [{"start": "08:30", "end": "17:30"}], "sat": []}'
+      selector:
+        object:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+copy_schedule:
+  fields:
+    source:
+      required: true
+      example: '{"type": "room", "id": "13000000"}'
+      selector:
+        object:
+    targets:
+      required: true
+      example: '[{"type": "room", "id": "13000001"}]'
+      selector:
+        object:
+    days:
+      required: false
+      example: '["mon", "tue"]'
+      selector:
+        object:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+restore_schedule:
+  fields:
+    target:
+      required: true
+      example: '{"type": "room", "id": "13000000"}'
+      selector:
+        object:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+get_write_job:
+  fields:
+    job_id:
+      required: true
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud

@@ -30,8 +30,10 @@ from .const import (
     CONF_SIGN_KEY,
     CONF_USERNAME,
     DATA_COORDINATOR,
+    DATA_JOBS,
     DATA_LOCAL,
     DATA_MQTT,
+    DATA_SCHEDULES,
     DEFAULT_LOCAL_SCAN_INTERVAL,
     DEFAULT_MQTT_BASE_TOPIC,
     DEFAULT_MQTT_MODE,
@@ -43,6 +45,9 @@ from .const import (
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 from .frontend import async_register_frontend, async_unregister_frontend
 from .mqtt_publisher import MqttPublisher
+from .services import async_register_services
+from .websocket_api import async_register as async_register_ws
+from .writejob import JobManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,9 +55,12 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Mise en place à l'échelle de l'intégration (une fois par instance).
 
-    Sert l'interface embarquée et déclare sa ressource Lovelace ici — jamais dans
-    `async_setup_entry` (contrat §6). Best-effort : n'empêche pas le démarrage.
+    Enregistre les actions et les commandes WebSocket, sert l'interface embarquée et
+    déclare sa ressource Lovelace ici — jamais dans `async_setup_entry` (contrat §6).
+    Best-effort : n'empêche pas le démarrage.
     """
+    async_register_services(hass)
+    async_register_ws(hass)
     await async_register_frontend(hass)
     return True
 
@@ -87,6 +95,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_COORDINATOR: coordinator,
         DATA_LOCAL: local_coordinator,
         DATA_MQTT: publisher,
+        DATA_JOBS: JobManager(),
+        DATA_SCHEDULES: {},
     }
     _cleanup_orphaned_head_climates(hass, entry, coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

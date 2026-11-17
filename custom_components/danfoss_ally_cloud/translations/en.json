@@ -40,17 +40,152 @@
   },
   "entity": {
     "sensor": {
-      "ouverture_vanne": { "name": "Valve opening" },
-      "defaut": { "name": "Fault code" }
+      "ouverture_vanne": {
+        "name": "Valve opening"
+      },
+      "defaut": {
+        "name": "Fault code"
+      }
     },
     "binary_sensor": {
-      "en_ligne": { "name": "Online" },
-      "fenetre": { "name": "Window" }
+      "en_ligne": {
+        "name": "Online"
+      },
+      "fenetre": {
+        "name": "Window"
+      }
     },
     "switch": {
-      "verrou_enfant": { "name": "Child lock" },
-      "detection_fenetre": { "name": "Open window detection" },
-      "pre_chauffage": { "name": "Pre-heating" }
+      "verrou_enfant": {
+        "name": "Child lock"
+      },
+      "detection_fenetre": {
+        "name": "Open window detection"
+      },
+      "pre_chauffage": {
+        "name": "Pre-heating"
+      }
+    }
+  },
+  "services": {
+    "get_rooms": {
+      "name": "List rooms",
+      "description": "Rooms and the state of their heads."
+    },
+    "get_schedule": {
+      "name": "Get schedule",
+      "description": "Weekly schedule of a room or an isolated head.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "Target: type 'room' or 'device', and its id."
+        },
+        "refresh": {
+          "name": "Refresh",
+          "description": "Re-read from the cloud instead of the cache."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
+    "set_schedule": {
+      "name": "Set schedule",
+      "description": "Writes the given days of a target (validated first). Admin only.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "Target: type 'room' or 'device', and its id."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days to write: each day holds its ranges (start and end times)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
+    "copy_schedule": {
+      "name": "Copy schedule",
+      "description": "Copies one target's schedule onto others. Admin only.",
+      "fields": {
+        "source": {
+          "name": "Source",
+          "description": "Source target."
+        },
+        "targets": {
+          "name": "Targets",
+          "description": "List of targets."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days to copy (all if omitted)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
+    "restore_schedule": {
+      "name": "Restore schedule",
+      "description": "Rewrites the schedule then publishes at_home (R4). Admin only.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "Target: type 'room' or 'device', and its id."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
+    "get_write_job": {
+      "name": "Write job status",
+      "description": "Follows a write job by its id.",
+      "fields": {
+        "job_id": {
+          "name": "Job id",
+          "description": "job_id returned by a write."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "invalid_time": {
+      "message": "Invalid time (expected HH:MM, 00:00–23:59)."
+    },
+    "empty_or_reversed": {
+      "message": "Empty or reversed range (start ≥ end)."
+    },
+    "overlap": {
+      "message": "Two ranges overlap."
+    },
+    "too_many_transitions": {
+      "message": "Too many ranges: at most three separate ranges (6 transitions) per day."
+    },
+    "unknown_target": {
+      "message": "Unknown room or head."
+    },
+    "grouped_device": {
+      "message": "Grouped head: target its room."
+    },
+    "not_admin": {
+      "message": "Writing is reserved for administrators."
+    },
+    "cloud_refused": {
+      "message": "The cloud refused the call."
+    },
+    "session_expired": {
+      "message": "Session needs renewing."
     }
   }
 }
