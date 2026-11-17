@@ -6,7 +6,7 @@
  * absence, ces fonctions se dégradent proprement (null / liste vide) au lieu de
  * remonter une erreur bloquante.
  */
-import type { HassLike, Info, Room } from "./types";
+import type { HassLike, Info, Room, Schedule, Target } from "./types";
 
 /** Récupère la version/les droits côté serveur, ou `null` si la commande manque. */
 export async function fetchInfo(hass: HassLike): Promise<Info | null> {
@@ -35,4 +35,25 @@ export function pickRoom(rooms: Room[], roomId: string | undefined): Room | unde
     return undefined;
   }
   return rooms.find((room) => room.id === roomId);
+}
+
+/**
+ * Lit le programme d'une cible (contrat §5.3 `schedule/get`). `refresh` force une
+ * relecture côté cloud. Renvoie `null` si la commande manque (lot 2 non déployé) ou
+ * échoue : la carte se dégrade proprement.
+ */
+export async function fetchSchedule(
+  hass: HassLike,
+  target: Target,
+  refresh = false,
+): Promise<Schedule | null> {
+  try {
+    return await hass.callWS<Schedule>({
+      type: "danfoss_ally_cloud/schedule/get",
+      target,
+      refresh,
+    });
+  } catch {
+    return null;
+  }
 }
