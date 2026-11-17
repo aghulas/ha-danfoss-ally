@@ -19,6 +19,6 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # « brands » exige des assets dans home-assistant/brands (PR séparée, à faire avant
-          # l'inclusion au Marketplace). Ignoré tant que cette PR n'est pas mergée.
+          # "brands" requires assets in home-assistant/brands (separate PR, to be done before
+          # Marketplace inclusion). Ignored until that PR is merged.
           ignore: brands
