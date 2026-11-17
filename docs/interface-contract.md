@@ -219,6 +219,25 @@ this path proved unreliable on grouped heads.
 `tuya.m.my.group.device.list` v1.0 (parameter `gid`) gives, per device, `dps["2"]` (displayed mode),
 `dps["172"]`, `dps["149"]`, `dps["118"]`, `dps["119"]`. No extra call is needed for `HeadState`.
 
+### 4.4 Local tunnel (Zigbee) — DP scales
+
+Operations the cloud misses (one-off setpoint override, valve descaling, window-detection write,
+multi-gateway survey) go through the **local Zigbee tunnel** (DP 198 → 199), implemented in
+`api/local/tunnel.py`. The scales below are the ones observed on real hardware; they are the
+reference, over the published product schema.
+
+| DP / attribute | Meaning | Scale (over the tunnel) |
+|---|---|---|
+| DP 171 (`OccupiedSetpoint`) | one-off setpoint override ("now", outside the schedule) | **hundredths of °C (×100)**: `7.0 °C` → raw `700` |
+
+> **DP 171 scale — hundredths, not `10⁰`.** The official product schema
+> (`dp_schema_officiel.md`, see `docs/reuse.md`) announces a `10⁰` scale for DP 171; this is
+> **wrong**. The integration and `pydanfoss_cloud.local.tunnel` (`setpoint_value` / `DP_SETPOINT`)
+> encode the override in **hundredths of °C**, confirmed on real hardware on 2026-11-17 (C0 trial,
+> head #1 "D-1 Local Apel": an override to `7.0 °C` was published as raw `700` and read back by the
+> head as `7`, idle — whereas a `10⁰` reading of `700` would have clamped to the upper bound and
+> requested heat). Do not "correct" the code to the schema.
+
 ## 5. What the integration exposes
 
 ### 5.1 Devices and entities
