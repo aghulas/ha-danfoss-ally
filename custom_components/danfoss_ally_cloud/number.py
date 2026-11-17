@@ -47,7 +47,7 @@ class RoomSetpointDescription(NumberEntityDescription):
     """Décrit une consigne de pièce : clé de lecture + DP(s) d'écriture."""
 
     consigne: str  # clé dans RoomState.consignes : "confort" | "reduit"
-    mode: str  # clé dans MODE_GROUP_SETPOINT_DP : "at_home" (confort) | "leaving_home" (réduit)
+    mode_key: str  # clé dans MODE_GROUP_SETPOINT_DP : "at_home" (confort) | "leaving_home" (réduit)
 
 
 SETPOINTS: tuple[RoomSetpointDescription, ...] = (
@@ -55,13 +55,13 @@ SETPOINTS: tuple[RoomSetpointDescription, ...] = (
         key="consigne_confort",
         translation_key="consigne_confort",
         consigne="confort",
-        mode="at_home",
+        mode_key="at_home",
     ),
     RoomSetpointDescription(
         key="consigne_reduit",
         translation_key="consigne_reduit",
         consigne="reduit",
-        mode="leaving_home",
+        mode_key="leaving_home",
     ),
 )
 
@@ -135,7 +135,7 @@ class DanfossRoomSetpoint(CoordinatorEntity[DanfossCoordinator], NumberEntity):
         room = self.room
         if room is None or room.pid not in WRITE_VERIFIED_PRODUCTS:
             raise HomeAssistantError("écriture de consigne indisponible pour cette pièce")
-        dps_nums = MODE_GROUP_SETPOINT_DP[self.entity_description.mode]
+        dps_nums = MODE_GROUP_SETPOINT_DP[self.entity_description.mode_key]
         valeur = encode_consigne(value, self.native_min_value, self.native_max_value, SETPOINT_STEP)
         dps = {str(dp): valeur for dp in dps_nums}
         try:
