@@ -17,3 +17,21 @@
 
 But transversal : éprouver le code sur d'autres installations (firmwares,
 product ids, modèles de passerelles) pour fiabiliser les hypothèses DP.
+
+## Programmes par pièce et interface embarquée
+
+Chantier décrit par `docs/cahier-des-charges-interface.md`, cadré par le
+contrat `docs/contrat-interface.md` (règles R1–R7). Un lot = une branche = une
+demande de fusion, validée en réel sur une pièce d'essai.
+
+- **Lot 0** — mise à niveau des documents (R4/R5) et alignement du thermostat
+  sur R3 (pas d'écriture de consigne de mode sans réécriture du programme).
+- **Lot 1** — couche `api/` : `schedule.py` (modèle, conversions, validation
+  R1), pièces et programme dans `client.py`, décodage de l'état réel (DP 172).
+- **Lot 2** — câblage Home Assistant : appareil par pièce, entités, actions +
+  WebSocket, lots d'écriture (`WriteJob`), vérification locale différée.
+- **Lot 3** — socle de l'interface embarquée (`frontend/`, TypeScript + Lit,
+  fichier compilé versionné, enregistrement Lovelace, carte minimale).
+- **Lot 4** — carte Programme en lecture (grille 7 jours, état des têtes).
+- **Lot 5** — carte Programme en écriture (édition des plages, validation R1,
+  suivi du lot, retour au programme).
