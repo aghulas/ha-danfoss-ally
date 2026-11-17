@@ -80,6 +80,16 @@
       "name": "List rooms",
       "description": "Rooms and the state of their heads."
     },
+    "get_local_survey": {
+      "name": "Local survey",
+      "description": "Read-only survey of every head through the local Zigbee tunnel (setpoints, schedule slots, attributes). Needs the local tunnel enabled.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
     "get_schedule": {
       "name": "Get schedule",
       "description": "Weekly schedule of a room or an isolated head.",
@@ -194,6 +204,9 @@
     },
     "session_expired": {
       "message": "Session needs renewing."
+    },
+    "local_disabled": {
+      "message": "The local tunnel is not enabled on this account."
     }
   }
 }

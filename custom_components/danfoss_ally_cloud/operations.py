@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant
@@ -22,7 +23,7 @@ from homeassistant.helpers.event import async_call_later
 from .api import ScheduleValidationError, UnknownTargetError, head_state
 from .api import schedule as sch
 from .api.client import CloudError
-from .const import DATA_COORDINATOR, DATA_JOBS, DATA_SCHEDULES
+from .const import DATA_COORDINATOR, DATA_JOBS, DATA_LOCAL, DATA_SCHEDULES
 from .writejob import (
     HEAD_APPLIED,
     HEAD_MISMATCH,
@@ -89,6 +90,28 @@ def rooms_payload(store: dict) -> dict:
         for gid, rs in coordinator.rooms.items()
     ]
     return {"rooms": rooms}
+
+
+async def local_survey(hass: HomeAssistant, store: dict) -> dict:
+    """Read-only multi-gateway survey through the local Zigbee tunnel (contract §4.4, C4).
+
+    Returns, per reachable head, the tunnel reading summarized (comfort slots, comfort/setback
+    setpoints, decoded attributes). Read-only: it never writes to a head. Raises
+    ``local_disabled`` if the local tunnel is not enabled on this entry.
+    """
+    local = store.get(DATA_LOCAL)
+    if local is None:
+        raise OperationError("local_disabled", "local tunnel not enabled on this account")
+    heads = local.heads
+    summaries = await hass.async_add_executor_job(local.manager.survey_heads, heads)
+    reachable = sum(1 for s in summaries.values() if not s.get("unreachable"))
+    return {
+        "surveyed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "gateways": sorted(local.manager.gateway_ids),
+        "attempted": len(summaries),
+        "reachable": reachable,
+        "heads": summaries,
+    }
 
 
 def validate_payload(days: dict) -> dict:

@@ -80,6 +80,16 @@
    "name": "Lister les pièces",
    "description": "Pièces et état de leurs têtes."
   },
+  "get_local_survey": {
+   "name": "Relevé local du parc",
+   "description": "Relevé en lecture seule de toutes les têtes via le tunnel Zigbee local (consignes, créneaux du programme, attributs). Nécessite le tunnel local activé.",
+   "fields": {
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
+  },
   "get_schedule": {
    "name": "Lire le programme",
    "description": "Programme hebdomadaire d'une pièce ou d'une tête isolée.",
@@ -194,6 +204,9 @@
   },
   "session_expired": {
    "message": "Session à renouveler."
+  },
+  "local_disabled": {
+   "message": "Le tunnel local n'est pas activé sur ce compte."
   }
  }
 }

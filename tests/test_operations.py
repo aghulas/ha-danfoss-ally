@@ -3,7 +3,12 @@
 import pytest
 
 from custom_components.danfoss_ally_cloud import operations as ops
-from custom_components.danfoss_ally_cloud.const import DATA_COORDINATOR, DATA_JOBS, DATA_SCHEDULES
+from custom_components.danfoss_ally_cloud.const import (
+    DATA_COORDINATOR,
+    DATA_JOBS,
+    DATA_LOCAL,
+    DATA_SCHEDULES,
+)
 from custom_components.danfoss_ally_cloud.writejob import JobManager
 
 from .common import head
@@ -63,6 +68,42 @@ class _Coord:
 def _store(grouped=True):
     coord = _Coord(grouped)
     return {DATA_COORDINATOR: coord, DATA_JOBS: JobManager(), DATA_SCHEDULES: {}}, coord
+
+
+class _FakeHass:
+    async def async_add_executor_job(self, func, *args):
+        return func(*args)
+
+
+class _FakeManager:
+    gateway_ids = {"gw1", "gw2"}
+
+    def survey_heads(self, heads):
+        return {"dev1": {"comfort": 21.0, "setback": 14.0}, "dev2": {"unreachable": True}}
+
+
+class _FakeLocal:
+    heads = ["dev1-head", "dev2-head"]  # opaque to the fake manager
+    manager = _FakeManager()
+
+
+async def test_local_survey_disabled():
+    """Without the local tunnel, local_survey raises the stable code local_disabled."""
+    store, _ = _store()
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.local_survey(_FakeHass(), store)
+    assert exc.value.code == "local_disabled"
+
+
+async def test_local_survey_ok():
+    store, _ = _store()
+    store[DATA_LOCAL] = _FakeLocal()
+    res = await ops.local_survey(_FakeHass(), store)
+    assert res["attempted"] == 2
+    assert res["reachable"] == 1  # dev2 unreachable
+    assert res["gateways"] == ["gw1", "gw2"]  # sorted
+    assert res["heads"]["dev1"]["comfort"] == 21.0
+    assert "surveyed_at" in res
 
 
 # --- Lecture -----------------------------------------------------------------------------------
