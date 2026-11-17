@@ -43,6 +43,7 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
+from .frontend import async_register_frontend, async_unregister_frontend
 from .mqtt_publisher import MqttPublisher
 from .services import async_register_services
 from .websocket_api import async_register as async_register_ws
@@ -52,9 +53,15 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Enregistre les actions et les commandes WebSocket (une fois par instance)."""
+    """Mise en place à l'échelle de l'intégration (une fois par instance).
+
+    Enregistre les actions et les commandes WebSocket, sert l'interface embarquée et
+    déclare sa ressource Lovelace ici — jamais dans `async_setup_entry` (contrat §6).
+    Best-effort : n'empêche pas le démarrage.
+    """
     async_register_services(hass)
     async_register_ws(hass)
+    await async_register_frontend(hass)
     return True
 
 
@@ -174,3 +181,13 @@ def _cleanup_orphaned_head_climates(
 async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Recharger l'entrée quand les options changent (MQTT, local, intervalle)."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Au retrait de la DERNIÈRE entrée : nettoyer la ressource Lovelace (contrat §6).
+
+    On ne nettoie pas au simple déchargement/rechargement (qui appelle seulement
+    `async_unload_entry`), mais seulement quand plus aucune entrée ne subsiste.
+    """
+    if not hass.config_entries.async_entries(DOMAIN):
+        await async_unregister_frontend(hass)

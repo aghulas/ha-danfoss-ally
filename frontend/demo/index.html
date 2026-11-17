@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Démo — Danfoss Ally (Cloud)</title>
+    <style>
+      /* Quelques variables de thème HA pour que la carte ait l'air « dans HA ». */
+      :root {
+        --primary-text-color: #212121;
+        --secondary-text-color: #727272;
+        --card-background-color: #fff;
+        --divider-color: #e0e0e0;
+        --primary-color: #03a9f4;
+        --text-primary-color: #fff;
+        --warning-color: #ffa600;
+        --ha-card-border-radius: 12px;
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f2f3f5;
+        font-family: Roboto, system-ui, sans-serif;
+        color: var(--primary-text-color);
+      }
+      /* Colonne centrée, largeur d'une colonne de tableau de bord. */
+      .wrap {
+        max-width: 420px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.1rem;
+        font-weight: 500;
+      }
+      #app,
+      #app > * {
+        display: block;
+      }
+      .panel {
+        padding: 12px 16px;
+        background: #fff;
+        border-radius: 12px;
+      }
+      .panel h2 {
+        font-size: 0.95rem;
+        margin: 0 0 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Démo hors Home Assistant — carte Programme (lot 3)</h1>
+      <div id="app"></div>
+      <div class="panel">
+        <h2>Éditeur de configuration</h2>
+        <div id="editor"></div>
+      </div>
+    </div>
+    <script type="module" src="./setup.ts"></script>
+  </body>
+</html>

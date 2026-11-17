@@ -2,6 +2,9 @@
   "domain": "danfoss_ally_cloud",
   "name": "Danfoss Ally (Cloud)",
   "after_dependencies": [
+    "frontend",
+    "http",
+    "lovelace",
     "mqtt"
   ],
   "codeowners": [

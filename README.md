@@ -43,8 +43,61 @@ décrite dans `docs/` (hook natif / capture réseau). Ces valeurs, le mot de pas
 session (`sid`/`ecode`) sont des **secrets** : ils ne sont jamais écrits dans les journaux ni les
 diagnostics (voir `diagnostics.py`).
 
+## Interface embarquée (carte de tableau de bord)
+
+L'intégration **livre sa propre carte Lovelace** `danfoss-ally-schedule-card` (programme d'une
+pièce). Rien à installer de plus : après l'installation par HACS et un redémarrage, la carte
+apparaît directement dans le **sélecteur de cartes** (« Ajouter une carte »).
+
+![Carte Programme Danfoss Ally](docs/images/schedule-card.png)
+
+Comment ça marche :
+
+- l'intégration sert son interface à l'URL `/danfoss_ally_cloud/frontend/` et déclare la ressource
+  `…/danfoss-ally-cloud.js?v=<version>` pour les tableaux de bord **en mode stockage** (le mode par
+  défaut) — aucune manipulation manuelle n'est nécessaire ;
+- la carte vérifie sa version au chargement et **propose de recharger** la page quand une nouvelle
+  version a été installée.
+
+### Tableau de bord en mode YAML
+
+En mode YAML, les ressources ne sont pas gérées par l'interface : ajoutez-la une fois à la main.
+
+```yaml
+# configuration.yaml (ou le fichier de ressources du tableau de bord)
+lovelace:
+  mode: yaml
+  resources:
+    - url: /danfoss_ally_cloud/frontend/danfoss-ally-cloud.js
+      type: module
+```
+
+Puis, dans une carte manuelle :
+
+```yaml
+type: custom:danfoss-ally-schedule-card
+room_id: "13000000" # group_id de la pièce
+```
+
+### Développer l'interface
+
+Les sources TypeScript + Lit sont dans `frontend/`. Le bundle **est versionné** dans le dépôt
+(`custom_components/danfoss_ally_cloud/frontend/danfoss-ally-cloud.js`) pour que HACS fonctionne
+depuis n'importe quelle branche ou étiquette. Commande de build **exacte** (sortie déterministe,
+vérifiée en CI) :
+
+```bash
+npm --prefix frontend ci
+npm --prefix frontend run build   # régénère le bundle versionné
+```
+
+Autres commandes : `npm --prefix frontend test` (Vitest), `npm --prefix frontend run typecheck`,
+et `npm --prefix frontend run demo` (page de démonstration hors Home Assistant, données d'essai
+synthétiques, sur http://localhost:5173/demo/).
+
 ## État
 
 **v0.1 — lecture seule cloud** : chaque tête apparaît comme un thermostat (température, consigne) ;
 capteurs batterie, ouverture de vanne, code défaut ; capteurs binaires en ligne / fenêtre. Pas
-encore d'écriture. Voir `docs/roadmap.md`.
+encore d'écriture. Socle de l'interface embarquée en place (carte minimale `danfoss-ally-schedule-card`).
+Voir `docs/roadmap.md`.
