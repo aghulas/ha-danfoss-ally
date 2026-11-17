@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -35,6 +36,17 @@ BIT_JOUR = {
     "samedi": 0x40,
 }
 MAX_TRANSITIONS = 6
+# Jours du dégommage (attribut Danfoss 0x4010, enum8) : dimanche = 0, … samedi = 6, 7 = indéfini.
+JOURS_DEGOMMAGE = [
+    "dimanche",
+    "lundi",
+    "mardi",
+    "mercredi",
+    "jeudi",
+    "vendredi",
+    "samedi",
+    "indéfini",
+]
 
 # Attributs lus : (id, nom). 0x0025 = mode programmation (bit 1 = pré-chauffage).
 ATTRIBUTS_STD = [
@@ -44,8 +56,47 @@ ATTRIBUTS_STD = [
     (0x0025, "mode_programmation"),
     (0x0030, "source_consigne"),
 ]
+# Attributs Danfoss (code fabricant 0x1246), répartis en deux relevés comme le connecteur MCP.
+ATTRIBUTS_DANFOSS_A = [
+    (0x4010, "degommage_jour"),
+    (0x4011, "degommage_heure"),
+    (0x4014, "orientation"),
+    (0x4016, "radiateur_couvert"),
+    (0x4020, "vitesse_regulation"),
+    (0x4030, "chaleur_disponible"),
+    (0x4031, "demande_chaleur"),
+    (0x4032, "equilibrage"),
+]
+ATTRIBUTS_DANFOSS_B = [
+    (0x404B, "decalage_consigne"),
+    (0x404D, "adaptation_etat"),
+    (0x404E, "adaptation_reglage"),
+    (0x404F, "prechauffage_en_cours"),
+    (0x4051, "detection_fenetre"),
+    (0x4000, "etat_fenetre"),
+]
+# Réglages inscriptibles par leur DP de pièce (noms officiels du schéma produit 03wvrwpv, contrat
+# §4.2). Le pré-chauffage réel, lui, est le bit 1 de l'attribut 0x0025 (voir ecrire_prechauffage) :
+# écrire le DP 1 ne touche que le cache de la passerelle (constat réel du 15/11/2026).
+REGLAGES_DP: dict[str, tuple[str, type]] = {
+    "detection_fenetre": ("116", bool),  # window_toggle
+    "verrouillage_enfant": ("30", bool),  # child_lock
+}
+# Dérogation de consigne « maintenant » : DP 171 OccupiedSetpoint. ATTENTION à l'échelle, voir
+# valeur_consigne : le MCP (validé en réel) l'écrit en centièmes de °C, alors que le schéma produit
+# annonce une échelle 10^0 — incohérence signalée, on suit le constat réel (centièmes).
+DP_CONSIGNE = "171"
+
 _CENTIEMES = {"consigne_en_cours", "borne_basse", "borne_haute"}
-_BOOLEENS: set[str] = set()
+_BOOLEENS = {
+    "radiateur_couvert",
+    "chaleur_disponible",
+    "demande_chaleur",
+    "equilibrage",
+    "prechauffage_en_cours",
+    "detection_fenetre",
+    "orientation",
+}
 _LONGUEUR = {
     0x10: 1,
     0x18: 1,
@@ -209,26 +260,86 @@ def nommer(valeurs: dict[int, int | None], table: list[tuple[int, str]]) -> dict
             out[nom] = v / 100
         elif nom in _BOOLEENS:
             out[nom] = bool(v)
+        elif nom == "degommage_jour":
+            out[nom] = JOURS_DEGOMMAGE[v] if v < len(JOURS_DEGOMMAGE) else v
+        elif nom == "degommage_heure":
+            out[nom] = f"{v // 60:02d}:{v % 60:02d}"
         elif nom == "mode_programmation":
             out[nom] = v
             out["pre_chauffage"] = bool(
                 v & 0x02
             )  # 3 = programme + pré-chauffage, 1 = programme seul
+        elif nom == "adaptation_etat":
+            out[nom] = v
+            out["adaptation_faite"] = bool(v & 0x02)
         else:
             out[nom] = v
     return out
 
 
 def plages(transitions: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    """Plages de confort d'une journée : segments dont la consigne dépasse celle de 00:00."""
+    """Plages de confort d'une journée : segments dont la consigne dépasse la plus basse du jour.
+
+    Deux segments de confort consécutifs à la même consigne sont fusionnés. La référence est la
+    consigne la plus basse de la journée (le réduit), et non celle de 00:00 : sinon une journée qui
+    commence en confort (plage à 00:00) ne montrerait aucune plage.
+    """
     if not transitions:
         return []
-    base, out = transitions[0]["c"], []
+    base: float = min(t["c"] for t in transitions)
+    out: list[dict[str, Any]] = []
     for i, t in enumerate(transitions):
         if t["c"] > base:
             fin = transitions[i + 1]["h"] if i + 1 < len(transitions) else "24:00"
-            out.append({"debut": t["h"], "fin": fin, "consigne": t["c"]})
+            if out and out[-1]["fin"] == t["h"] and out[-1]["consigne"] == t["c"]:
+                out[-1]["fin"] = fin
+            else:
+                out.append({"debut": t["h"], "fin": fin, "consigne": t["c"]})
     return out
+
+
+def degommage_valeurs(jour: str, heure: str) -> list[tuple[int, int, int]]:
+    """Dégommage hebdomadaire de la vanne : attributs Danfoss 0x4010 (jour, enum8) et 0x4011 (heure
+    en minutes, uint16). À écrire par ``ecrire_attributs(..., fabricant=True)``."""
+    j = (jour or "").lower()
+    if j not in JOURS_DEGOMMAGE[:7]:
+        raise LocalErreur(f"jour de dégommage inconnu : {jour}")
+    return [(0x4010, 0x30, JOURS_DEGOMMAGE.index(j)), (0x4011, 0x21, minutes(heure) % 1440)]
+
+
+def valeur_consigne(celsius: float) -> int:
+    """Dérogation de consigne (DP 171) → entier à publier. Valide 5–35 °C par 0,5.
+
+    Échelle : centièmes de °C (21 °C → 2100), d'après le constat réel du connecteur MCP du
+    15/11/2026. Le schéma produit officiel (DP 171 ``OccupiedSetpoint``) annonce une échelle 10^0 :
+    cette incohérence est connue et tranchée en faveur du constat réel (voir DP_CONSIGNE).
+    """
+    c = float(celsius)
+    if not 5 <= c <= 35 or round(c * 2) != c * 2:
+        raise LocalErreur(f"consigne hors plage : {celsius} (5 à 35 °C par 0,5)")
+    return int(round(c * 100))
+
+
+def transitions_depuis_fenetres(
+    fenetres: list[dict[str, str]], confort: float, reduit: float
+) -> list[dict[str, Any]]:
+    """Fenêtres de confort ``[{debut, fin}]`` → transitions d'une journée (réduit en dehors)."""
+    tr: list[dict[str, Any]] = [{"h": "00:00", "c": float(reduit)}]
+    fin_prec = 0
+    for f in sorted(fenetres, key=lambda x: minutes(x["debut"])):
+        d, e = minutes(f["debut"]), minutes(f["fin"])
+        if d < fin_prec or e <= d:
+            raise LocalErreur(
+                "fenêtres de confort mal formées (chevauchement ou fin avant le début)"
+            )
+        if d == 0:
+            tr[0]["c"] = float(confort)
+        else:
+            tr.append({"h": f"{d // 60:02d}:{d % 60:02d}", "c": float(confort)})
+        if e < 1440:
+            tr.append({"h": f"{e // 60:02d}:{e % 60:02d}", "c": float(reduit)})
+        fin_prec = e
+    return verifier_transitions(tr)
 
 
 # --- liaison avec une passerelle (tinytuya) ---------------------------------------------------
@@ -261,6 +372,11 @@ class LocalLink:
 
     def envoyer(self, dev_id: str, node_id: str, trame: bytes) -> None:
         self._sub(dev_id, node_id).set_value("198", base64.b64encode(trame).decode(), nowait=True)
+
+    def envoyer_dp(self, dev_id: str, node_id: str, dp: str, valeur: Any) -> None:
+        """Publie une valeur sur un DP de la tête (hors tunnel) : dérogation de consigne (171),
+        réglages de pièce (116, 30). Fire-and-forget : la passerelle accuse par rafraîchissement."""
+        self._sub(dev_id, node_id).set_value(dp, valeur, nowait=True)
 
     def recevoir(self) -> tuple[str | None, dict[str, Any]] | None:
         if time.time() - self._battement > 20:
@@ -394,3 +510,218 @@ def ecrire_prechauffage(
     """
     nouveau = nouveau_mode_prechauffage(mode_actuel, actif)
     return ecrire_attributs(lien, dev_id, node_id, [(0x0025, 0x18, nouveau)], fabricant=False)
+
+
+def ecrire_jour(
+    lien: Any, dev_id: str, node_id: str, jour: str, transitions: list[dict[str, Any]]
+) -> int | None:
+    """SetWeeklySchedule (0x01) pour UN jour par le tunnel. Renvoie le statut de la tête (0 =
+    accepté) dans la réponse par défaut ZCL (0x0B), None sans réponse. R2 : la tête propage ensuite
+    toute la semaine. R1 est validée en amont (``verifier_transitions``, aussi dans la trame)."""
+
+    def accepte(f: dict[str, Any]) -> Any:
+        c = f["charge"]
+        return c[1] if f["commande"] == 0x0B and len(c) >= 2 and c[0] == 0x01 else None
+
+    trame = trame_ecrire_programme(jour, transitions)
+    return demander(lien, dev_id, node_id, trame, accepte, duree=10, essais=1)
+
+
+def ecrire_degommage(lien: Any, dev_id: str, node_id: str, jour: str, heure: str) -> int | None:
+    """Règle le dégommage de la vanne (0x4010/0x4011, fabricant). Statut 0 = accepté."""
+    return ecrire_attributs(lien, dev_id, node_id, degommage_valeurs(jour, heure), fabricant=True)
+
+
+def ecrire_consigne(lien: Any, dev_id: str, node_id: str, celsius: float) -> int:
+    """Dérogation de consigne « maintenant » par le DP 171 (centièmes). Fire-and-forget : renvoie la
+    valeur publiée (vérification par relecture ultérieure). Hors programme : dérogation jusqu'au
+    prochain changement d'horaire de la tête (pas une consigne durable, cf. contrat R3/R5)."""
+    val = valeur_consigne(celsius)
+    lien.envoyer_dp(dev_id, node_id, DP_CONSIGNE, val)
+    return val
+
+
+def ecrire_reglage_dp(lien: Any, dev_id: str, node_id: str, reglage: str, valeur: Any) -> Any:
+    """Écrit un réglage de pièce par son DP (``detection_fenetre`` → 116, ``verrouillage_enfant`` →
+    30). Fire-and-forget : renvoie la valeur publiée (type coercé selon REGLAGES_DP)."""
+    if reglage not in REGLAGES_DP:
+        raise LocalErreur(f"réglage DP inconnu : {reglage} (connus : {', '.join(REGLAGES_DP)})")
+    dp, typ = REGLAGES_DP[reglage]
+    val = typ(valeur)
+    lien.envoyer_dp(dev_id, node_id, dp, val)
+    return val
+
+
+def lire_detection_fenetre(lien: Any, dev_id: str, node_id: str, **kw: Any) -> bool | None:
+    """Lit l'attribut Danfoss 0x4051 (détection de fenêtre ouverte, bool). None sans réponse."""
+    a = lire_attributs(lien, dev_id, node_id, [(0x4051, "detection_fenetre")], True, **kw)
+    return None if a is None else a.get("detection_fenetre")
+
+
+def lire_tete(lien: Any, dev_id: str, node_id: str, programme: bool = True) -> dict[str, Any]:
+    """Relevé complet d'une tête par le tunnel : attributs standard + Danfoss (A et B) et, si
+    ``programme``, les transitions des 7 jours. ``injoignable`` si rien ne répond. Best-effort : un
+    relevé d'attributs qui échoue est noté dans ``manques`` sans interrompre les autres."""
+    e: dict[str, Any] = {"attributs": {}, "programme": {}, "manques": []}
+    t0, echecs = time.time(), 0
+    for nom, table, fab in (
+        ("standard", ATTRIBUTS_STD, False),
+        ("danfoss_a", ATTRIBUTS_DANFOSS_A, True),
+        ("danfoss_b", ATTRIBUTS_DANFOSS_B, True),
+    ):
+        a = lire_attributs(lien, dev_id, node_id, table, fab)
+        if a is None:
+            e["manques"].append(nom)
+            echecs += 1
+            if echecs >= 2 and not e["attributs"]:
+                break
+        else:
+            e["attributs"].update(a)
+    if not e["attributs"]:
+        e["injoignable"] = True
+    elif programme:
+        for j in JOURS:
+            tr = lire_jour(lien, dev_id, node_id, j)
+            if tr is None:
+                e["manques"].append(j)
+            else:
+                e["programme"][j] = tr
+    e["duree_s"] = round(time.time() - t0)
+    return e
+
+
+def releve(
+    gateways: dict[str, GatewayKey],
+    heads: list[Any],
+    ouvrir: Callable[[GatewayKey], Any] = LocalLink,
+    progres: Callable[[str, dict[str, Any]], None] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Relevé robuste de plusieurs têtes, une passerelle par fil (lecture seule, ~8 s par tête).
+
+    ``heads`` : objets exposant ``dev_id``, ``node_id`` et ``gateway_id`` (p. ex. ``manager.Head``).
+    Résultat indexé par ``dev_id``. Best-effort : une passerelle injoignable marque ses têtes
+    ``injoignable``, et chaque tête est isolée des autres (aucune exception propagée)."""
+    res: dict[str, dict[str, Any]] = {}
+    garde = threading.Lock()
+    par_gw: dict[str, list[Any]] = {}
+    for h in heads:
+        if h.gateway_id in gateways:
+            par_gw.setdefault(h.gateway_id, []).append(h)
+
+    def fil(gw_id: str, miennes: list[Any]) -> None:
+        try:
+            lien = ouvrir(gateways[gw_id])
+        except Exception as ex:  # noqa: BLE001 - passerelle injoignable
+            with garde:
+                for h in miennes:
+                    res[h.dev_id] = {
+                        "attributs": {},
+                        "programme": {},
+                        "injoignable": True,
+                        "erreur": str(ex)[:80],
+                    }
+            return
+        try:
+            for h in miennes:
+                try:
+                    e = lire_tete(lien, h.dev_id, h.node_id)
+                except Exception as ex:  # noqa: BLE001 - on isole chaque tête
+                    e = {
+                        "attributs": {},
+                        "programme": {},
+                        "injoignable": True,
+                        "erreur": str(ex)[:80],
+                    }
+                with garde:
+                    res[h.dev_id] = e
+                if progres:
+                    progres(h.dev_id, e)
+        finally:
+            lien.fermer()
+
+    fils = [threading.Thread(target=fil, args=(g, m), daemon=True) for g, m in par_gw.items()]
+    for f in fils:
+        f.start()
+    for f in fils:
+        f.join(timeout=60)
+    return res
+
+
+# --- synthèse et comparaison (fonctions pures) ------------------------------------------------
+
+
+def resumer_tete(e: dict[str, Any]) -> dict[str, Any]:
+    """Résumé d'un relevé de tête : plages de confort par jour, confort/réduit et attributs."""
+    if not e.get("attributs"):
+        return {"injoignable": True}
+    p = e.get("programme") or {}
+    cs = [t["c"] for j in JOURS for t in p.get(j, [])]
+    return {
+        "plages": {
+            j: [f"{x['debut']}–{x['fin']}" for x in plages(p.get(j))] for j in JOURS if j in p
+        },
+        "confort": max(cs) if cs else None,
+        "reduit": min(cs) if cs else None,
+        **e["attributs"],
+        **({"manques": e["manques"]} if e.get("manques") else {}),
+    }
+
+
+# Réglages suivis d'un relevé à l'autre (écarts remontés par ``comparer``).
+REGLAGES_SUIVIS = (
+    "borne_haute",
+    "borne_basse",
+    "mode_programmation",
+    "degommage_jour",
+    "degommage_heure",
+    "vitesse_regulation",
+    "detection_fenetre",
+    "adaptation_faite",
+    "radiateur_couvert",
+    "equilibrage",
+)
+
+
+def comparer(
+    reference: dict[str, dict[str, Any]], nouveau: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """Écarts d'un relevé par rapport à une référence : programmes, réglages suivis, injoignables.
+
+    ``reference`` et ``nouveau`` sont indexés de la même façon (``dev_id`` ou nom)."""
+    ra = {n: e for n, e in reference.items() if e.get("attributs")}
+    rb = {n: e for n, e in nouveau.items() if e.get("attributs")}
+    prog = []
+    for n in sorted(rb):
+        if n in ra:
+            for j in JOURS:
+                x, y = ra[n]["programme"].get(j), rb[n]["programme"].get(j)
+                if x != y and y is not None:
+                    prog.append({"tete": n, "jour": j, "avant": x, "apres": y})
+    regl = [
+        {
+            "tete": n,
+            "reglage": k,
+            "avant": ra[n]["attributs"].get(k),
+            "apres": rb[n]["attributs"].get(k),
+        }
+        for n in sorted(rb)
+        if n in ra
+        for k in REGLAGES_SUIVIS
+        if ra[n]["attributs"].get(k) != rb[n]["attributs"].get(k)
+    ]
+
+    def chauffe(e: dict[str, Any], j: str) -> bool:
+        return bool(plages(e["programme"].get(j)))
+
+    return {
+        "relevees": len(rb),
+        "tentees": len(nouveau),
+        "injoignables": sorted(n for n, e in nouveau.items() if not e.get("attributs")),
+        "nouvelles_injoignables": sorted(n for n in ra if n in nouveau and n not in rb),
+        "programmes_modifies": prog,
+        "reglages_modifies": regl,
+        "chauffent_mercredi": sorted(n for n, e in rb.items() if chauffe(e, "mercredi")),
+        "chauffent_week_end": sorted(
+            n for n, e in rb.items() if chauffe(e, "samedi") or chauffe(e, "dimanche")
+        ),
+    }
