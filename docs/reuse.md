@@ -25,3 +25,17 @@ Assistant** et packagée sous le nom **`pydanfoss-cloud`** par le `pyproject.tom
 - Le connecteur MCP pourra remplacer sa copie (`tuya/`, `local.py`, `modeles.py`) par une dépendance
   `pydanfoss-cloud` une fois la bibliothèque **publiée sur PyPI** (repo/compte à décider par Rémi).
 - Ensuite seulement, l'intégration référencera la version dans `manifest.json -> requirements`.
+
+## Voie officielle Danfoss (OAuth2) : hors lib, hors intégration
+
+La **voie officielle Danfoss** — API publique `api.danfoss.com`, authentification **OAuth2** avec
+application développeur et clé API — **reste dans le connecteur MCP `danfoss-ally-mcp`** (pour le
+diagnostic et la compatibilité) et **n'entre ni dans `pydanfoss-cloud` ni dans l'intégration**.
+
+C'est un **choix de conception assumé**, pas un manque : l'intégration et la bibliothèque sont
+**cloud-first voie 1a**, c.-à-d. la même API cloud que l'application mobile, précisément pour
+**éviter l'application développeur et son quota partagé** (voir README et `architecture.md`). Faire
+entrer OAuth2 dans la lib ré-introduirait exactement la dépendance que ce projet écarte.
+
+**Donc : ne pas porter la voie OAuth2 dans `pydanfoss-cloud`.** Si un besoin de diagnostic l'exige,
+il passe par le connecteur MCP, qui la conserve à part.

@@ -38,6 +38,60 @@ local reste interne, sans rien demander de plus à l'utilisateur.
   source `cloud` / `local`.
 - `diagnostics.py` — rédaction stricte des secrets.
 
+## Session Tuya partagée avec le connecteur MCP (deviceId commun)
+
+L'intégration `danfoss_ally_cloud` et le connecteur MCP `danfoss-ally-mcp`
+utilisent le **même matériel d'installation capturé de l'application** :
+`deviceId`, `sign_key` et `chKey` (voir README, « Secrets d'installation »).
+Côté serveur Tuya, ce triplet identifie **une seule installation**, donc **une
+seule session active**. Si les deux clients tournent en parallèle contre le
+compte réel, la connexion de l'un **invalide la session de l'autre** : ils se
+délogent mutuellement, chacun déclenchant chez l'autre une ré-authentification,
+d'où une boucle de reconnexions et des erreurs intermittentes (`session_expired`,
+appels refusés) des deux côtés.
+
+> Le connecteur `tuya-mcp` (radiateurs du bâtiment F) n'est **pas** concerné : il
+> passe par le SDK de partage Smart Life avec son propre `terminal_id`.
+
+### Règle opérationnelle (tant qu'un seul jeu de secrets existe)
+
+**Ne jamais faire tourner les deux en même temps contre le compte réel.** Un seul
+porteur de session à la fois :
+
+- tant que le connecteur MCP sert (session Claude active sur `danfoss-ally-mcp`),
+  l'intégration reste **désactivée** côté Home Assistant ;
+- inversement, pour utiliser l'intégration en continu, on arrête d'utiliser le
+  connecteur MCP sur ce compte.
+
+Désactiver l'intégration côté HA la décharge **et** l'empêche de se recharger au
+démarrage, ce qui libère la session ; un simple « recharger » ne suffit pas. État
+actuel sur le Pi de l'école : l'intégration est `disabled_by: user` (désactivée),
+le connecteur MCP garde donc la main. C'est un **contournement**, pas la cible.
+
+### Piste de fond : une installation virtuelle distincte pour l'intégration
+
+La vraie coexistence suppose de donner à l'intégration **son propre jeu de
+secrets** (`deviceId` / `sign_key` / `chKey` distincts), c.-à-d. une **deuxième
+« installation » virtuelle** de l'application vis-à-vis du serveur Tuya. Deux
+installations = deux sessions indépendantes, qui ne se délogent plus.
+
+Marche à suivre, au niveau conceptuel (étape manuelle **à venir**, non réalisée
+ici) :
+
+1. produire un nouveau triplet d'installation à l'aide du dépôt de signature
+   `~/dev/danfoss-ally-signing-re` et de l'application réelle (capture / hook) —
+   l'opération demande **Rémi** et l'app, elle ne peut pas être automatisée depuis
+   ce dépôt ;
+2. enregistrer cette installation sur le compte comme un appareil mobile
+   supplémentaire (le serveur refuse un `chKey` inconnu : le triplet doit être un
+   vrai couple installation ↔ compte, pas une valeur fabriquée) ;
+3. configurer l'intégration avec ce triplet distinct, et réserver le triplet
+   d'origine au connecteur MCP ;
+4. vérifier en réel que les deux sessions coexistent sans se déloger.
+
+Tant que cette capture n'est pas faite, la règle opérationnelle ci-dessus reste la
+seule garantie contre les délogements mutuels.
+
 ## Sécurité
 
 Jetons de session et localKey sont des secrets : jamais dans les logs, les

@@ -43,6 +43,12 @@ décrite dans `docs/` (hook natif / capture réseau). Ces valeurs, le mot de pas
 session (`sid`/`ecode`) sont des **secrets** : ils ne sont jamais écrits dans les journaux ni les
 diagnostics (voir `diagnostics.py`).
 
+> **Un seul client par jeu de secrets.** Côté serveur Tuya, ce triplet identifie une seule
+> installation, donc une seule session active. Si le connecteur MCP `danfoss-ally-mcp` utilise le
+> **même** triplet sur le même compte, les deux se délogent mutuellement : ne pas les faire tourner
+> en parallèle, ou capturer un triplet distinct pour chacun. Détail dans
+> [`docs/architecture.md`](docs/architecture.md) (« Session Tuya partagée avec le connecteur MCP »).
+
 ## Interface embarquée (carte de tableau de bord)
 
 L'intégration **livre sa propre carte Lovelace** `danfoss-ally-schedule-card` (programme d'une
