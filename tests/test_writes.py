@@ -52,10 +52,16 @@ def test_encode_setpoint_rounding_and_bounds():
 
 async def test_switch_verrou_enfant_envoie_dp30():
     dev = _dev()
+    dev.mesh_id = "gw-mesh-1"
     coord = _coord(dev)
     desc = next(d for d in SWITCHES if d.key == "child_lock")
     ent = DanfossSwitch(coord, dev.id, desc)
     await ent.async_turn_on()
-    coord.client.async_write_setting.assert_awaited_once_with(dev.id, dev.product_id, {"30": True})
+    # The settings write addresses the head's gateway (meshId), aligned on the schedule path.
+    coord.client.async_write_setting.assert_awaited_once_with(
+        dev.id, dev.product_id, {"30": True}, gw_id="gw-mesh-1"
+    )
     await ent.async_turn_off()
-    coord.client.async_write_setting.assert_awaited_with(dev.id, dev.product_id, {"30": False})
+    coord.client.async_write_setting.assert_awaited_with(
+        dev.id, dev.product_id, {"30": False}, gw_id="gw-mesh-1"
+    )

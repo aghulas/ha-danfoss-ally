@@ -227,12 +227,20 @@ class CloudClient:
             "channel": meta.get("zigChannel"),
         }
 
-    async def async_write_setting(self, dev_id: str, pid: str, dps: dict) -> object:
+    async def async_write_setting(
+        self, dev_id: str, pid: str, dps: dict, *, gw_id: str | int | None = None
+    ) -> object:
         """Write setting DPs on a HEAD (tuya.m.custom.wkf.settings.change, resType 1).
 
         Mechanism proven by capture (see danfoss-ally-mcp) for the "Setting" screen DPs (child lock,
         window detection, setpoint...). `dps` = {str(dp): value}. A head GROUPED into a room is
         normally set through its room (group) - not handled in v0.2.
+
+        ``gw_id`` is the head's gateway (``meshId``). For an isolated head the gateway is the
+        proven addressing (see ``_resolve_target`` and contract §4.1, confirmed on real hardware
+        2026-11-17, C0b): the schedule writes already use ``gwId = meshId``, and this settings
+        path is now aligned on it. When ``gw_id`` is omitted (or falsy) it falls back to ``dev_id``,
+        the previous behaviour.
 
         ⚠ The real effect on the head is still to confirm on real hardware (some settings via this
         path had not reached every isolated head in the MCP trials).
@@ -241,7 +249,7 @@ class CloudClient:
             raise CloudWriteError("devId/pid required for the write.")
         body = {
             "devId": dev_id,
-            "gwId": dev_id,
+            "gwId": str(gw_id or dev_id),
             "pid": pid,
             "resId": dev_id,
             "resType": 1,
@@ -499,7 +507,9 @@ class CloudClient:
         if res["res_type"] == RES_TYPE_GROUP:
             await self.async_group_publish(res["res_id"], {"2": "at_home"})
         else:
-            await self.async_write_setting(res["res_id"], res["pid"] or "", {"2": "at_home"})
+            await self.async_write_setting(
+                res["res_id"], res["pid"] or "", {"2": "at_home"}, gw_id=res["gw_id"]
+            )
         return {"target": target, "restored": True}
 
     async def async_validate(self) -> list[dict]:
