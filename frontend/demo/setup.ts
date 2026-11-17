@@ -8,7 +8,16 @@
 import "../src/main";
 import type { DanfossAllyScheduleCard } from "../src/schedule-card";
 import type { DanfossAllyScheduleCardEditor } from "../src/schedule-card-editor";
-import type { HassLike, Info, Room, Schedule } from "../src/types";
+import type {
+  DayKey,
+  HassLike,
+  Info,
+  Room,
+  Schedule,
+  TimeRange,
+  WriteJob,
+} from "../src/types";
+import { validateDays } from "../src/validate";
 
 // `ha-card` factice : la démo n'a pas les composants de Home Assistant. Défini
 // globalement, il est aussi « upgradé » à l'intérieur du shadow DOM de la carte,
@@ -150,12 +159,78 @@ const SCHEDULES: Record<string, Schedule> = {
   },
 };
 
+// is_admin true → la démo montre l'édition (lot 5). Mettre false pour voir la
+// carte en lecture seule.
 const INFO: Info = { version: "0.1.0", local_enabled: false, is_admin: true };
+
+// Abonnés à `jobs/subscribe` (simulation locale, pas de vrai WebSocket).
+const jobListeners: ((job: WriteJob) => void)[] = [];
+let jobSeq = 0;
+
+function emit(job: WriteJob): void {
+  for (const cb of jobListeners) {
+    cb(job);
+  }
+}
+
+// Simule le cycle d'un lot d'écriture (envoyé → appliqué, tête par tête).
+function simulateJob(roomId: string, kind: string): WriteJob {
+  jobSeq += 1;
+  const heads = (ROOMS.find((r) => r.id === roomId)?.heads ?? []).map((h) => ({
+    device_id: h.device_id,
+    status: "pending" as const,
+    detail: null,
+  }));
+  const job: WriteJob = {
+    job_id: `demo-${jobSeq}`,
+    kind,
+    target: { type: "room", id: roomId },
+    status: "sent",
+    created_at: new Date().toISOString(),
+    heads: heads.map((h) => ({ ...h })),
+  };
+  // Après un instant, chaque tête « en ligne » passe à appliqué.
+  heads.forEach((h, i) => {
+    setTimeout(
+      () => {
+        const online = ROOMS.find((r) => r.id === roomId)?.heads.find(
+          (x) => x.device_id === h.device_id,
+        )?.online;
+        job.heads[i] = {
+          device_id: h.device_id,
+          status: online ? "applied" : "unreachable",
+          detail: null,
+        };
+        const allApplied = job.heads.every((x) => x.status === "applied");
+        const anyApplied = job.heads.some((x) => x.status === "applied");
+        job.status = allApplied ? "applied" : anyApplied ? "partial" : "unverified";
+        emit({ ...job, heads: job.heads.map((x) => ({ ...x })) });
+      },
+      800 * (i + 1),
+    );
+  });
+  return { ...job, heads: job.heads.map((x) => ({ ...x })) };
+}
 
 // Pour voir la bannière de rechargement : mettre une version différente de celle
 // injectée au build, p. ex. `{ ...INFO, version: "9.9.9" }`.
 const fakeHass: HassLike = {
   language: "fr",
+  connection: {
+    async subscribeMessage<T>(
+      cb: (msg: T) => void,
+      _sub: Record<string, unknown>,
+    ): Promise<() => void> {
+      const typed = cb as unknown as (job: WriteJob) => void;
+      jobListeners.push(typed);
+      return () => {
+        const i = jobListeners.indexOf(typed);
+        if (i >= 0) {
+          jobListeners.splice(i, 1);
+        }
+      };
+    },
+  },
   async callWS<T>(msg: Record<string, unknown>): Promise<T> {
     // Simule la latence et les commandes du contrat §5.3.
     await new Promise((r) => setTimeout(r, 120));
@@ -171,10 +246,36 @@ const fakeHass: HassLike = {
       if (!schedule) {
         throw new Error("pièce inconnue");
       }
-      // Sur un « actualiser » (refresh), met à jour l'horodatage de lecture.
       return (
         msg.refresh ? { ...schedule, read_at: new Date().toISOString() } : schedule
       ) as unknown as T;
+    }
+    if (msg.type === "danfoss_ally_cloud/schedule/validate") {
+      const days = msg.days as Record<string, TimeRange[]>;
+      const res = validateDays(days ?? {});
+      return {
+        valid: res.valid,
+        transitions: res.transitions,
+        errors: res.errors.map((e) => ({ code: e.code, message: e.code, day: e.day })),
+      } as unknown as T;
+    }
+    if (msg.type === "danfoss_ally_cloud/schedule/set") {
+      const target = msg.target as { id?: string };
+      const days = msg.days as Partial<Record<DayKey, TimeRange[]>>;
+      const schedule = target.id ? SCHEDULES[target.id] : undefined;
+      if (!schedule) {
+        throw { code: "unknown_target", message: "pièce inconnue" };
+      }
+      // Applique les jours envoyés au programme simulé.
+      for (const [day, ranges] of Object.entries(days) as [DayKey, TimeRange[]][]) {
+        schedule.days[day] = ranges.map((r) => ({ ...r }));
+      }
+      schedule.read_at = new Date().toISOString();
+      return simulateJob(target.id!, "set_schedule") as unknown as T;
+    }
+    if (msg.type === "danfoss_ally_cloud/schedule/restore") {
+      const target = msg.target as { id?: string };
+      return simulateJob(target.id!, "restore_schedule") as unknown as T;
     }
     throw new Error(`commande non simulée : ${String(msg.type)}`);
   },
