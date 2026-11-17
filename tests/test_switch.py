@@ -39,8 +39,8 @@ class _FakeClient:
     def __init__(self):
         self.calls = []
 
-    async def async_write_setting(self, dev_id, pid, dps):
-        self.calls.append((dev_id, pid, dps))
+    async def async_write_setting(self, dev_id, pid, dps, *, gw_id=None):
+        self.calls.append((dev_id, pid, dps, gw_id))
 
 
 def _verrou_desc():
@@ -68,7 +68,7 @@ async def test_switch_turn_on_ecrit_et_rafraichit():
     coord = _FakeCloudCoord({dev.id: dev}, client=client)
     sw = DanfossSwitch(coord, dev.id, _verrou_desc())
     await sw.async_turn_on()
-    assert client.calls == [(dev.id, dev.product_id, {"30": True})]
+    assert client.calls == [(dev.id, dev.product_id, {"30": True}, dev.mesh_id)]
     assert coord.refreshed is True
 
 
@@ -78,7 +78,7 @@ async def test_switch_turn_off():
     coord = _FakeCloudCoord({dev.id: dev}, client=client)
     sw = DanfossSwitch(coord, dev.id, _verrou_desc())
     await sw.async_turn_off()
-    assert client.calls[-1] == (dev.id, dev.product_id, {"30": False})
+    assert client.calls[-1] == (dev.id, dev.product_id, {"30": False}, dev.mesh_id)
 
 
 async def test_switch_turn_on_without_device_does_nothing():

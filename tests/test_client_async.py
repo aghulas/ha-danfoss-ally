@@ -81,6 +81,20 @@ async def test_async_write_setting_payload():
     api, _, body, _ = fake.calls[-1]
     assert api == "tuya.m.custom.wkf.settings.change"
     assert body["devId"] == "dev-1" and '"16":210' in body["settings"]
+    # Without an explicit gateway, gwId falls back to devId (previous behaviour).
+    assert body["gwId"] == "dev-1"
+
+
+async def test_async_write_setting_uses_meshid_gateway():
+    """An isolated head's settings write addresses gwId = meshId (contract §4.1/§4.2)."""
+    fake = FakeHttp({"tuya.m.custom.wkf.settings.change": {"ok": True}})
+    with patch(_HTTP, return_value=fake):
+        await _client().async_write_setting(
+            "dev-1", "03wvrwpv", {"2": "at_home"}, gw_id="gw-mesh-9"
+        )
+    _, _, body, _ = fake.calls[-1]
+    assert body["devId"] == "dev-1"  # resId/devId stay the head
+    assert body["gwId"] == "gw-mesh-9"  # gateway (meshId), not the head's devId
 
 
 async def test_async_device_meta():

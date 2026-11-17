@@ -180,9 +180,11 @@ For an isolated head, `gwId` is the **`meshId`** (the gateway), **not** the head
 the shape observed on the app and **replayed on real hardware**, implemented by `_resolve_target` in
 `api/client.py` (`gw_id = dev.mesh_id or devId`, falling back to the `devId` if the `meshId` is
 missing). The code remains the reference; this table was aligned on it on 2026-11-17 (an earlier
-version of the contract said `gwId = devId` for an isolated head). Caveat: the "isolated head" path
-was observed on the app but not yet exercised end-to-end on real hardware (the trials of 2026-11-16
-were on rooms) — to confirm in a trial on an ungrouped head.
+version of the contract said `gwId = devId` for an isolated head). **Confirmed on real hardware on
+2026-11-17** (C0b trial, ungrouped head "E-2 Local Menage"): a schedule write targeting the head
+with `gwId = meshId` was accepted by the backend **and reached the hardware** (the Monday comfort
+slot appeared in the head's schedule, re-read through the tunnel). `gwId = devId` for a schedule
+write is **not** proven and must not be reintroduced blindly.
 
 | Operation | API | Version | Body (in addition to the common body) |
 |---|---|---|---|
@@ -212,7 +214,11 @@ were on rooms) — to confirm in a trial on an ungrouped head.
 | Room settings | `{"1": bool}` preheat, `{"30": bool}` lock, `{"116": bool}` window, `{"18": 210}` upper bound | applied in 5 to 10 min |
 
 An isolated head is set via `tuya.m.custom.wkf.settings.change` (already in `async_write_setting`);
-this path proved unreliable on grouped heads.
+this path proved unreliable on grouped heads. Since 2026-11-17 this settings write uses `gwId =
+meshId` (the head's gateway), **aligned on the schedule path** (§4.1): the previous `gwId = devId`
+was the lone divergence inside `api/client.py` and is lifted. `async_write_setting` takes an
+optional `gw_id`; callers pass the head's `meshId` (falling back to `devId` when the `meshId` is
+unknown).
 
 ### 4.3 State
 
