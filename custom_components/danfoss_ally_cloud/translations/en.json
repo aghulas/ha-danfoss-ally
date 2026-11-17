@@ -112,6 +112,38 @@
         }
       }
     },
+    "set_override": {
+      "name": "Set temperature override",
+      "description": "One-off setpoint override on a head, over the local Zigbee tunnel. Lasts until the head's next scheduled change (not a durable setpoint).",
+      "fields": {
+        "target": {
+          "name": "Head",
+          "description": "Target head: type device and its device id (see the service example)."
+        },
+        "temperature": {
+          "name": "Temperature",
+          "description": "Override temperature in degrees C (5 to 35, by 0.5)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
+    "clear_override": {
+      "name": "Clear temperature override",
+      "description": "End an override by re-applying the setpoint the schedule prescribes now.",
+      "fields": {
+        "target": {
+          "name": "Head",
+          "description": "Target head: type device and its device id (see the service example)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
     "get_schedule": {
       "name": "Get schedule",
       "description": "Weekly schedule of a room or an isolated head.",
@@ -244,6 +276,12 @@
     },
     "invalid_day": {
       "message": "Unknown day (expected mon, tue, wed, thu, fri, sat or sun)."
+    },
+    "invalid_setpoint": {
+      "message": "Setpoint out of range (5 to 35 degrees C, by 0.5)."
+    },
+    "no_schedule": {
+      "message": "No schedule to return to; the override lapses at the next scheduled change."
     }
   }
 }

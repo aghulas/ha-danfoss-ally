@@ -16,7 +16,7 @@ import logging
 import re
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_call_later
@@ -143,14 +143,74 @@ def _require_local(store: dict):
     return local
 
 
-async def _run_tunnel(hass: HomeAssistant, func, *args) -> bool:
-    """Run a blocking tunnel write off-thread, mapping tunnel errors to contract codes."""
+async def _run_tunnel(hass: HomeAssistant, func, *args) -> Any:
+    """Run a blocking tunnel read/write off-thread, mapping tunnel errors to contract codes."""
     try:
         return await hass.async_add_executor_job(func, *args)
     except tunnel.LocalUnavailable as err:
         raise OperationError("local_unreachable", str(err)) from err
     except tunnel.LocalError as err:
         raise OperationError("local_write_failed", str(err)) from err
+
+
+def _scheduled_setpoint_now(schedule_days: dict[str, list[dict]], now: datetime) -> float | None:
+    """The setpoint the weekly schedule prescribes at ``now`` (used to end an override).
+
+    ``schedule_days``: ``{tunnel-weekday: [{"h": "HH:MM", "c": float}]}`` (tunnel.read_schedule);
+    the weekday index matches ``datetime.weekday()``, Monday = 0. Within the current day the active
+    transition is the last whose time <= now; before the first transition of the day, the most
+    recent prior day's last transition applies (contract R1). None if the schedule is empty.
+    """
+    order = tunnel.WEEKDAYS  # monday .. sunday (index 0 = Monday, as datetime.weekday())
+    idx = now.weekday()
+    hhmm = now.strftime("%H:%M")
+    today = schedule_days.get(order[idx]) or []
+    active = [t for t in today if t["h"] <= hhmm]
+    if active:
+        return float(active[-1]["c"])
+    for back in range(1, 8):  # walk back to the most recent day that has a transition
+        prev = schedule_days.get(order[(idx - back) % 7]) or []
+        if prev:
+            return float(prev[-1]["c"])
+    return None
+
+
+async def set_override(hass: HomeAssistant, store: dict, target: dict, temperature: float) -> dict:
+    """C1 — set a one-off "now" setpoint override on a head via the tunnel (DP 171).
+
+    Outside the schedule: an override until the head's next scheduled change (not a durable
+    setpoint; see contract R3/R5). Value validated against the head's own bounds.
+    """
+    local = _require_local(store)
+    coordinator = store[DATA_COORDINATOR]
+    head = _tunnel_head(coordinator, local, target)
+    dev = coordinator.data[head.dev_id]
+    low = dev.min_setpoint if dev.min_setpoint is not None else 5.0
+    high = dev.max_setpoint if dev.max_setpoint is not None else 35.0
+    temp = float(temperature)
+    if not (low <= temp <= high) or round(temp * 2) != temp * 2:
+        raise OperationError("invalid_setpoint", f"setpoint out of range ({low}-{high} °C, by 0.5)")
+    raw = await _run_tunnel(hass, local.manager.set_override, head, temp)
+    return {"target": target, "setpoint": temp, "published_raw": raw}
+
+
+async def clear_override(hass: HomeAssistant, store: dict, target: dict) -> dict:
+    """C1 — end a one-off override by re-applying the setpoint the schedule prescribes now.
+
+    Reads the head's schedule through the tunnel and writes (DP 171) the value active at this
+    moment, so the head immediately shows its scheduled temperature (the override then matches the
+    schedule and lapses at the next scheduled change — the lever used to restore in the C0 trial).
+    """
+    local = _require_local(store)
+    head = _tunnel_head(store[DATA_COORDINATOR], local, target)
+    days = await _run_tunnel(hass, local.manager.read_schedule, head)
+    setpoint = _scheduled_setpoint_now(days, datetime.now().astimezone())
+    if setpoint is None:
+        raise OperationError(
+            "no_schedule", "no schedule to return to; the override lapses at the next change"
+        )
+    raw = await _run_tunnel(hass, local.manager.set_override, head, setpoint)
+    return {"target": target, "restored_setpoint": setpoint, "published_raw": raw}
 
 
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")

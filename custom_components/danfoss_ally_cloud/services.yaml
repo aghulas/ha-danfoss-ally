@@ -38,6 +38,41 @@ set_descaling:
         config_entry:
           integration: danfoss_ally_cloud
 
+set_override:
+  fields:
+    target:
+      required: true
+      example: '{"type": "device", "id": "<devId>"}'
+      selector:
+        object:
+    temperature:
+      required: true
+      example: 20
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+clear_override:
+  fields:
+    target:
+      required: true
+      example: '{"type": "device", "id": "<devId>"}'
+      selector:
+        object:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
 get_schedule:
   fields:
     target:

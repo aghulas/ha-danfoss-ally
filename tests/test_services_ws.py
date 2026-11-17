@@ -89,6 +89,27 @@ async def test_service_set_descaling_disabled(setup):
         )
 
 
+async def test_service_overrides_disabled(setup):
+    """set_override and clear_override raise local_disabled when the tunnel is off."""
+    hass, _, _ = setup
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            "set_override",
+            {"target": {"type": "device", "id": "a"}, "temperature": 20},
+            blocking=True,
+            return_response=True,
+        )
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            "clear_override",
+            {"target": {"type": "device", "id": "a"}},
+            blocking=True,
+            return_response=True,
+        )
+
+
 async def test_service_set_schedule_invalide(setup):
     hass, _, fake = setup
     with pytest.raises(ServiceValidationError):
@@ -208,6 +229,18 @@ async def test_ws_set_descaling_disabled(setup):
     )
     await hass.async_block_till_done()
     assert conn.errors and conn.errors[-1][0] == "local_disabled"
+
+
+async def test_ws_overrides_disabled(setup):
+    hass, _, _ = setup
+    conn = _FakeConn(is_admin=True)
+    ws.ws_set_override(
+        hass, conn, {"id": 11, "target": {"type": "device", "id": "a"}, "temperature": 20.0}
+    )
+    await hass.async_block_till_done()
+    ws.ws_clear_override(hass, conn, {"id": 12, "target": {"type": "device", "id": "a"}})
+    await hass.async_block_till_done()
+    assert [c for c, _ in conn.errors].count("local_disabled") == 2
 
 
 async def test_ws_jobs_subscribe(setup):

@@ -109,6 +109,30 @@ class LocalTunnelManager:
         finally:
             link.close()
 
+    def set_override(self, head: Head, celsius: float) -> int:
+        """One-off "now" setpoint override via DP 171 (contract §4.4). Returns the published raw
+        value (hundredths of °C). Raises LocalError (value out of range) / LocalUnavailable."""
+        if head.gateway_id not in self._gateways:
+            raise tunnel.LocalUnavailable(f"unknown gateway: {head.gateway_id}")
+        link = self._open_link(self._gateways[head.gateway_id])
+        try:
+            return tunnel.write_setpoint(link, head.dev_id, head.node_id, celsius)
+        finally:
+            link.close()
+
+    def read_schedule(self, head: Head) -> dict[str, list[dict[str, Any]]]:
+        """Read the head's 7-day weekly schedule through the tunnel (read-only).
+
+        Returns ``{weekday: [{"h": "HH:MM", "c": setpoint}]}``. Raises LocalUnavailable on an
+        unknown gateway."""
+        if head.gateway_id not in self._gateways:
+            raise tunnel.LocalUnavailable(f"unknown gateway: {head.gateway_id}")
+        link = self._open_link(self._gateways[head.gateway_id])
+        try:
+            return tunnel.read_schedule(link, head.dev_id, head.node_id)
+        finally:
+            link.close()
+
     def descale(self, head: Head, day: str, hour: str) -> bool:
         """Set the weekly valve descaling day/time (0x4010/0x4011).
 
