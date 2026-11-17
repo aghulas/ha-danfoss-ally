@@ -19,6 +19,7 @@ from .coordinator import DanfossCoordinator
 
 # Clés de l'entrée à rédiger (secrets de compte, session et installation).
 TO_REDACT = {
+    "username",
     "password",
     "sign_key",
     "ch_key",
