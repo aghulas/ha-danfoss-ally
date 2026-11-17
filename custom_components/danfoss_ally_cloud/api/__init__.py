@@ -13,9 +13,18 @@ Réutilisation (voir docs/reuse.md) :
 
 from __future__ import annotations
 
-from .client import CloudAuthError, CloudClient, CloudError, CloudWriteError
-from .decode import DanfossDevice, decoder
+from . import schedule
+from .client import (
+    CloudAuthError,
+    CloudClient,
+    CloudError,
+    CloudWriteError,
+    ScheduleValidationError,
+    UnknownTargetError,
+)
+from .decode import DanfossDevice, decoder, decoder_operation, etat_tete
 from .keys import GatewayKey, async_fetch_gateway_keys
+from .schedule import Schedule, count_transitions, validate_days
 from .writes import ecriture_autorisee, encode_consigne
 
 __all__ = [
@@ -25,8 +34,16 @@ __all__ = [
     "CloudWriteError",
     "DanfossDevice",
     "GatewayKey",
+    "Schedule",
+    "ScheduleValidationError",
+    "UnknownTargetError",
     "async_fetch_gateway_keys",
+    "count_transitions",
     "decoder",
+    "decoder_operation",
     "ecriture_autorisee",
     "encode_consigne",
+    "etat_tete",
+    "schedule",
+    "validate_days",
 ]

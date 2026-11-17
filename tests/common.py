@@ -70,6 +70,7 @@ class FakeCloudClient:
         self._members = members or {}
         self._topology_exc = topology_exc
         self.closed = False
+        self.writes: list = []
 
     async def async_validate(self):
         if self._validate_exc is not None:
@@ -93,6 +94,27 @@ class FakeCloudClient:
         if self._topology_exc is not None:
             raise self._topology_exc
         return dict(self._members)
+
+    # Édition de programme (couche edition-programme) : stub + journal des écritures.
+    async def async_get_schedule(self, target):
+        return {
+            "target": target,
+            "name": "Salle 1",
+            "comfort": 21.0,
+            "setback": 14.0,
+            "days": {d: [] for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")},
+            "max_transitions_per_day": 6,
+            "source": "cloud",
+            "read_at": "t",
+        }
+
+    async def async_set_schedule_days(self, target, days):
+        self.writes.append(("set", target, days))
+        return {}
+
+    async def async_restore_schedule(self, target):
+        self.writes.append(("restore", target))
+        return {}
 
     async def async_close(self):
         self.closed = True
