@@ -15,8 +15,10 @@ _R = "**REDACTED**"
 
 
 async def test_diagnostics_redige_secrets_et_ids(hass: HomeAssistant):
+    # Donnée synthétique : un champ `email` éventuel doit aussi être rédigé par prudence.
+    data = {**ENTRY_DATA, "email": "compte@exemple.fr"}
     entry = MockConfigEntry(
-        domain=DOMAIN, data=ENTRY_DATA, options={"mqtt_mode": "off"}, unique_id="compte@exemple.fr"
+        domain=DOMAIN, data=data, options={"mqtt_mode": "off"}, unique_id="compte@exemple.fr"
     )
     entry.add_to_hass(hass)
     coord = DanfossCoordinator(hass, FakeCloudClient(), 90)
@@ -30,7 +32,9 @@ async def test_diagnostics_redige_secrets_et_ids(hass: HomeAssistant):
     assert diag["entry"]["sign_key"] == _R
     assert diag["entry"]["ch_key"] == _R
     assert diag["entry"]["device_id"] == _R
-    assert diag["entry"]["username"] == ENTRY_DATA["username"]
+    # L'identifiant de connexion (= e-mail, PII) doit être rédigé comme les autres secrets.
+    assert diag["entry"]["username"] == _R
+    assert diag["entry"]["email"] == _R
 
     # Identifiants matériels réels rédigés, valeurs décodées conservées.
     app = diag["appareils"][0]

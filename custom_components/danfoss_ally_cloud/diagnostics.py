@@ -1,8 +1,9 @@
 """Diagnostics avec rédaction stricte.
 
-Ne JAMAIS exposer : mot de passe, matériel de session (sid/ecode), clé de signature, chKey,
-identifiants d'appareil réels (devId/nodeId/meshId). Responsabilité critique pour une intégration
-publique. Les valeurs décodées (températures, batterie…) sont conservées, mais pas les ids.
+Ne JAMAIS exposer : identifiant de connexion (username/email, = PII), mot de passe, matériel de
+session (sid/ecode), clé de signature, chKey, identifiants d'appareil réels (devId/nodeId/meshId).
+Responsabilité critique pour une intégration publique. Les valeurs décodées (températures,
+batterie…) sont conservées, mais pas les ids.
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ from .coordinator import DanfossCoordinator
 
 # Clés de l'entrée à rédiger (secrets de compte, session et installation).
 TO_REDACT = {
+    "username",
+    "email",
     "password",
     "sign_key",
     "ch_key",
