@@ -67,6 +67,15 @@ async def test_service_get_schedule(setup):
     assert res["target"] == _ROOM_TARGET and "mon" in res["days"]
 
 
+async def test_service_get_local_survey_disabled(setup):
+    """Without the local tunnel, the service raises the translated local_disabled error."""
+    hass, _, _ = setup
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN, "get_local_survey", {}, blocking=True, return_response=True
+        )
+
+
 async def test_service_set_schedule_invalide(setup):
     hass, _, fake = setup
     with pytest.raises(ServiceValidationError):
@@ -166,6 +175,14 @@ async def test_ws_schedule_get_set_restore_and_refusal(setup):
         ws.ws_schedule_set(
             hass, _FakeConn(is_admin=False), {"id": 7, "target": _ROOM_TARGET, "days": _VALID_DAYS}
         )
+
+
+async def test_ws_local_survey_disabled(setup):
+    hass, _, _ = setup
+    conn = _FakeConn()
+    ws.ws_local_survey(hass, conn, {"id": 9, "type": "danfoss_ally_cloud/local_survey"})
+    await hass.async_block_till_done()
+    assert conn.errors and conn.errors[-1][0] == "local_disabled"
 
 
 async def test_ws_jobs_subscribe(setup):

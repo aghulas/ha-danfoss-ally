@@ -38,6 +38,7 @@ def async_register(hass: HomeAssistant) -> None:
     reg = websocket_api.async_register_command
     reg(hass, ws_info)
     reg(hass, ws_rooms)
+    reg(hass, ws_local_survey)
     reg(hass, ws_schedule_get)
     reg(hass, ws_schedule_validate)
     reg(hass, ws_schedule_set)
@@ -72,6 +73,23 @@ def ws_rooms(hass: HomeAssistant, connection, msg: dict) -> None:
         connection.send_error(msg["id"], "unknown_target", "no account configured")
         return
     connection.send_result(msg["id"], ops.rooms_payload(store))
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "danfoss_ally_cloud/local_survey", vol.Optional("entry_id"): str}
+)
+@websocket_api.async_response
+async def ws_local_survey(hass: HomeAssistant, connection, msg: dict) -> None:
+    store = _store(hass, msg)
+    if store is None:
+        connection.send_error(msg["id"], "unknown_target", "no account configured")
+        return
+    try:
+        result = await ops.local_survey(hass, store)
+    except ops.OperationError as err:
+        _send_op_error(connection, msg["id"], err)
+        return
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command(

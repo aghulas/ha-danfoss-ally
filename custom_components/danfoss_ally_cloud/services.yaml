@@ -6,6 +6,14 @@ get_rooms:
         config_entry:
           integration: danfoss_ally_cloud
 
+get_local_survey:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
 get_schedule:
   fields:
     target:

@@ -82,6 +82,16 @@ class LocalTunnelManager:
             t.join(timeout=40)
         return res
 
+    def survey_heads(self, heads: list[Head]) -> dict[str, dict[str, Any]]:
+        """Full read-only survey of each head through the tunnel, summarized per head.
+
+        One gateway per thread, best-effort (an unreachable head -> ``{"unreachable": True}``,
+        never an exception propagated). Returns a mapping ``dev_id -> summary`` (comfort slots,
+        comfort/setback setpoints, decoded attributes); see ``tunnel.summarize_head``.
+        """
+        raw = tunnel.survey(self._gateways, heads)
+        return {dev_id: tunnel.summarize_head(entry) for dev_id, entry in raw.items()}
+
     def write_preheat(self, head: Head, active: bool) -> bool:
         """Enable/disable preheat (reads 0x0025, writes the bit, schedule preserved).
 

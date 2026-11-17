@@ -65,6 +65,19 @@ def test_gateway_ids():
     assert LocalTunnelManager(_gw()).gateway_ids == {"gw1"}
 
 
+def test_survey_heads_summarizes(monkeypatch):
+    """survey_heads runs the tunnel survey and summarizes each head (read-only)."""
+    raw = {
+        "dev1": {"attributes": {"current_setpoint": 21.0}, "schedule": {}},
+        "dev2": {"attributes": {}, "unreachable": True},
+    }
+    monkeypatch.setattr(tunnel, "survey", lambda gateways, heads: raw)
+    monkeypatch.setattr(tunnel, "summarize_head", lambda e: {"ok": bool(e.get("attributes"))})
+    mgr = LocalTunnelManager(_gw())
+    res = mgr.survey_heads([Head("dev1", "n1", "gw1"), Head("dev2", "n2", "gw1")])
+    assert res == {"dev1": {"ok": True}, "dev2": {"ok": False}}
+
+
 def test_survey_head_error_isolated(monkeypatch):
     """A head that raises during the read becomes None, without breaking the survey."""
 

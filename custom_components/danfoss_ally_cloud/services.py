@@ -84,6 +84,12 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def get_rooms(call: ServiceCall) -> dict:
         return ops.rooms_payload(_store(hass, call))
 
+    async def get_local_survey(call: ServiceCall) -> dict:
+        try:
+            return await ops.local_survey(hass, _store(hass, call))
+        except ops.OperationError as err:
+            _raise(err)
+
     async def get_schedule(call: ServiceCall) -> dict:
         try:
             return await ops.get_schedule(
@@ -128,6 +134,7 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     reg = hass.services.async_register
     reg(DOMAIN, "get_rooms", get_rooms, _GET_ROOMS, SupportsResponse.ONLY)
+    reg(DOMAIN, "get_local_survey", get_local_survey, _GET_ROOMS, SupportsResponse.ONLY)
     reg(DOMAIN, "get_schedule", get_schedule, _GET_SCHEDULE, SupportsResponse.ONLY)
     reg(DOMAIN, "set_schedule", set_schedule, _SET_SCHEDULE, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "copy_schedule", copy_schedule, _COPY_SCHEDULE, SupportsResponse.OPTIONAL)
