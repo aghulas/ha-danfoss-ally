@@ -25,12 +25,12 @@ async def test_diagnostics_redige_secrets_et_ids(hass: HomeAssistant):
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
-    # Secrets de compte / installation rédigés, identifiant non secret conservé.
+    # Secrets de compte / installation rédigés, y compris le username (e-mail = donnée personnelle).
     assert diag["entry"]["password"] == _R
     assert diag["entry"]["sign_key"] == _R
     assert diag["entry"]["ch_key"] == _R
     assert diag["entry"]["device_id"] == _R
-    assert diag["entry"]["username"] == ENTRY_DATA["username"]
+    assert diag["entry"]["username"] == _R
 
     # Identifiants matériels réels rédigés, valeurs décodées conservées.
     app = diag["appareils"][0]
