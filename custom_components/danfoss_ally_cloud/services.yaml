@@ -110,10 +110,12 @@ detach_heads:
           integration: danfoss_ally_cloud
 
 disconnect_head:
+  # Unbinds any sub-device (head, sensor or relay); a gateway is refused. Name kept for
+  # backward compatibility (shipped head-only).
   fields:
     target:
       required: true
-      example: '{"type": "device", "id": "<devId>"}'
+      example: '{"type": "device", "id": "<sub-device devId>"}'
       selector:
         object:
     wipe_data:

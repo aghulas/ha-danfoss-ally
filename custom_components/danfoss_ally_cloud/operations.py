@@ -767,9 +767,13 @@ async def end_vacation(
     return {"home": gid, "ended": True, "temperature": tenths / 10, "rooms": room_ids}
 
 
-# --- Head UNBIND / "disconnect" (contract write-safety). The most DESTRUCTIVE cloud write: the head
-# leaves the Zigbee network and disappears from the account; re-pairing needs a physical action on
-# site. Triple-gated: opt-in (DATA_HEAD_UNBIND, OFF by default), admin (caller), verified product,
+# --- Sub-device UNBIND / "disconnect" (contract write-safety). The most DESTRUCTIVE cloud write:
+# the device leaves the Zigbee network and disappears from the account; re-pairing needs a physical
+# action on site. Scope (widened 2026-11-18, mirroring the MCP connector PR #7): ANY sub-device —
+# head, sensor, relay or other — but a GATEWAY is REFUSED (unbinding it would drop all its heads at
+# once). Unbind is a Tuya-generic call keyed on the category, NOT on a verified product, so the
+# head-only ``write_allowed`` gate does not apply here; the safety is the category check plus the
+# triple gate: opt-in (DATA_HEAD_UNBIND, OFF by default), admin with allow_internal=False (caller),
 # AND an explicit ``confirm`` flag — no one-click path. Captured/validated on real hardware via the
 # MCP connector (2026-11-18); validation THROUGH this integration is still pending. ----------------
 
@@ -783,6 +787,30 @@ def _require_unbind(store: dict) -> None:
         )
 
 
+def _require_unbindable_device(coordinator: DanfossCoordinator, target: dict):
+    """Resolve a ``{type:"device", id}`` target to a known, UNBINDABLE sub-device, or raise.
+
+    Mirrors the MCP connector: the target must be ``type=device`` (``device_only``) and a known
+    device (``unknown_target``); a GATEWAY is refused (``gateway_target``) because unbinding it
+    would drop every head it carries. Any other category — head, sensor, relay, or other
+    sub-device — is accepted. No verified-product gate: unbind is a Tuya-generic call keyed on the
+    category, so the head-only ``write_allowed`` check (local-tunnel writes) must NOT block a
+    legitimate sensor/relay. Returns the resolved ``DanfossDevice``.
+    """
+    if target.get("type") != "device":
+        raise OperationError("device_only", "disconnect_head targets a sub-device (type=device)")
+    dev = coordinator.data.get(str(target.get("id")))
+    if dev is None:
+        raise OperationError("unknown_target", f"device not found: {target.get('id')}")
+    if dev.category == "gateway":
+        raise OperationError(
+            "gateway_target",
+            "refused: this is a gateway — unbinding it would drop all its heads; "
+            "unbind targets a sub-device (head, sensor, relay)",
+        )
+    return dev
+
+
 async def disconnect_head(
     hass: HomeAssistant,
     store: dict,
@@ -790,25 +818,30 @@ async def disconnect_head(
     wipe_data: bool = False,
     confirm: bool = False,
 ) -> dict:
-    """Unbind (disconnect) a head from the network (``smartlife.m.device.reset``). ⚠ DESTRUCTIVE.
+    """Unbind (disconnect) a sub-device via ``smartlife.m.device.reset``. ⚠ DESTRUCTIVE.
 
-    Gates, in order: opt-in flag (``unbind_disabled``), target is a known head of a verified product
-    (``device_only`` / ``unknown_head`` / ``unverified_product``), and an explicit ``confirm=True``
-    (``confirmation_required``) so it can never fire by accident. The caller also enforces admin.
+    Scope: any sub-device — head, sensor, relay or other — but a GATEWAY is refused. The name
+    ``disconnect_head`` is kept for backward compatibility (the service shipped head-only); it now
+    covers every detachable sub-device, mirroring the MCP connector.
+
+    Gates, in order: opt-in flag (``unbind_disabled``), target is a known non-gateway sub-device
+    (``device_only`` / ``unknown_target`` / ``gateway_target``), and an explicit ``confirm=True``
+    (``confirmation_required``) so it can never fire by accident. The caller also enforces admin
+    (``allow_internal=False``). No verified-product gate (category-generic call).
 
     ``wipe_data`` (= ``resetFactory``): ``False`` = "disconnect" (identity kept; re-added on its own
-    gateway without a wipe, the head returns with the SAME devId); ``True`` = "disconnect and wipe
+    gateway without a wipe, the device returns with the SAME devId); ``True`` = "disconnect and wipe
     data" (factory reset — a NEW devId, identity/name LOST, IRREVERSIBLE on the identity). In both
     cases re-pairing needs a physical action on site (permit-join is MQTT, not path 1a).
     """
     _require_unbind(store)
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
-    dev = _require_verified_head(coordinator, target)
+    dev = _require_unbindable_device(coordinator, target)
     dev_id = dev.id
     if not confirm:
         raise OperationError(
             "confirmation_required",
-            "destructive action: pass confirm=true to unbind this head",
+            "destructive action: pass confirm=true to unbind this device",
         )
     wipe = bool(wipe_data)
     await _run_cloud_write(coordinator.client.async_device_reset, dev_id, wipe)
@@ -816,12 +849,13 @@ async def disconnect_head(
     return {
         "device_id": dev_id,
         "name": dev.name,
+        "category": dev.category,
         "mode": "disconnect_and_wipe" if wipe else "disconnect",
         "wipe_data": wipe,
         "irreversible": wipe,
         "consequences": [
-            "the head left the Zigbee network and is gone from the account",
-            "re-pairing requires a physical action on the head, on site (not drivable from here)",
+            "the device left the Zigbee network and is gone from the account",
+            "re-pairing requires a physical action on the device, on site (not drivable from here)",
             (
                 "data wiped: it will return with a NEW devId — identity and name LOST "
                 "(irreversible)"
@@ -829,7 +863,7 @@ async def disconnect_head(
                 else "identity kept: re-added on its gateway without a wipe, it returns with the "
                 "same devId and name (rediscovery)"
             ),
-            "its room membership is lost and must be reassigned after re-pairing",
+            "a head's room membership is lost and must be reassigned after re-pairing",
         ],
     }
 

@@ -119,29 +119,43 @@ async def test_disconnect_refuses_non_device_target():
     assert coord.client.reset_calls == []
 
 
-async def test_disconnect_refuses_unknown_head():
+async def test_disconnect_refuses_unknown_device():
     coord = _coord()
     with pytest.raises(ops.OperationError) as e:
         await ops.disconnect_head(
             None, _store(coord), {"type": "device", "id": "ghost"}, confirm=True
         )
-    assert e.value.code == "unknown_head"
+    assert e.value.code == "unknown_target"
 
 
-async def test_disconnect_refuses_gateway_or_relay_target():
-    # A non-head device (e.g. a boiler relay) is refused: unbind only targets heads.
+async def test_disconnect_accepts_relay():
+    # Widened scope (mirrors MCP connector PR #7): a relay is an unbindable sub-device.
     coord = _coord(a=relay("a", "Relay"))
-    with pytest.raises(ops.OperationError) as e:
-        await ops.disconnect_head(None, _store(coord), _DEV, confirm=True)
-    assert e.value.code == "unknown_head"
-    assert coord.client.reset_calls == []
+    res = await ops.disconnect_head(None, _store(coord), _DEV, confirm=True)
+    assert coord.client.reset_calls == [("a", False)]
+    assert res["category"] == "relay"
 
 
-async def test_disconnect_refuses_unverified_product():
+async def test_disconnect_accepts_sensor():
+    coord = _coord(a=head("a", "Sensor", category="sensor"))
+    res = await ops.disconnect_head(None, _store(coord), _DEV, confirm=True)
+    assert coord.client.reset_calls == [("a", False)]
+    assert res["category"] == "sensor"
+
+
+async def test_disconnect_accepts_unverified_product():
+    # No verified-product gate on unbind (category-generic call): an unknown product is accepted.
     coord = _coord(a=head("a", "A", product_id="other"))
+    await ops.disconnect_head(None, _store(coord), _DEV, confirm=True)
+    assert coord.client.reset_calls == [("a", False)]
+
+
+async def test_disconnect_refuses_gateway():
+    # A gateway is the one refused category: unbinding it would drop all its heads.
+    coord = _coord(a=head("a", "Gateway", category="gateway"))
     with pytest.raises(ops.OperationError) as e:
         await ops.disconnect_head(None, _store(coord), _DEV, confirm=True)
-    assert e.value.code == "unverified_product"
+    assert e.value.code == "gateway_target"
     assert coord.client.reset_calls == []
 
 
