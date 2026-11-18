@@ -62,12 +62,18 @@ CONF_DEVICE_ID = "device_id"
 CONF_CH_KEY = "ch_key"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_ENABLE_LOCAL = "enable_local"
+# Coexistence: use a deviceId distinct from the app's / the MCP connector's captured one (same
+# sign_key/chKey), so the integration keeps its own Tuya session instead of stealing theirs
+# (docs/architecture.md). On by default; turn off only to reproduce the legacy shared-session
+# behaviour. Changing it re-logs in with the other deviceId on the next reload.
+CONF_DISTINCT_DEVICE_ID = "distinct_device_id"
 CONF_MQTT_MODE = "mqtt_mode"  # "off" | "discovery" | "zigbee2mqtt"
 CONF_MQTT_SOURCE = "mqtt_source"  # "cloud" | "local"
 CONF_MQTT_BASE_TOPIC = "mqtt_base_topic"
 
 # Conservative defaults: the account's quota and security come first.
 DEFAULT_SCAN_INTERVAL = 90  # seconds
+DEFAULT_DISTINCT_DEVICE_ID = True
 DEFAULT_MQTT_MODE = "off"
 DEFAULT_MQTT_SOURCE = "cloud"
 DEFAULT_MQTT_BASE_TOPIC = "danfoss_ally_cloud"

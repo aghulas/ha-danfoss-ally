@@ -377,12 +377,14 @@ follows the heat demand of the rooms **linked** to it, a server-side Danfoss fun
 | Link / unlink a room (write) | `m.life.solution.wkf.reference.edit` | 1.0 | `{"devId": R, "gwId": R, "roomId", "status": "bind"\|"unbind"}` | one room per call; **real-hardware validation required** |
 
 - `gwId == devId` of the relay (not a `meshId`) for both relay calls — observed on the app, proven on
-  the read path (2026-11-15); the write (`reference.edit`) is captured but **to validate on real
-  hardware** (it changes the boiler's heat demand).
-- **Direct relay on/off (DP `1`, device level) is NOT in contract**: the device-level publish method is
-  uncaptured (the candidates reject the parameter format). Reading the state is in contract; forcing it
-  is not (§7). While the Danfoss gateways drive the relay, the server can rewrite the DP at its own
-  cadence anyway.
+  the read path (2026-11-15); the write (`reference.edit`) is captured and **validated on real
+  hardware** (2026-11-18, unbind then rebind of a room on the relay — see §5.2).
+- **There is no manual relay on/off in the app (confirmed 2026-11-18).** The relay state is
+  **automatic**: the Danfoss server computes it from the heat demand of the rooms **linked** to the
+  relay. The app offers no DP `1` on/off control at all; it only lets you choose which rooms drive the
+  relay (`reference.edit`). So a device-level DP `1` publish is **not** merely uncaptured — it does not
+  exist as an app action, and forcing it is **out of contract** (§7). Reading the DP `1` state is in
+  contract; the only write lever is the room↔relay link.
 
 ### 4.7 Room management
 
@@ -541,10 +543,11 @@ Axis B (0.5.0) brought holiday **read** (§4.5), the boiler relay **read** + roo
 - **Holiday set / exit (write).** The app's holiday pose/exit routes are **not** in the APK (runtime
   mini-program): uncaptured. R5: DP 2 `holiday` is a label only, never a real holiday write. Blocked
   until an app capture (Rémi + the app), like the distinct-`deviceId` capture (`architecture.md`).
-- **Direct boiler-relay on/off (DP `1`, device level).** The device-level publish method is
-  uncaptured (candidates reject the parameter format). Only the relay *state read* and the room↔relay
-  *link* are in contract. While the Danfoss gateways drive the relay, the server rewrites the DP at
-  its own cadence anyway.
+- **Direct boiler-relay on/off (DP `1`, device level).** Confirmed 2026-11-18: the app has **no**
+  manual relay on/off — the relay is server-driven from the heat demand of the linked rooms, so there
+  is no such app action to mirror (not merely "uncaptured"). Only the relay *state read* and the
+  room↔relay *link* (`reference.edit`, §4.6) are in contract. The integration exposes **no** relay
+  on/off switch and holds **no** DP `1` forcing path.
 - **Firmware management.** The subject of a later addition.
 
 Axis D (0.6.0) brought the **UI layer** into contract: the per-room card and the side panel (§8).

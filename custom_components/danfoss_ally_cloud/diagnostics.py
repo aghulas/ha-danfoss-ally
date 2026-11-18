@@ -46,7 +46,9 @@ async def async_get_config_entry_diagnostics(
     devices = [async_redact_data(asdict(dev), DEVICE_REDACT) for dev in coordinator.data.values()]
     return {
         "entry": async_redact_data(dict(entry.data), TO_REDACT),
-        "options": dict(entry.options),
+        # Options hold no secret today (intervals, toggles, MQTT topic); redact defensively anyway
+        # so a future secret-bearing option can never leak through diagnostics.
+        "options": async_redact_data(dict(entry.options), TO_REDACT),
         "device_count": len(coordinator.data),
         "devices": devices,
     }

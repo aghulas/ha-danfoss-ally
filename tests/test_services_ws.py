@@ -440,3 +440,85 @@ async def test_ws_overview_and_room_climate_entity(setup):
     room = conn.results[51]["rooms"][0]
     assert room["climate_entity_id"] and room["climate_entity_id"].startswith("climate.")
     assert room["writable"] is True
+
+
+# --- Service-path coverage of the remaining write wrappers (parity with the WS tests above) -----
+
+
+async def test_service_copy_schedule(setup):
+    hass, _, fake = setup
+    res = await hass.services.async_call(
+        DOMAIN,
+        "copy_schedule",
+        {"source": _ROOM_TARGET, "targets": [_ROOM_TARGET]},
+        blocking=True,
+        return_response=True,
+    )
+    assert len(res["jobs"]) == 1 and res["jobs"][0]["kind"] == "set_schedule"
+    assert any(w[0] == "set" for w in fake.writes)
+
+
+async def test_service_rename_and_delete_room(setup):
+    hass, _, fake = setup
+    res = await hass.services.async_call(
+        DOMAIN,
+        "rename_room",
+        {"target": _ROOM_TARGET, "name": "New"},
+        blocking=True,
+        return_response=True,
+    )
+    assert res["room_id"] == "room-5"
+    assert ("room_update", "room-5", "New") in fake.writes
+    await hass.services.async_call(
+        DOMAIN, "delete_room", {"target": _ROOM_TARGET}, blocking=True, return_response=True
+    )
+    assert ("room_dismiss", "room-5") in fake.writes
+
+
+async def test_service_attach_and_detach_heads(setup):
+    hass, _, fake = setup
+    res = await hass.services.async_call(
+        DOMAIN,
+        "attach_heads",
+        {"target": _ROOM_TARGET, "devices": ["a"]},
+        blocking=True,
+        return_response=True,
+    )
+    assert res["heads"] == ["a", "b"]
+    res2 = await hass.services.async_call(
+        DOMAIN,
+        "detach_heads",
+        {"target": _ROOM_TARGET, "devices": ["b"]},
+        blocking=True,
+        return_response=True,
+    )
+    assert res2["heads"] == ["a"]
+    assert ("room_set", "room-5", ["a"]) in fake.writes
+
+
+async def test_service_set_relay_room(hass: HomeAssistant):
+    """set_relay_room via the service path: matches the room by name, calls reference.edit."""
+    from .common import relay
+
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, unique_id="compte@exemple.fr")
+    entry.add_to_hass(hass)
+    fake = FakeCloudClient(
+        devices=[head("a", "Salle 1 #2"), head("b", "Salle 1 #3"), relay("relay-1")],
+        groups=_GROUPS,
+        members=_MEMBERS,
+        relay_rooms={"relay-1": [{"room_id": "r9", "name": "Salle 1", "linked": False}]},
+    )
+    with patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=fake):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    res = await hass.services.async_call(
+        DOMAIN,
+        "set_relay_room",
+        {"relay": "relay-1", "target": _ROOM_TARGET, "linked": True},
+        blocking=True,
+        return_response=True,
+    )
+    assert res == {"relay": "relay-1", "room_id": "r9", "linked": True}
+    assert ("relay_bind", "relay-1", "r9", True) in fake.writes
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()

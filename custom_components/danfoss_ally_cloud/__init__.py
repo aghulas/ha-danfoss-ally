@@ -20,6 +20,7 @@ from .const import (
     CONF_CH_KEY,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
+    CONF_DISTINCT_DEVICE_ID,
     CONF_ENABLE_LOCAL,
     CONF_MQTT_BASE_TOPIC,
     CONF_MQTT_MODE,
@@ -34,6 +35,7 @@ from .const import (
     DATA_LOCAL,
     DATA_MQTT,
     DATA_SCHEDULES,
+    DEFAULT_DISTINCT_DEVICE_ID,
     DEFAULT_LOCAL_SCAN_INTERVAL,
     DEFAULT_MQTT_BASE_TOPIC,
     DEFAULT_MQTT_MODE,
@@ -75,6 +77,7 @@ def _client_from_entry(entry: ConfigEntry) -> CloudClient:
         device_id=data[CONF_DEVICE_ID],
         ch_key=data[CONF_CH_KEY],
         region=data.get(CONF_REGION, "eu"),
+        distinct_device_id=entry.options.get(CONF_DISTINCT_DEVICE_ID, DEFAULT_DISTINCT_DEVICE_ID),
     )
 
 

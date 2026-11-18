@@ -22,6 +22,7 @@ from .client import (
     CloudWriteError,
     ScheduleValidationError,
     UnknownTargetError,
+    derive_distinct_device_id,
 )
 from .decode import (
     DanfossDevice,
@@ -48,6 +49,7 @@ __all__ = [
     "count_transitions",
     "decode_device",
     "decode_operation",
+    "derive_distinct_device_id",
     "encode_setpoint",
     "head_state",
     "holiday_temperature",
