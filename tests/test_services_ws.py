@@ -347,6 +347,25 @@ async def test_service_create_room_not_admin(setup):
         )
 
 
+async def test_service_disconnect_head_not_admin(setup):
+    # The most destructive write must refuse a non-admin at the service layer, and send nothing.
+    hass, _, fake = setup
+    ctx = Context(user_id="non-admin")
+    with (
+        patch.object(hass.auth, "async_get_user", return_value=SimpleNamespace(is_admin=False)),
+        pytest.raises((Unauthorized, ServiceValidationError)),
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            "disconnect_head",
+            {"target": {"type": "device", "id": "a"}, "confirm": True},
+            blocking=True,
+            context=ctx,
+            return_response=True,
+        )
+    assert not any(w[0] == "device_reset" for w in fake.writes)  # nothing sent
+
+
 async def test_ws_room_rename_and_delete(setup):
     hass, _, fake = setup
     conn = _FakeConn(is_admin=True)

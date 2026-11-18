@@ -102,6 +102,18 @@ _ATTACH = vol.Schema(
         vol.Optional("config_entry_id"): cv.string,
     }
 )
+# Head unbind ("disconnect"): DESTRUCTIVE. Triple-gated (opt-in option + verified product +
+# explicit confirm, admin by the handler). ``wipe_data`` = resetFactory (True loses the identity).
+_DISCONNECT_HEAD = vol.Schema(
+    {
+        vol.Required("target"): _TARGET,
+        vol.Optional("wipe_data", default=False): cv.boolean,
+        # Required (no default): a destructive action must carry confirm explicitly, aligned with
+        # services.yaml. The `confirmation_required` op guard stays as a net for confirm=false.
+        vol.Required("confirm"): cv.boolean,
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
 # Vacation (holiday) writes (GATED). A vacation is set per HOME (gid), optionally scoped to a list
 # of room targets (default: every room of the home).
 _SET_VACATION = vol.Schema(
@@ -334,6 +346,22 @@ def async_register_services(hass: HomeAssistant) -> None:
         except ops.OperationError as err:
             _raise(err)
 
+    async def disconnect_head(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            # Most destructive write: require a real administrator in context, refusing even a
+            # user-less internal/automation call (allow_internal=False).
+            await ops.ensure_admin(hass, call.context.user_id, allow_internal=False)
+            return await ops.disconnect_head(
+                hass,
+                store,
+                call.data["target"],
+                call.data["wipe_data"],
+                call.data["confirm"],
+            )
+        except ops.OperationError as err:
+            _raise(err)
+
     async def set_vacation(call: ServiceCall) -> dict:
         store = _store(hass, call)
         try:
@@ -416,6 +444,7 @@ def async_register_services(hass: HomeAssistant) -> None:
     reg(DOMAIN, "set_relay_room", set_relay_room, _SET_RELAY_ROOM, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "attach_heads", attach_heads, _ATTACH, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "detach_heads", detach_heads, _ATTACH, SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "disconnect_head", disconnect_head, _DISCONNECT_HEAD, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "set_vacation", set_vacation, _SET_VACATION, SupportsResponse.OPTIONAL)
     reg(
         DOMAIN,

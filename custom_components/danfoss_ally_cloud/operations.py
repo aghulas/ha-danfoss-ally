@@ -35,6 +35,7 @@ from .api.local import tunnel
 from .api.local.manager import Head
 from .const import (
     DATA_COORDINATOR,
+    DATA_HEAD_UNBIND,
     DATA_JOBS,
     DATA_LOCAL,
     DATA_SCHEDULES,
@@ -78,13 +79,44 @@ class OperationError(Exception):
         super().__init__(message or code)
 
 
-async def ensure_admin(hass: HomeAssistant, user_id: str | None) -> None:
-    """Refuse a non-admin user (contract §5.2). None = internal call, allowed."""
+async def ensure_admin(
+    hass: HomeAssistant, user_id: str | None, *, allow_internal: bool = True
+) -> None:
+    """Refuse a non-admin user (contract §5.2). None = internal call, allowed by default.
+
+    ``allow_internal=False`` additionally refuses a user-less call (``user_id is None``): used by
+    ``disconnect_head``, the most destructive write, so that an unattended automation/script cannot
+    unbind a head without a real administrator in context (opt-in + confirm are not enough there).
+    """
     if user_id is None:
-        return
+        if allow_internal:
+            return
+        raise OperationError("not_admin", "this action requires an administrator user")
     user = await hass.auth.async_get_user(user_id)
     if user is None or not user.is_admin:
         raise OperationError("not_admin", "write reserved for administrators")
+
+
+def _require_verified_head(
+    coordinator: DanfossCoordinator, target: dict, *, not_found_code: str = "unknown_head"
+):
+    """Resolve a ``{type:"device", id}`` target to a known, write-verified head, or raise.
+
+    The target-safety sequence shared by writes that address a single head (contract write-safety):
+    the target must be ``type=device``, a known head, of a write-verified product. The
+    ``not_found_code`` arg lets each caller keep its own stable code for an unknown target
+    (``unknown_head`` for the
+    head writes, ``unknown_target`` for the local tunnel) — observable behaviour unchanged. Returns
+    the resolved ``DanfossDevice``.
+    """
+    if target.get("type") != "device":
+        raise OperationError("device_only", "this write targets a head (type=device)")
+    dev = coordinator.data.get(str(target.get("id")))
+    if dev is None or not dev.is_head:
+        raise OperationError(not_found_code, f"head not found: {target.get('id')}")
+    if not write_allowed(dev):
+        raise OperationError("unverified_product", "write not verified for this product")
+    return dev
 
 
 def _heads_of_room(coordinator: DanfossCoordinator, group_id: str) -> list[dict]:
@@ -735,6 +767,73 @@ async def end_vacation(
     return {"home": gid, "ended": True, "temperature": tenths / 10, "rooms": room_ids}
 
 
+# --- Head UNBIND / "disconnect" (contract write-safety). The most DESTRUCTIVE cloud write: the head
+# leaves the Zigbee network and disappears from the account; re-pairing needs a physical action on
+# site. Triple-gated: opt-in (DATA_HEAD_UNBIND, OFF by default), admin (caller), verified product,
+# AND an explicit ``confirm`` flag — no one-click path. Captured/validated on real hardware via the
+# MCP connector (2026-11-18); validation THROUGH this integration is still pending. ----------------
+
+
+def _require_unbind(store: dict) -> None:
+    if not store.get(DATA_HEAD_UNBIND):
+        raise OperationError(
+            "unbind_disabled",
+            "head unbind is disabled; enable it in the integration options "
+            "(for a supervised real-hardware validation session)",
+        )
+
+
+async def disconnect_head(
+    hass: HomeAssistant,
+    store: dict,
+    target: dict,
+    wipe_data: bool = False,
+    confirm: bool = False,
+) -> dict:
+    """Unbind (disconnect) a head from the network (``smartlife.m.device.reset``). ⚠ DESTRUCTIVE.
+
+    Gates, in order: opt-in flag (``unbind_disabled``), target is a known head of a verified product
+    (``device_only`` / ``unknown_head`` / ``unverified_product``), and an explicit ``confirm=True``
+    (``confirmation_required``) so it can never fire by accident. The caller also enforces admin.
+
+    ``wipe_data`` (= ``resetFactory``): ``False`` = "disconnect" (identity kept; re-added on its own
+    gateway without a wipe, the head returns with the SAME devId); ``True`` = "disconnect and wipe
+    data" (factory reset — a NEW devId, identity/name LOST, IRREVERSIBLE on the identity). In both
+    cases re-pairing needs a physical action on site (permit-join is MQTT, not path 1a).
+    """
+    _require_unbind(store)
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    dev = _require_verified_head(coordinator, target)
+    dev_id = dev.id
+    if not confirm:
+        raise OperationError(
+            "confirmation_required",
+            "destructive action: pass confirm=true to unbind this head",
+        )
+    wipe = bool(wipe_data)
+    await _run_cloud_write(coordinator.client.async_device_reset, dev_id, wipe)
+    await _refresh_after_structural_write(coordinator)
+    return {
+        "device_id": dev_id,
+        "name": dev.name,
+        "mode": "disconnect_and_wipe" if wipe else "disconnect",
+        "wipe_data": wipe,
+        "irreversible": wipe,
+        "consequences": [
+            "the head left the Zigbee network and is gone from the account",
+            "re-pairing requires a physical action on the head, on site (not drivable from here)",
+            (
+                "data wiped: it will return with a NEW devId — identity and name LOST "
+                "(irreversible)"
+                if wipe
+                else "identity kept: re-added on its gateway without a wipe, it returns with the "
+                "same devId and name (rediscovery)"
+            ),
+            "its room membership is lost and must be reassigned after re-pairing",
+        ],
+    }
+
+
 async def local_survey(hass: HomeAssistant, store: dict) -> dict:
     """Read-only multi-gateway survey through the local Zigbee tunnel (contract §4.4, C4).
 
@@ -764,13 +863,7 @@ def _tunnel_head(coordinator: DanfossCoordinator, local, target: dict) -> Head:
     isolated head (type=device), of a write-verified product, with a known Zigbee node and a
     gateway the local manager can reach. Errors are stable contract codes.
     """
-    if target.get("type") != "device":
-        raise OperationError("device_only", "a local tunnel write targets a head (type=device)")
-    dev = coordinator.data.get(str(target.get("id")))
-    if dev is None or not dev.is_head:
-        raise OperationError("unknown_target", f"head not found: {target.get('id')}")
-    if not write_allowed(dev):
-        raise OperationError("unverified_product", "write not verified for this product")
+    dev = _require_verified_head(coordinator, target, not_found_code="unknown_target")
     if not dev.node_id or not dev.mesh_id or dev.mesh_id not in local.manager.gateway_ids:
         raise OperationError("local_unreachable", "head not reachable through the local tunnel")
     return Head(dev.id, dev.node_id, dev.mesh_id)

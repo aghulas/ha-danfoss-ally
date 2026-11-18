@@ -554,6 +554,41 @@ class CloudClient:
             },
         )
 
+    async def async_device_reset(self, dev_id: str, reset_factory: bool = False) -> object:
+        """UNBIND a head from the network (``smartlife.m.device.reset`` v3.0). ⚠ DESTRUCTIVE.
+
+        This is the app's "disconnect" action: ``ThingHomeSdk.newDeviceInstance(devId)
+        .removeDevice()`` (+ ``resetFactory``), i.e. a Zigbee ``leave`` emitted by the gateway. The
+        head leaves the network and disappears from the account (its individual routes then 404).
+        Captured and validated on real hardware 2026-11-18 (see
+        ``~/dev/danfoss-ally-signing-re/NOTES.md``, section "GATE A/D"); the app sends it as
+        ``thing.m.device.reset`` but the SIGNED/wire name is ``smartlife.m.device.reset`` (the SDK
+        rewrites the ``thing.`` prefix to ``smartlife.`` before signing), which is the final name
+        passed here — exactly as for ``smartlife.m.device.get`` / ``smartlife.m.room.*``.
+
+        The two app buttons differ ONLY by ``reset_factory``:
+
+        - ``reset_factory=False`` ("disconnect"): identity KEPT. Re-added on ITS gateway without a
+          wipe, the head comes back by rediscovery with the SAME ``devId`` (name/identity restored).
+        - ``reset_factory=True`` ("disconnect and wipe data"): factory reset. On re-pairing the head
+          returns with a NEW ``devId``; identity and name are LOST — IRREVERSIBLE on the identity.
+
+        ⚠ Re-pairing (add) is NOT covered by path 1a: opening the gateway's permit-join is an MQTT
+        order, not an HTTP ``m.*`` call, and it needs a physical action on the head, on site.
+        ⚠ Session conflict: path 1a shares the Tuya ``deviceId`` with the app; a real unbind assumes
+        the Danfoss app is signed out (else ``USER_SESSION_INVALID``) — see ``distinct_device_id``.
+
+        The caller is responsible for the safety gates (opt-in, admin, verified product, explicit
+        confirmation): this layer only encodes the captured request body.
+        """
+        if not dev_id:
+            raise CloudWriteError("devId required for the unbind.")
+        return await self._request(
+            "smartlife.m.device.reset",
+            "3.0",
+            {"devId": dev_id, "resetFactory": bool(reset_factory)},
+        )
+
     async def async_write_setting(
         self, dev_id: str, pid: str, dps: dict, *, gw_id: str | int | None = None
     ) -> object:
