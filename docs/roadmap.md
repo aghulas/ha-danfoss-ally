@@ -1,5 +1,11 @@
 # Roadmap
 
+> **Note (2026-11):** releases now follow the **axis** plan agreed with the owner, which supersedes
+> the per-version list below. Shipped: **0.3.0** (i18n), **0.4.0** (axis C — local tunnel wired),
+> **0.5.0** (axis B — holiday read, boiler relay, room management; contract §4.5–§4.7). Remaining:
+> **axis D**, then **axis A** (1.0 hardening + HACS inclusion). The per-version list below is kept
+> for historical context.
+
 - **v0.0** — skeleton: HA tree, config_flow/options, stubs, CI (hassfest + HACS + ruff + pytest).
 - **v0.1** — cloud read-only: climate (temperature, setpoint) + sensors, on a real install.
 - **v0.2** — validated cloud writes (setpoints, child lock, window) on verified models; values
