@@ -22,14 +22,18 @@ make the DP assumptions more reliable.
 
 ## Device lifecycle: unbind shipped (gated), pairing out of scope
 
-- **Unbind ("disconnect") — shipped, GATED.** A head can be unbound from the network via the
-  `disconnect_head` service (`smartlife.m.device.reset` v3.0 `{devId, resetFactory}`, captured on
-  real hardware 2026-11-18 — see `~/dev/danfoss-ally-signing-re/NOTES.md`, "GATE A/D"). Triple-gated
-  (admin + the `enable_head_unbind` option, **off by default** + explicit `confirm`), verified
-  products only. `resetFactory=false` keeps the head's identity (same devId on re-pairing to its
-  gateway); `resetFactory=true` is a factory reset (new devId, identity lost, irreversible).
-  **Validating a real disconnect through HA is still pending** (integrator present, real head, app
-  signed out of path 1a): it is left off by default until then.
+- **Unbind ("disconnect") — shipped, GATED.** Any sub-device — head, sensor, relay or other — can
+  be unbound from the network via the `disconnect_head` service (`smartlife.m.device.reset` v3.0
+  `{devId, resetFactory}`, captured on real hardware 2026-11-18 — see
+  `~/dev/danfoss-ally-signing-re/NOTES.md`, "GATE A/D"). A **gateway is refused** (it would drop all
+  its heads). The scope was widened from heads-only to all sub-devices on 2026-11-18, mirroring the
+  MCP connector (PR #7); unbind is a Tuya-generic, category-based call, so there is no
+  verified-product gate on it. Triple-gated (admin with no user-less calls + the
+  `enable_head_unbind` option, **off by default** + explicit `confirm`). `resetFactory=false` keeps
+  the device's identity (same devId on re-pairing to its gateway); `resetFactory=true` is a factory
+  reset (new devId, identity lost, irreversible). **Validating a real disconnect through HA is still
+  pending** (integrator present, real device, app signed out of path 1a): it is left off by default
+  until then.
 
 - **Pairing (add) — OUT OF SCOPE, no path-1a route.** Re-adding/pairing a head is deliberately NOT
   exposed. Opening the gateway's permit-join is **not** an HTTP `m.*` call: the "open network" order

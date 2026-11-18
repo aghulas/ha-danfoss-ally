@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Unbind widened to sub-devices (sensors, relays), GATED
+
+### Changed
+
+- **`disconnect_head` now unbinds any sub-device, not just heads** (mirrors the MCP connector
+  PR #7). The target may be a head, sensor, relay or other sub-device; a **gateway is refused**
+  (`gateway_target`) — unbinding it would drop all its heads at once. Unbind is a Tuya-generic call
+  keyed on the device category, so there is **no verified-product gate** for it (that head-only
+  check still guards the local-tunnel writes). The service **name `disconnect_head` is kept** for
+  backward compatibility (it shipped head-only) and now documents the wider scope. The double-gate
+  is unchanged: opt-in `enable_head_unbind` (OFF), admin (`allow_internal=False`), explicit
+  `confirm`. Response now carries the device `category`. Error codes: target-not-found is now
+  `unknown_target` (was `unknown_head`); a gateway target raises the new `gateway_target`.
+  `category_of` treats any `wg*` Tuya category as a gateway (defensive). Real-hardware validation
+  through HA remains **GATED** and not performed.
+
+
 ## Unreleased — Head unbind (disconnect), GATED
 
 ### Added

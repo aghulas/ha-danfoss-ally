@@ -133,7 +133,10 @@ def category_of(category: str | None) -> str:
         return "relay"
     if c in ("wsdcg", "mcs", "ms", "pir"):
         return "sensor"
-    if c in ("wg2", "zigbee", "gateway"):
+    # Any ``wg*`` Tuya category is an Ally gateway (wg2 on real hardware); the prefix match is
+    # defensive so a variant gateway code can never be mistaken for a detachable sub-device (a
+    # gateway must never be unbound — it would drop all its heads at once).
+    if c.startswith("wg") or c in ("zigbee", "gateway"):
         return "gateway"
     return "other"
 
