@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.4.0 — Local tunnel wired (axis C)
+
+Wires the local Zigbee tunnel primitives (ported in the `pydanfoss_cloud.local.tunnel` layer) to
+Home Assistant as entities/services, and settles two findings from the C0 field validation
+(2026-11-17). The cloud-first behaviour is unchanged; the tunnel features require the optional
+**local tunnel** (`enable_local`) and act only on **isolated heads of a verified product**.
+
+### Added
+
+- **One-off setpoint override (C1)** — services `set_override` / `clear_override` (and WebSocket
+  commands) write a "now" setpoint on a head over the tunnel (DP 171). An override lapses at the
+  head's next scheduled change; `clear_override` re-applies the setpoint the schedule prescribes
+  now.
+- **Valve descaling (C2)** — service `set_descaling` sets a head's weekly valve-descaling day/time
+  (0x4010/0x4011).
+- **Open-window detection, local write (C3)** — service `set_window_detection` writes DP 116 over
+  the tunnel (the authoritative read is attribute 0x4051).
+- **Multi-gateway survey (C4)** — read-only service `get_local_survey` (and WebSocket command)
+  returns, per reachable head, the tunnel reading summarized (comfort slots, comfort/setback
+  setpoints, decoded attributes).
+
+### Fixed
+
+- **Settings write now uses `gwId = meshId` for isolated heads**, aligned on the schedule-write
+  path (proven on real hardware, C0b). This lifts the lone `gwId = devId` divergence in
+  `api/client.py`. `CloudClient.async_write_setting` gains an optional keyword `gw_id` (additive,
+  backward-compatible).
+
+### Documentation
+
+- Interface contract §4.4: the one-off override (DP 171) is encoded in **hundredths of °C**, not
+  the `10⁰` the official product schema announces (confirmed in the C0 trial); §4.1/§4.2 note the
+  isolated-head `meshId` addressing as confirmed on real hardware.
+
+### Write-safety
+
+Every tunnel write targets an isolated head of a verified product, reachable through the tunnel,
+with values validated before sending — otherwise a clean, translated error rather than a misleading
+success. The write features **await per-feature real-hardware validation** (see each PR's
+validation request); the survey (C4) and the documentation/`meshId` fixes are not blocked on it.
+
 ## 0.3.0 — English base language
 
 The whole repository is now authored in **English** (code, docstrings, comments, docs),
