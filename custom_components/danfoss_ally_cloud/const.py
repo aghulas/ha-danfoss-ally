@@ -45,6 +45,7 @@ DATA_LOCAL = "local_coordinator"  # local fallback (tunnel), None if enable_loca
 DATA_MQTT = "mqtt_publisher"  # MQTT publisher, None if mqtt_mode = off
 DATA_JOBS = "jobs"  # in-memory queue of write jobs (WriteJob)
 DATA_SCHEDULES = "schedules"  # per-target schedule cache (read on demand)
+DATA_VACATION_WRITE = "vacation_write"  # bool: vacation-write gate (CONF_ENABLE_VACATION_WRITE)
 
 # LOCAL survey (Zigbee tunnel) interval: slow, ~8 s per head. Distinct from the cloud polling.
 DEFAULT_LOCAL_SCAN_INTERVAL = 900  # seconds
@@ -70,10 +71,16 @@ CONF_DISTINCT_DEVICE_ID = "distinct_device_id"
 CONF_MQTT_MODE = "mqtt_mode"  # "off" | "discovery" | "zigbee2mqtt"
 CONF_MQTT_SOURCE = "mqtt_source"  # "cloud" | "local"
 CONF_MQTT_BASE_TOPIC = "mqtt_base_topic"
+# Vacation (holiday) WRITE gate. A vacation write acts on the live heating and its exact request
+# shape is pending a real-hardware validation (Rémi present), so it is OFF by default: the vacation
+# write services refuse (`vacation_disabled`) until it is deliberately enabled for a validation
+# session. Reads (holiday active / setpoint) are unaffected.
+CONF_ENABLE_VACATION_WRITE = "enable_vacation_write"
 
 # Conservative defaults: the account's quota and security come first.
 DEFAULT_SCAN_INTERVAL = 90  # seconds
 DEFAULT_DISTINCT_DEVICE_ID = True
+DEFAULT_ENABLE_VACATION_WRITE = False
 DEFAULT_MQTT_MODE = "off"
 DEFAULT_MQTT_SOURCE = "cloud"
 DEFAULT_MQTT_BASE_TOPIC = "danfoss_ally_cloud"

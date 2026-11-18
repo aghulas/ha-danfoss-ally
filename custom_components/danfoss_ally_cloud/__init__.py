@@ -22,6 +22,7 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
     CONF_ENABLE_LOCAL,
+    CONF_ENABLE_VACATION_WRITE,
     CONF_MQTT_BASE_TOPIC,
     CONF_MQTT_MODE,
     CONF_MQTT_SOURCE,
@@ -35,7 +36,9 @@ from .const import (
     DATA_LOCAL,
     DATA_MQTT,
     DATA_SCHEDULES,
+    DATA_VACATION_WRITE,
     DEFAULT_DISTINCT_DEVICE_ID,
+    DEFAULT_ENABLE_VACATION_WRITE,
     DEFAULT_LOCAL_SCAN_INTERVAL,
     DEFAULT_MQTT_BASE_TOPIC,
     DEFAULT_MQTT_MODE,
@@ -100,6 +103,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_MQTT: publisher,
         DATA_JOBS: JobManager(),
         DATA_SCHEDULES: {},
+        DATA_VACATION_WRITE: entry.options.get(
+            CONF_ENABLE_VACATION_WRITE, DEFAULT_ENABLE_VACATION_WRITE
+        ),
     }
     await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
     _cleanup_orphaned_head_climates(hass, entry, coordinator)

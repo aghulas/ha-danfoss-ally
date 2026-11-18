@@ -286,13 +286,117 @@ class CloudClient:
     async def async_get_vacation(self, home_id: str | int) -> dict:
         """Active holiday detail of a home (tuya.m.solution.wkf.vacation.detail). {} if none.
 
-        Read-only (contract §4.5): the holiday *set/exit* routes are uncaptured (runtime
-        mini-program), so the integration never writes a holiday.
+        Read (contract §4.5). The holiday *write* routes were captured on 2026-11-18 (see the
+        ``async_vacation_*`` methods below); they run through a runtime mini-program on the app but
+        the plaintext bodies replay on the bare path-1a channel. R5 still holds: DP 2 ``holiday`` is
+        only a display label — these ``solution.wkf.vacation.*`` routes are the real lever.
         """
         r = await self._request(
             "tuya.m.solution.wkf.vacation.detail", "1.0", {"homeId": str(home_id)}
         )
         return r if isinstance(r, dict) else {}
+
+    # --- Axis A vacation writes (contract §4.5, §5.2). Captured 2026-11-18; GATED and pending a
+    # real-hardware validation (a vacation write acts on the live heating). The caller enforces the
+    # opt-in gate and admin rights; this layer only encodes the captured request bodies. ----------
+
+    @staticmethod
+    def _room_ids_csv(room_ids: list[str] | str) -> str:
+        """The captured ``roomIds`` field is a comma-separated string of Tuya room ids."""
+        if isinstance(room_ids, str):
+            return room_ids
+        return ",".join(str(r) for r in room_ids)
+
+    async def async_vacation_leave(
+        self,
+        home_id: str | int,
+        start_date: str,
+        start_time: str,
+        end_date: str,
+        end_time: str,
+        temperature_tenths: int,
+        room_ids: list[str] | str,
+        time_zone: str = "Europe/Paris",
+    ) -> object:
+        """Set / edit an *away* holiday (tuya.m.solution.wkf.vacation.plan.leave v1.0).
+
+        The head holds ``temperature`` for the whole period. Editing = re-posting ``plan.leave``
+        (idempotent per home). ``temperature`` is tenths of °C as a **string** (``150`` = 15.0 °C),
+        ``startDate``/``endDate`` are ``YYYYMMDD``, ``startTime``/``endTime`` are ``HH:MM``.
+        """
+        return await self._request(
+            "tuya.m.solution.wkf.vacation.plan.leave",
+            "1.0",
+            {
+                "startDate": start_date,
+                "startTime": start_time,
+                "endDate": end_date,
+                "endTime": end_time,
+                "temperature": str(int(temperature_tenths)),
+                "homeId": str(home_id),
+                "roomIds": self._room_ids_csv(room_ids),
+                "timeZoneId": time_zone,
+            },
+        )
+
+    async def async_vacation_athome(
+        self,
+        home_id: str | int,
+        start_date: str,
+        end_date: str,
+        room_ids: list[str] | str,
+        time_zone: str = "Europe/Paris",
+    ) -> object:
+        """Set / edit an *at-home* holiday (tuya.m.solution.wkf.vacation.plan.athome v1.0).
+
+        No temperature and no times: each head follows its **Saturday** schedule for the period
+        (DP 2 ``holiday_sat``). The app blocks this client-side when no room has a Saturday program;
+        the cloud may likewise refuse it.
+        """
+        return await self._request(
+            "tuya.m.solution.wkf.vacation.plan.athome",
+            "1.0",
+            {
+                "startDate": start_date,
+                "endDate": end_date,
+                "homeId": str(home_id),
+                "roomIds": self._room_ids_csv(room_ids),
+                "timeZoneId": time_zone,
+            },
+        )
+
+    async def async_vacation_cancel(
+        self, home_id: str | int, time_zone: str = "Europe/Paris"
+    ) -> object:
+        """Cancel a *planned* holiday before it starts (vacation.cancel v1.0)."""
+        return await self._request(
+            "tuya.m.solution.wkf.vacation.cancel",
+            "1.0",
+            {"homeId": str(home_id), "timeZoneId": time_zone},
+        )
+
+    async def async_vacation_leave_now(
+        self,
+        home_id: str | int,
+        room_ids: list[str] | str,
+        temperature_tenths: int,
+        time_zone: str = "Europe/Paris",
+    ) -> object:
+        """End an *in-progress* holiday now (tuya.m.solution.wkf.vacation.leave.now v1.0).
+
+        Re-applies ``temperature`` to the rooms immediately. Here ``temperature`` is tenths of °C as
+        an **integer** (``150`` = 15.0 °C), unlike ``plan.leave`` where it is a string.
+        """
+        return await self._request(
+            "tuya.m.solution.wkf.vacation.leave.now",
+            "1.0",
+            {
+                "homeId": str(home_id),
+                "roomIds": self._room_ids_csv(room_ids),
+                "temperature": int(temperature_tenths),
+                "timeZoneId": time_zone,
+            },
+        )
 
     async def async_list_holidays(self) -> list[dict]:
         """Per-home holiday state of the account: [{gid, name, active, detail}]. Read-only.

@@ -58,6 +58,10 @@ def async_register(hass: HomeAssistant) -> None:
     reg(hass, ws_room_attach)
     reg(hass, ws_room_detach)
     reg(hass, ws_relay_set_room)
+    reg(hass, ws_vacation_set)
+    reg(hass, ws_vacation_set_at_home)
+    reg(hass, ws_vacation_cancel)
+    reg(hass, ws_vacation_end)
 
 
 @websocket_api.websocket_command(
@@ -443,6 +447,108 @@ async def ws_relay_set_room(hass: HomeAssistant, connection, msg: dict) -> None:
         _send_op_error(connection, msg["id"], err)
         return
     connection.send_result(msg["id"], result)
+
+
+# --- Vacation (holiday) writes (GATED). Admin-only; the opt-in gate is enforced in operations. ---
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/vacation/set",
+        vol.Required("home"): str,
+        vol.Required("start_date"): str,
+        vol.Required("start_time"): str,
+        vol.Required("end_date"): str,
+        vol.Required("end_time"): str,
+        vol.Required("temperature"): vol.Coerce(float),
+        vol.Optional("rooms"): [dict],
+        vol.Optional("time_zone", default="Europe/Paris"): str,
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_vacation_set(hass: HomeAssistant, connection, msg: dict) -> None:
+    await _ws_room_write(
+        hass,
+        connection,
+        msg,
+        ops.set_vacation,
+        msg["home"],
+        msg["start_date"],
+        msg["start_time"],
+        msg["end_date"],
+        msg["end_time"],
+        msg["temperature"],
+        msg.get("rooms"),
+        msg["time_zone"],
+    )
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/vacation/set_at_home",
+        vol.Required("home"): str,
+        vol.Required("start_date"): str,
+        vol.Required("end_date"): str,
+        vol.Optional("rooms"): [dict],
+        vol.Optional("time_zone", default="Europe/Paris"): str,
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_vacation_set_at_home(hass: HomeAssistant, connection, msg: dict) -> None:
+    await _ws_room_write(
+        hass,
+        connection,
+        msg,
+        ops.set_vacation_at_home,
+        msg["home"],
+        msg["start_date"],
+        msg["end_date"],
+        msg.get("rooms"),
+        msg["time_zone"],
+    )
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/vacation/cancel",
+        vol.Required("home"): str,
+        vol.Optional("time_zone", default="Europe/Paris"): str,
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_vacation_cancel(hass: HomeAssistant, connection, msg: dict) -> None:
+    await _ws_room_write(hass, connection, msg, ops.cancel_vacation, msg["home"], msg["time_zone"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/vacation/end",
+        vol.Required("home"): str,
+        vol.Required("temperature"): vol.Coerce(float),
+        vol.Optional("rooms"): [dict],
+        vol.Optional("time_zone", default="Europe/Paris"): str,
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_vacation_end(hass: HomeAssistant, connection, msg: dict) -> None:
+    await _ws_room_write(
+        hass,
+        connection,
+        msg,
+        ops.end_vacation,
+        msg["home"],
+        msg["temperature"],
+        msg.get("rooms"),
+        msg["time_zone"],
+    )
 
 
 @websocket_api.websocket_command(

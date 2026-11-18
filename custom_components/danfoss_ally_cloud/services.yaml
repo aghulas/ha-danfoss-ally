@@ -323,3 +323,142 @@ get_write_job:
       selector:
         config_entry:
           integration: danfoss_ally_cloud
+
+# --- Vacation (holiday) writes (GATED) --------------------------------------------------------
+# Disabled by default: enable "Use vacation writes" in the integration options for a real-hardware
+# validation session. A vacation is set per HOME (gid), optionally scoped to a list of room targets
+# (default: every room of the home).
+set_vacation:
+  fields:
+    home:
+      required: true
+      example: "<home gid>"
+      selector:
+        text:
+    start_date:
+      required: true
+      example: "20261220"
+      selector:
+        text:
+    start_time:
+      required: true
+      example: "08:00"
+      selector:
+        text:
+    end_date:
+      required: true
+      example: "20270105"
+      selector:
+        text:
+    end_time:
+      required: true
+      example: "18:00"
+      selector:
+        text:
+    temperature:
+      required: true
+      example: 15.0
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    rooms:
+      required: false
+      example: '[{"type": "room", "id": "<group_id>"}]'
+      selector:
+        object:
+    time_zone:
+      required: false
+      example: Europe/Paris
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+set_vacation_at_home:
+  fields:
+    home:
+      required: true
+      example: "<home gid>"
+      selector:
+        text:
+    start_date:
+      required: true
+      example: "20261220"
+      selector:
+        text:
+    end_date:
+      required: true
+      example: "20270105"
+      selector:
+        text:
+    rooms:
+      required: false
+      example: '[{"type": "room", "id": "<group_id>"}]'
+      selector:
+        object:
+    time_zone:
+      required: false
+      example: Europe/Paris
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+cancel_vacation:
+  fields:
+    home:
+      required: true
+      example: "<home gid>"
+      selector:
+        text:
+    time_zone:
+      required: false
+      example: Europe/Paris
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+end_vacation:
+  fields:
+    home:
+      required: true
+      example: "<home gid>"
+      selector:
+        text:
+    temperature:
+      required: true
+      example: 20.0
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    rooms:
+      required: false
+      example: '[{"type": "room", "id": "<group_id>"}]'
+      selector:
+        object:
+    time_zone:
+      required: false
+      example: Europe/Paris
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
