@@ -19,10 +19,10 @@ from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .api import DanfossDevice
+from .api import DanfossDevice, holiday_temperature
 from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import DanfossCoordinator
-from .entity import DanfossEntity
+from .entity import DanfossEntity, DanfossHomeEntity
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -76,12 +76,18 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: DanfossCoordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
-    async_add_entities(
+    entities: list[SensorEntity] = [
         DanfossSensor(coordinator, dev.id, desc)
         for dev in coordinator.data.values()
         if dev.is_head
         for desc in SENSORS
+    ]
+    # Holiday setpoint (read only, contract §4.5): one per home.
+    entities.extend(
+        DanfossHolidaySetpoint(coordinator, gid, holiday.get("name"))
+        for gid, holiday in coordinator.holidays.items()
     )
+    async_add_entities(entities)
 
 
 class DanfossSensor(DanfossEntity, SensorEntity):
@@ -103,3 +109,27 @@ class DanfossSensor(DanfossEntity, SensorEntity):
     def native_value(self):
         dev = self.device
         return self.entity_description.value(dev) if dev else None
+
+
+class DanfossHolidaySetpoint(DanfossHomeEntity, SensorEntity):
+    """Holiday setpoint of a home (read only, contract §4.5).
+
+    Value from the cloud's holiday record (``None`` while no holiday is active or when the record
+    carries no recognised temperature field; the raw record is on the holiday binary_sensor).
+    """
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_translation_key = "holiday_setpoint"
+    _attr_icon = "mdi:bag-suitcase"
+
+    def __init__(self, coordinator: DanfossCoordinator, gid: str, name: str | None) -> None:
+        super().__init__(coordinator, gid, name)
+        self._attr_unique_id = f"home_{gid}_holiday_setpoint"
+
+    @property
+    def native_value(self) -> float | None:
+        holiday = self.holiday
+        if not holiday or not holiday.get("active"):
+            return None
+        return holiday_temperature(holiday.get("detail"))

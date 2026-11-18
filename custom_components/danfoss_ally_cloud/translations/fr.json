@@ -45,6 +45,9 @@
    },
    "fault": {
     "name": "Code défaut"
+   },
+   "holiday_setpoint": {
+    "name": "Consigne vacances"
    }
   },
   "binary_sensor": {
@@ -53,6 +56,9 @@
    },
    "window": {
     "name": "Fenêtre"
+   },
+   "holiday": {
+    "name": "Vacances actives"
    }
   },
   "switch": {

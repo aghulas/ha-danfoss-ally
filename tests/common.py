@@ -61,6 +61,8 @@ class FakeCloudClient:
         groups=None,
         members=None,
         topology_exc=None,
+        holidays=None,
+        holidays_exc=None,
         **kwargs,
     ) -> None:
         self._devices = [head()] if devices is None else devices
@@ -69,6 +71,8 @@ class FakeCloudClient:
         self._groups = groups or []
         self._members = members or {}
         self._topology_exc = topology_exc
+        self._holidays = holidays
+        self._holidays_exc = holidays_exc
         self.closed = False
         self.writes: list = []
 
@@ -94,6 +98,11 @@ class FakeCloudClient:
         if self._topology_exc is not None:
             raise self._topology_exc
         return dict(self._members)
+
+    async def async_list_holidays(self):
+        if self._holidays_exc is not None:
+            raise self._holidays_exc
+        return list(self._holidays) if self._holidays is not None else []
 
     # Schedule editing (schedule-editing layer): stub + write log.
     async def async_get_schedule(self, target):

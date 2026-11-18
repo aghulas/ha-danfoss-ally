@@ -23,7 +23,13 @@ from .client import (
     ScheduleValidationError,
     UnknownTargetError,
 )
-from .decode import DanfossDevice, decode_device, decode_operation, head_state
+from .decode import (
+    DanfossDevice,
+    decode_device,
+    decode_operation,
+    head_state,
+    holiday_temperature,
+)
 from .keys import GatewayKey, async_fetch_gateway_keys
 from .schedule import Schedule, count_transitions, validate_days
 from .writes import encode_setpoint, write_allowed
@@ -44,6 +50,7 @@ __all__ = [
     "decode_operation",
     "encode_setpoint",
     "head_state",
+    "holiday_temperature",
     "schedule",
     "validate_days",
     "write_allowed",
