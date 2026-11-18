@@ -365,6 +365,16 @@
      "description": "Si plusieurs comptes sont configurés."
     }
    }
+  },
+  "get_overview": {
+   "name": "Vue d'ensemble de la flotte",
+   "description": "Vue d'ensemble du bâtiment / de la flotte (maisons, passerelles, pièces), en lecture seule.",
+   "fields": {
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
   }
  },
  "exceptions": {

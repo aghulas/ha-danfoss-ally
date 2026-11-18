@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
 
 from .api import ScheduleValidationError, UnknownTargetError, head_state, write_allowed
@@ -26,7 +27,14 @@ from .api import schedule as sch
 from .api.client import CloudError
 from .api.local import tunnel
 from .api.local.manager import Head
-from .const import DATA_COORDINATOR, DATA_JOBS, DATA_LOCAL, DATA_SCHEDULES
+from .const import (
+    DATA_COORDINATOR,
+    DATA_JOBS,
+    DATA_LOCAL,
+    DATA_SCHEDULES,
+    DOMAIN,
+    WRITE_VERIFIED_PRODUCTS,
+)
 from .writejob import (
     HEAD_APPLIED,
     HEAD_MISMATCH,
@@ -78,6 +86,19 @@ def _heads_of_room(coordinator: DanfossCoordinator, group_id: str) -> list[dict]
     ]
 
 
+def _room_climate_entity_id(coordinator: DanfossCoordinator, group_id: str) -> str | None:
+    """Entity id of the room thermostat (unique_id = group_id), or None if not registered.
+
+    Lets the room card reuse the existing, already-validated ``climate.set_temperature`` instead of
+    any new write path (contract §8.1). Best-effort: a missing registry just yields None.
+    """
+    try:
+        registry = er.async_get(coordinator.hass)
+    except Exception:  # noqa: BLE001 - never block a read on the registry
+        return None
+    return registry.async_get_entity_id("climate", DOMAIN, group_id)
+
+
 def _room_entry(coordinator: DanfossCoordinator, group_id: str) -> dict:
     """One room payload (contract §3.4) from the aggregated RoomState + member head states."""
     rs = coordinator.rooms[group_id]
@@ -88,6 +109,15 @@ def _room_entry(coordinator: DanfossCoordinator, group_id: str) -> dict:
         "comfort": rs.setpoints.get("comfort"),
         "setback": rs.setpoints.get("setback"),
         "heads": _heads_of_room(coordinator, group_id),
+        # Live climate (same values as the room thermostat) + the write affordances, read-only
+        # (contract §3.4, axis D). No extra cloud call: all from the aggregated RoomState.
+        "temperature": rs.temperature,
+        "setpoint": rs.setpoint,
+        "mode": rs.mode,
+        "heating": rs.heating,
+        "online": rs.online,
+        "writable": rs.pid in WRITE_VERIFIED_PRODUCTS,
+        "climate_entity_id": _room_climate_entity_id(coordinator, group_id),
     }
 
 
@@ -95,6 +125,124 @@ def rooms_payload(store: dict) -> dict:
     """Rooms (contract §3.4): RoomState from #12 + member head states (HeadState §3.3)."""
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     return {"rooms": [_room_entry(coordinator, gid) for gid in coordinator.rooms]}
+
+
+def _low_battery_head(head: dict) -> bool:
+    """A head is low on battery if a battery fault (E14/E15) is set, or battery <= 10 %."""
+    codes = {str(f.get("code")) for f in head.get("faults", [])}
+    if codes & {"E14", "E15"}:
+        return True
+    battery = head.get("battery")
+    return battery is not None and battery <= 10
+
+
+def _room_overview(coordinator: DanfossCoordinator, group_id: str) -> dict[str, Any]:
+    """Per-room health counts for the fleet overview (contract §3.6)."""
+    rs = coordinator.rooms[group_id]
+    heads = _heads_of_room(coordinator, group_id)
+    return {
+        "id": group_id,
+        "name": rs.name,
+        "head_count": rs.head_count,
+        "offline": sum(1 for h in heads if not h["online"]),
+        "low_battery": sum(1 for h in heads if _low_battery_head(h)),
+        "heating": bool(rs.heating) or any(h.get("heat_request") for h in heads),
+        "window_open": any(h.get("window_open") for h in heads),
+        "inconsistent": sum(1 for h in heads if h["inconsistent"]),
+        "faults": sum(1 for h in heads if h["faults"]),
+    }
+
+
+def _home_gids(coordinator: DanfossCoordinator) -> list[str]:
+    """Home gids present, from the room topology then the holiday reads (stable order)."""
+    gids: list[str] = []
+    for gid in coordinator.rooms:
+        home = coordinator.home_of(gid)
+        if home and home not in gids:
+            gids.append(home)
+    for gid in coordinator.holidays:
+        if gid not in gids:
+            gids.append(gid)
+    return gids
+
+
+def _relay_home_gid(coordinator: DanfossCoordinator, relay, home_gids: list[str]) -> str | None:
+    """Best-effort home of a boiler relay. Exact for a single-home account (the common case).
+
+    The cloud exposes no relay -> home link directly; with one home every relay belongs to it. With
+    several, fall back to the home of a linked room when resolvable, else the first home.
+    """
+    if len(home_gids) == 1:
+        return home_gids[0]
+    for room in coordinator.relay_rooms.get(relay.id, []):
+        home = coordinator.home_of(str(room.get("room_id")))
+        if home:
+            return home
+    return home_gids[0] if home_gids else None
+
+
+def overview_payload(store: dict) -> dict:
+    """Building / fleet overview (contract §3.6). Read-only, from the coordinator cache only.
+
+    No extra cloud call: homes, gateways, rooms and relays all come from the already-polled state.
+    """
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    home_gids = _home_gids(coordinator)
+    names = {gid: (h.get("name") or f"Home {gid}") for gid, h in coordinator.holidays.items()}
+    gateways = [d for d in coordinator.data.values() if d.category == "gateway"]
+    relays = [d for d in coordinator.data.values() if d.is_relay]
+
+    primary = home_gids[0] if home_gids else None
+    homes: list[dict[str, Any]] = []
+    for gid in home_gids:
+        rooms = [
+            _room_overview(coordinator, group_id)
+            for group_id in coordinator.rooms
+            if coordinator.home_of(group_id) == gid
+        ]
+        home_relays = [
+            {
+                "device_id": d.id,
+                "name": d.name,
+                "on": d.relay_on,
+                "online": d.online,
+                "linked_rooms": sum(
+                    1 for r in coordinator.relay_rooms.get(d.id, []) if r.get("linked")
+                ),
+            }
+            for d in relays
+            if _relay_home_gid(coordinator, d, home_gids) == gid
+        ]
+        # Gateways have no per-home link; attribute them to the primary home (exact for a
+        # single-home account, the common case), none to the others.
+        home_gateways = (
+            [{"device_id": g.id, "name": g.name, "online": g.online} for g in gateways]
+            if gid == primary
+            else []
+        )
+        homes.append(
+            {
+                "gid": gid,
+                "name": names.get(gid, f"Home {gid}"),
+                "holiday_active": bool((coordinator.holidays.get(gid) or {}).get("active")),
+                "gateways": home_gateways,
+                "rooms": rooms,
+                "relays": home_relays,
+            }
+        )
+
+    totals = {
+        "homes": len(homes),
+        "gateways": len(gateways),
+        "rooms": sum(len(h["rooms"]) for h in homes),
+        "heads": sum(r["head_count"] for h in homes for r in h["rooms"]),
+        "offline": sum(r["offline"] for h in homes for r in h["rooms"]),
+        "low_battery": sum(r["low_battery"] for h in homes for r in h["rooms"]),
+        "heating": sum(1 for h in homes for r in h["rooms"] if r["heating"]),
+        "faults": sum(r["faults"] for h in homes for r in h["rooms"]),
+        "relays_on": sum(1 for d in relays if d.relay_on),
+    }
+    return {"homes": homes, "totals": totals}
 
 
 def holidays_payload(store: dict) -> dict:

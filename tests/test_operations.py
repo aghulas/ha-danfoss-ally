@@ -30,6 +30,12 @@ class _RoomState:
         self.name = nom
         self.pid = pid
         self.setpoints = consignes
+        self.head_count = 2
+        self.online = True
+        self.temperature = 20.4
+        self.setpoint = 21.0
+        self.mode = "at_home"
+        self.heating = True
 
 
 class _FakeClient:
@@ -315,6 +321,29 @@ def test_rooms_payload_rooms_and_heads():
     assert room["comfort"] == 21.0 and room["setback"] == 14.0
     assert {h["device_id"] for h in room["heads"]} == {"a", "b"}
     assert any(h["inconsistent"] for h in room["heads"])  # b : at_home + DP172 0
+
+
+def test_room_entry_live_climate_fields():
+    """Axis D: _room_entry exposes the live climate + write affordances (read only)."""
+    store, _ = _store()
+    room = ops.rooms_payload(store)["rooms"][0]
+    assert room["temperature"] == 20.4 and room["setpoint"] == 21.0
+    assert room["mode"] == "at_home" and room["heating"] is True and room["online"] is True
+    assert room["writable"] is True  # pid 03wvrwpv is verified
+    assert room["climate_entity_id"] is None  # no entity registry in this fake
+
+
+def test_head_state_carries_status_fields():
+    """HeadState now carries battery/valve/window/lock/faults for the UI (all read only)."""
+    store, _ = _store()
+    head_a = next(h for h in ops.rooms_payload(store)["rooms"][0]["heads"] if h["device_id"] == "a")
+    assert head_a["battery"] == 90.0
+    assert head_a["valve_opening"] == 30
+    assert head_a["window_open"] is False
+    assert head_a["window_detection"] is True
+    assert head_a["child_lock"] is False
+    assert head_a["faults"] == []
+    assert "heat_request" in head_a
 
 
 async def test_get_schedule_cache_puis_refresh():

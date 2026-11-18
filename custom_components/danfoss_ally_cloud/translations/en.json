@@ -365,6 +365,16 @@
           "description": "If several accounts are configured."
         }
       }
+    },
+    "get_overview": {
+      "name": "Get fleet overview",
+      "description": "Building / fleet overview across homes, gateways and rooms (read only).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
     }
   },
   "exceptions": {

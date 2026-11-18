@@ -401,3 +401,29 @@ async def test_ws_holiday_and_relays(setup):
     ws.ws_relays(hass, conn, {"id": 41})
     assert "holidays" in conn.results[40]
     assert "relays" in conn.results[41]
+
+
+# --- D1: fleet overview + enriched room payload (axis D) ---------------------------------------
+
+
+async def test_service_get_overview(setup):
+    hass, _, _ = setup
+    res = await hass.services.async_call(
+        DOMAIN, "get_overview", {}, blocking=True, return_response=True
+    )
+    assert "homes" in res and "totals" in res
+    assert res["totals"]["rooms"] == 1 and res["totals"]["heads"] == 2
+    room = res["homes"][0]["rooms"][0]
+    assert room["id"] == "13000000" and room["head_count"] == 2
+
+
+async def test_ws_overview_and_room_climate_entity(setup):
+    hass, _, _ = setup
+    conn = _FakeConn()
+    ws.ws_overview(hass, conn, {"id": 50})
+    assert "homes" in conn.results[50]
+    # The enriched room payload resolves the real room climate entity id (registry path).
+    ws.ws_rooms(hass, conn, {"id": 51, "type": "danfoss_ally_cloud/rooms"})
+    room = conn.results[51]["rooms"][0]
+    assert room["climate_entity_id"] and room["climate_entity_id"].startswith("climate.")
+    assert room["writable"] is True
