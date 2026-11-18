@@ -41,6 +41,12 @@ try:
 except ImportError:  # lovelace absent
     _ResourcesCls = None
 
+# Custom-panel helper (sidebar, contract §8.2). May be absent on a minimal HA: best-effort.
+try:
+    from homeassistant.components import panel_custom
+except ImportError:  # panel_custom absent
+    panel_custom = None
+
 _LOGGER = logging.getLogger(__name__)
 
 # Public URL of the served folder, and the bundle name (versioned in the repo).
@@ -48,25 +54,70 @@ FRONTEND_URL_BASE = f"/{DOMAIN}/frontend"
 JS_FILENAME = "danfoss-ally-cloud.js"
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 
+# Side panel (contract §8.2): sidebar entry backed by the <danfoss-ally-panel> web component of the
+# same bundle. Read-first, so no admin requirement.
+PANEL_URL_PATH = "danfoss-ally-cloud"
+PANEL_COMPONENT = "danfoss-ally-panel"
+PANEL_TITLE = "Danfoss Ally"
+PANEL_ICON = "mdi:radiator"
+
 # Flag in hass.data: static path already registered for this instance.
 _DATA_STATIC_REGISTERED = f"{DOMAIN}_frontend_static"
+# Flag in hass.data: the side panel is registered for this instance.
+_DATA_PANEL_REGISTERED = f"{DOMAIN}_frontend_panel"
 
 
 async def async_register_frontend(hass: HomeAssistant) -> None:
-    """Serve the bundle and declare the Lovelace resource. Call this in async_setup."""
+    """Serve the bundle, declare the Lovelace resource and the side panel (async_setup)."""
     await _async_register_static_path(hass)
     url = await _async_resource_url(hass)
     await _async_register_resource(hass, url)
+    await _async_register_panel(hass, url)
 
 
 async def async_unregister_frontend(hass: HomeAssistant) -> None:
-    """Remove the Lovelace resource (when the last entry is removed).
+    """Remove the Lovelace resource and the side panel (when the last entry is removed).
 
     The static path is not removed: Home Assistant offers no way to unregister it, and it is
     harmless (it disappears on the next restart).
     """
     url = await _async_resource_url(hass)
     await _async_remove_resource(hass, url)
+    _async_remove_panel(hass)
+
+
+async def _async_register_panel(hass: HomeAssistant, module_url: str) -> None:
+    """Register the sidebar panel, once per instance. Best-effort: never blocks setup."""
+    if hass.data.get(_DATA_PANEL_REGISTERED) or panel_custom is None:
+        return
+    try:
+        await panel_custom.async_register_panel(
+            hass,
+            frontend_url_path=PANEL_URL_PATH,
+            webcomponent_name=PANEL_COMPONENT,
+            module_url=module_url,
+            sidebar_title=PANEL_TITLE,
+            sidebar_icon=PANEL_ICON,
+            require_admin=False,
+            embed_iframe=False,
+        )
+    except Exception as err:  # noqa: BLE001 - best-effort, must not block setup
+        _LOGGER.warning("Could not register the Danfoss Ally panel: %s", err)
+        return
+    hass.data[_DATA_PANEL_REGISTERED] = True
+
+
+def _async_remove_panel(hass: HomeAssistant) -> None:
+    """Remove the sidebar panel (cleanup). Best-effort."""
+    if not hass.data.get(_DATA_PANEL_REGISTERED):
+        return
+    try:
+        from homeassistant.components import frontend as ha_frontend
+
+        ha_frontend.async_remove_panel(hass, PANEL_URL_PATH)
+    except Exception as err:  # noqa: BLE001 - best-effort
+        _LOGGER.debug("Could not remove the Danfoss Ally panel: %s", err)
+    hass.data[_DATA_PANEL_REGISTERED] = False
 
 
 async def _async_resource_url(hass: HomeAssistant) -> str:

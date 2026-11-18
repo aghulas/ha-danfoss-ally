@@ -6,6 +6,7 @@
  * développer la carte sans instance HA. Démarrage : `npm run demo`.
  */
 import "../src/main";
+import type { DanfossAllyPanel } from "../src/panel";
 import type { DanfossAllyRoomCard } from "../src/room-card";
 import type { DanfossAllyScheduleCard } from "../src/schedule-card";
 import type { DanfossAllyScheduleCardEditor } from "../src/schedule-card-editor";
@@ -399,6 +400,10 @@ const fakeHass: HassLike = {
     throw new Error(`commande non simulée : ${String(msg.type)}`);
   },
 };
+
+const panel = document.createElement("danfoss-ally-panel") as DanfossAllyPanel;
+panel.hass = fakeHass;
+document.getElementById("panel")?.appendChild(panel);
 
 const roomCard = document.createElement("danfoss-ally-room-card") as DanfossAllyRoomCard;
 roomCard.setConfig({ room_id: "13000000" });

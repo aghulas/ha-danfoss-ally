@@ -902,6 +902,13 @@ async function fetchRooms(hass) {
     return [];
   }
 }
+async function fetchOverview(hass) {
+  try {
+    return await hass.callWS({ type: "danfoss_ally_cloud/overview" });
+  } catch {
+    return null;
+  }
+}
 function pickRoom(rooms, roomId) {
   if (!roomId) {
     return void 0;
@@ -981,14 +988,14 @@ async function subscribeJobs(hass, callback) {
     };
   }
 }
-var __defProp$2 = Object.defineProperty;
-var __getOwnPropDesc$2 = Object.getOwnPropertyDescriptor;
-var __decorateClass$2 = (decorators, target, key, kind) => {
-  var result = kind > 1 ? void 0 : kind ? __getOwnPropDesc$2(target, key) : target;
+var __defProp$3 = Object.defineProperty;
+var __getOwnPropDesc$3 = Object.getOwnPropertyDescriptor;
+var __decorateClass$3 = (decorators, target, key, kind) => {
+  var result = kind > 1 ? void 0 : kind ? __getOwnPropDesc$3(target, key) : target;
   for (var i2 = decorators.length - 1, decorator; i2 >= 0; i2--)
     if (decorator = decorators[i2])
       result = (kind ? decorator(target, key, result) : decorator(result)) || result;
-  if (kind && result) __defProp$2(target, key, result);
+  if (kind && result) __defProp$3(target, key, result);
   return result;
 };
 let DanfossAllyScheduleCardEditor = class extends i {
@@ -1070,19 +1077,19 @@ DanfossAllyScheduleCardEditor.styles = i$3`
       font-size: 0.9rem;
     }
   `;
-__decorateClass$2([
+__decorateClass$3([
   n2({ attribute: false })
 ], DanfossAllyScheduleCardEditor.prototype, "hass", 2);
-__decorateClass$2([
+__decorateClass$3([
   r()
 ], DanfossAllyScheduleCardEditor.prototype, "_config", 2);
-__decorateClass$2([
+__decorateClass$3([
   r()
 ], DanfossAllyScheduleCardEditor.prototype, "_rooms", 2);
-__decorateClass$2([
+__decorateClass$3([
   r()
 ], DanfossAllyScheduleCardEditor.prototype, "_loaded", 2);
-DanfossAllyScheduleCardEditor = __decorateClass$2([
+DanfossAllyScheduleCardEditor = __decorateClass$3([
   t$1("danfoss-ally-schedule-card-editor")
 ], DanfossAllyScheduleCardEditor);
 const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -1310,14 +1317,14 @@ function needsReload(cardVersion, serverVersion) {
   }
   return cardVersion !== serverVersion;
 }
-var __defProp$1 = Object.defineProperty;
-var __getOwnPropDesc$1 = Object.getOwnPropertyDescriptor;
-var __decorateClass$1 = (decorators, target, key, kind) => {
-  var result = kind > 1 ? void 0 : kind ? __getOwnPropDesc$1(target, key) : target;
+var __defProp$2 = Object.defineProperty;
+var __getOwnPropDesc$2 = Object.getOwnPropertyDescriptor;
+var __decorateClass$2 = (decorators, target, key, kind) => {
+  var result = kind > 1 ? void 0 : kind ? __getOwnPropDesc$2(target, key) : target;
   for (var i2 = decorators.length - 1, decorator; i2 >= 0; i2--)
     if (decorator = decorators[i2])
       result = (kind ? decorator(target, key, result) : decorator(result)) || result;
-  if (kind && result) __defProp$1(target, key, result);
+  if (kind && result) __defProp$2(target, key, result);
   return result;
 };
 let DanfossAllyScheduleCard = class extends i {
@@ -2510,55 +2517,55 @@ DanfossAllyScheduleCard.styles = i$3`
       }
     }
   `;
-__decorateClass$1([
+__decorateClass$2([
   n2({ attribute: false })
 ], DanfossAllyScheduleCard.prototype, "hass", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_config", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_rooms", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_info", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_schedule", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_loaded", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_refreshing", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_editing", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_draft", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_saving", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_error", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_job", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_restoring", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_copyFrom", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_copyTargets", 2);
-__decorateClass$1([
+__decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_serverValidation", 2);
-DanfossAllyScheduleCard = __decorateClass$1([
+DanfossAllyScheduleCard = __decorateClass$2([
   t$1("danfoss-ally-schedule-card")
 ], DanfossAllyScheduleCard);
 const ICON_CHECK = w`<svg viewBox="0 0 24 24"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.42z" /></svg>`;
@@ -2594,14 +2601,14 @@ function steppedSetpoint(current, direction) {
 function roomNeedsRestore(room) {
   return room.heads.some((h2) => h2.schedule_active === false);
 }
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __decorateClass = (decorators, target, key, kind) => {
-  var result = kind > 1 ? void 0 : kind ? __getOwnPropDesc(target, key) : target;
+var __defProp$1 = Object.defineProperty;
+var __getOwnPropDesc$1 = Object.getOwnPropertyDescriptor;
+var __decorateClass$1 = (decorators, target, key, kind) => {
+  var result = kind > 1 ? void 0 : kind ? __getOwnPropDesc$1(target, key) : target;
   for (var i2 = decorators.length - 1, decorator; i2 >= 0; i2--)
     if (decorator = decorators[i2])
       result = (kind ? decorator(target, key, result) : decorator(result)) || result;
-  if (kind && result) __defProp(target, key, result);
+  if (kind && result) __defProp$1(target, key, result);
   return result;
 };
 let DanfossAllyRoomCard = class extends i {
@@ -3331,40 +3338,40 @@ DanfossAllyRoomCard.styles = i$3`
       font: inherit;
     }
   `;
-__decorateClass([
+__decorateClass$1([
   n2({ attribute: false })
 ], DanfossAllyRoomCard.prototype, "hass", 2);
-__decorateClass([
+__decorateClass$1([
   r()
 ], DanfossAllyRoomCard.prototype, "_config", 2);
-__decorateClass([
+__decorateClass$1([
   r()
 ], DanfossAllyRoomCard.prototype, "_rooms", 2);
-__decorateClass([
+__decorateClass$1([
   r()
 ], DanfossAllyRoomCard.prototype, "_info", 2);
-__decorateClass([
+__decorateClass$1([
   r()
 ], DanfossAllyRoomCard.prototype, "_schedule", 2);
-__decorateClass([
+__decorateClass$1([
   r()
 ], DanfossAllyRoomCard.prototype, "_loaded", 2);
-__decorateClass([
+__decorateClass$1([
   r()
 ], DanfossAllyRoomCard.prototype, "_refreshing", 2);
-__decorateClass([
+__decorateClass$1([
   r()
 ], DanfossAllyRoomCard.prototype, "_busy", 2);
-__decorateClass([
+__decorateClass$1([
   r()
 ], DanfossAllyRoomCard.prototype, "_error", 2);
-__decorateClass([
+__decorateClass$1([
   r()
 ], DanfossAllyRoomCard.prototype, "_editing", 2);
-__decorateClass([
+__decorateClass$1([
   r()
 ], DanfossAllyRoomCard.prototype, "_job", 2);
-DanfossAllyRoomCard = __decorateClass([
+DanfossAllyRoomCard = __decorateClass$1([
   t$1("danfoss-ally-room-card")
 ], DanfossAllyRoomCard);
 const ICON_MINUS = w`<svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14z" /></svg>`;
@@ -3380,6 +3387,372 @@ const ICON_BATTERY = w`<svg viewBox="0 0 24 24"><path d="M16.67 4H15V2H9v2H7.33C
 const ICON_VALVE = w`<svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7.76A4 4 0 1 0 15 16a4 4 0 0 0-2-3.24V5a1 1 0 0 1 2 0h2a3 3 0 0 0-3-3z" /></svg>`;
 const ICON_WINDOW = w`<svg viewBox="0 0 24 24"><path d="M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1m7 2H5v6h6zm2 0v6h6V5zm-2 8H5v6h6zm2 0v6h6v-6z" /></svg>`;
 const ICON_LOCK = w`<svg viewBox="0 0 24 24"><path d="M12 17a2 2 0 0 0 2-2 2 2 0 0 0-2-2 2 2 0 0 0-2 2 2 2 0 0 0 2 2m6-9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h1V6a5 5 0 0 1 10 0v2zM12 3a3 3 0 0 0-3 3v2h6V6a3 3 0 0 0-3-3" /></svg>`;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __decorateClass = (decorators, target, key, kind) => {
+  var result = kind > 1 ? void 0 : kind ? __getOwnPropDesc(target, key) : target;
+  for (var i2 = decorators.length - 1, decorator; i2 >= 0; i2--)
+    if (decorator = decorators[i2])
+      result = (kind ? decorator(target, key, result) : decorator(result)) || result;
+  if (kind && result) __defProp(target, key, result);
+  return result;
+};
+let DanfossAllyPanel = class extends i {
+  constructor() {
+    super(...arguments);
+    this.narrow = false;
+    this._overview = null;
+    this._loaded = false;
+    this._refreshing = false;
+  }
+  updated(changed) {
+    if (changed.has("hass") && this.hass && !this._loaded) {
+      this._loaded = true;
+      void this._load();
+    }
+  }
+  async _load() {
+    if (this.hass) {
+      this._overview = await fetchOverview(this.hass);
+    }
+  }
+  async _refresh() {
+    if (!this.hass || this._refreshing) {
+      return;
+    }
+    this._refreshing = true;
+    try {
+      const overview = await fetchOverview(this.hass);
+      if (overview) {
+        this._overview = overview;
+      }
+    } finally {
+      this._refreshing = false;
+    }
+  }
+  render() {
+    const overview = this._overview;
+    return b`
+      <div class="page">
+        <header class="bar">
+          <h1>${t(this.hass, "panel_title")}</h1>
+          <button class="refresh" @click=${this._refresh} ?disabled=${this._refreshing}>
+            ${t(this.hass, "refresh")}
+          </button>
+        </header>
+        ${overview ? this._renderBody(overview) : this._renderUnavailable()}
+        <footer class="foot">${t(this.hass, "version", { version: CARD_VERSION })}</footer>
+      </div>
+    `;
+  }
+  _renderUnavailable() {
+    return b`<div class="unavailable">${t(this.hass, "overview_unavailable")}</div>`;
+  }
+  _renderBody(overview) {
+    const tot = overview.totals;
+    return b`
+      <section class="totals">
+        ${this._stat(tot.rooms, t(this.hass, "fleet_rooms"), "")}
+        ${this._stat(tot.heads, t(this.hass, "fleet_heads"), "")}
+        ${this._stat(tot.gateways, t(this.hass, "fleet_gateways"), "")}
+        ${this._stat(tot.offline, t(this.hass, "fleet_offline"), tot.offline ? "warn" : "")}
+        ${this._stat(tot.low_battery, t(this.hass, "fleet_low_battery"), tot.low_battery ? "warn" : "")}
+        ${this._stat(tot.heating, t(this.hass, "fleet_heating"), tot.heating ? "hot" : "")}
+        ${this._stat(tot.faults, t(this.hass, "fleet_faults"), tot.faults ? "bad" : "")}
+        ${this._stat(tot.relays_on, t(this.hass, "fleet_relays_on"), "")}
+      </section>
+      ${overview.homes.map((home) => this._renderHome(home))}
+    `;
+  }
+  _stat(value, label, kind) {
+    return b`
+      <div class="stat ${kind}">
+        <span class="stat-value">${value}</span>
+        <span class="stat-label">${label}</span>
+      </div>
+    `;
+  }
+  _renderHome(home) {
+    const onlineGw = home.gateways.filter((g2) => g2.online).length;
+    return b`
+      <section class="home">
+        <div class="home-head">
+          <h2>${home.name}</h2>
+          <span class="tags">
+            ${home.holiday_active ? b`<span class="tag holiday">${t(this.hass, "holiday_active")}</span>` : A}
+            ${home.gateways.length > 0 ? b`<span class="tag ${onlineGw === home.gateways.length ? "" : "warn"}">
+                  ${t(this.hass, "gateway_online", {
+      n: `${onlineGw}/${home.gateways.length}`
+    })}
+                </span>` : A}
+          </span>
+        </div>
+        <div class="rooms">${home.rooms.map((room) => this._renderRoom(room))}</div>
+        ${home.relays.length > 0 ? b`<div class="relays">${home.relays.map((relay) => this._renderRelay(relay))}</div>` : A}
+      </section>
+    `;
+  }
+  _renderRoom(room) {
+    const healthy = room.offline === 0 && room.low_battery === 0 && room.faults === 0 && !room.window_open;
+    return b`
+      <div class="room ${healthy ? "ok" : "attn"}">
+        <div class="room-top">
+          <span class="room-name" title=${room.name}>${room.name}</span>
+          <span class="heads-count">${room.head_count}×</span>
+        </div>
+        <div class="flags">
+          ${room.heating ? b`<span class="flag hot">${t(this.hass, "room_calling")}</span>` : A}
+          ${room.window_open ? b`<span class="flag warn">${t(this.hass, "room_window")}</span>` : A}
+          ${room.offline ? b`<span class="flag warn">${t(this.hass, "room_offline_n", { n: room.offline })}</span>` : A}
+          ${room.low_battery ? b`<span class="flag warn">${t(this.hass, "room_low_battery_n", { n: room.low_battery })}</span>` : A}
+          ${room.faults ? b`<span class="flag bad">${t(this.hass, "room_faults_n", { n: room.faults })}</span>` : A}
+          ${healthy ? b`<span class="flag ok">${t(this.hass, "room_ok")}</span>` : A}
+        </div>
+      </div>
+    `;
+  }
+  _renderRelay(relay) {
+    const on = relay.on === true;
+    return b`
+      <div class="relay">
+        <span class="relay-dot ${on ? "on" : "off"}"></span>
+        <span class="relay-name">${relay.name}</span>
+        <span class="relay-state">${t(this.hass, on ? "relay_on" : "relay_off")}</span>
+        <span class="relay-rooms">${t(this.hass, "rooms_calling", { n: relay.linked_rooms })}</span>
+      </div>
+    `;
+  }
+};
+DanfossAllyPanel.styles = i$3`
+    :host {
+      display: block;
+      background: var(--primary-background-color, #f2f3f5);
+      min-height: 100%;
+    }
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    .bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 500;
+      color: var(--primary-text-color);
+      margin: 8px 0 16px;
+    }
+    .refresh {
+      cursor: pointer;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-radius: 16px;
+      padding: 6px 14px;
+      background: var(--card-background-color, #fff);
+      color: var(--primary-text-color);
+      font: inherit;
+      font-size: 0.85rem;
+    }
+    .refresh:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .unavailable {
+      color: var(--secondary-text-color);
+      padding: 24px 0;
+    }
+    .totals {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .stat {
+      background: var(--card-background-color, #fff);
+      border-radius: 12px;
+      padding: 12px 14px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .stat-value {
+      font-size: 1.6rem;
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+      color: var(--primary-text-color);
+    }
+    .stat-label {
+      font-size: 0.78rem;
+      color: var(--secondary-text-color);
+    }
+    .stat.warn .stat-value {
+      color: var(--warning-color, #ffa600);
+    }
+    .stat.bad .stat-value {
+      color: var(--error-color, #c62828);
+    }
+    .stat.hot .stat-value {
+      color: var(--danfoss-comfort-color, #ff8a33);
+    }
+    .home {
+      background: var(--card-background-color, #fff);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+    .home-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    h2 {
+      font-size: 1.1rem;
+      font-weight: 500;
+      color: var(--primary-text-color);
+      margin: 0 0 10px;
+    }
+    .tags {
+      display: inline-flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .tag {
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: var(--secondary-background-color, #eee);
+      color: var(--primary-text-color);
+    }
+    .tag.holiday {
+      background: var(--info-color, #39739d);
+      color: var(--text-primary-color, #fff);
+    }
+    .tag.warn {
+      background: var(--warning-color, #ffa600);
+      color: var(--text-primary-color, #fff);
+    }
+    .rooms {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 8px;
+    }
+    .room {
+      border: 1px solid var(--divider-color, #e8e8e8);
+      border-radius: 10px;
+      padding: 8px 10px;
+    }
+    .room.attn {
+      border-color: var(--warning-color, #ffa600);
+    }
+    .room-top {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .room-name {
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: var(--primary-text-color);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .heads-count {
+      font-size: 0.75rem;
+      color: var(--secondary-text-color);
+      font-variant-numeric: tabular-nums;
+    }
+    .flags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 6px;
+    }
+    .flag {
+      font-size: 0.68rem;
+      padding: 1px 7px;
+      border-radius: 9px;
+      background: var(--secondary-background-color, #eee);
+      color: var(--secondary-text-color);
+    }
+    .flag.ok {
+      color: var(--success-color, #2e7d32);
+    }
+    .flag.warn {
+      background: var(--warning-color, #ffa600);
+      color: var(--text-primary-color, #fff);
+    }
+    .flag.bad {
+      background: var(--error-color, #c62828);
+      color: var(--text-primary-color, #fff);
+    }
+    .flag.hot {
+      background: var(--danfoss-comfort-color, #ff8a33);
+      color: var(--text-primary-color, #fff);
+    }
+    .relays {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--divider-color, #eee);
+    }
+    .relay {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+      color: var(--primary-text-color);
+    }
+    .relay-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .relay-dot.on {
+      background: var(--danfoss-comfort-color, #ff8a33);
+    }
+    .relay-dot.off {
+      background: var(--disabled-text-color, #9e9e9e);
+    }
+    .relay-rooms {
+      color: var(--secondary-text-color);
+      font-size: 0.78rem;
+    }
+    .foot {
+      color: var(--secondary-text-color);
+      font-size: 0.75rem;
+      text-align: right;
+      margin-top: 12px;
+    }
+  `;
+__decorateClass([
+  n2({ attribute: false })
+], DanfossAllyPanel.prototype, "hass", 2);
+__decorateClass([
+  n2({ type: Boolean })
+], DanfossAllyPanel.prototype, "narrow", 2);
+__decorateClass([
+  r()
+], DanfossAllyPanel.prototype, "_overview", 2);
+__decorateClass([
+  r()
+], DanfossAllyPanel.prototype, "_loaded", 2);
+__decorateClass([
+  r()
+], DanfossAllyPanel.prototype, "_refreshing", 2);
+DanfossAllyPanel = __decorateClass([
+  t$1("danfoss-ally-panel")
+], DanfossAllyPanel);
 const DOC_URL = "https://github.com/aghulas/ha-danfoss-ally";
 const CARDS = [
   {
