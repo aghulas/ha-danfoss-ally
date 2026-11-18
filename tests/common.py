@@ -45,6 +45,20 @@ def head(dev_id="dev-1", name="Salon", **kw) -> DanfossDevice:
     return DanfossDevice(**base)
 
 
+def relay(dev_id="relay-1", name="Boiler relay", on=True, **kw) -> DanfossDevice:
+    base = dict(
+        id=dev_id,
+        name=name,
+        category="relay",
+        product_id="ypieax1h",
+        mesh_id="gw-1",
+        online=True,
+        relay_on=on,
+    )
+    base.update(kw)
+    return DanfossDevice(**base)
+
+
 class FakeCloudClient:
     """Fake CloudClient: returns synthetic heads and a room topology, without a network.
 
@@ -63,6 +77,7 @@ class FakeCloudClient:
         topology_exc=None,
         holidays=None,
         holidays_exc=None,
+        relay_rooms=None,
         **kwargs,
     ) -> None:
         self._devices = [head()] if devices is None else devices
@@ -73,6 +88,7 @@ class FakeCloudClient:
         self._topology_exc = topology_exc
         self._holidays = holidays
         self._holidays_exc = holidays_exc
+        self._relay_rooms = relay_rooms
         self.closed = False
         self.writes: list = []
 
@@ -103,6 +119,9 @@ class FakeCloudClient:
         if self._holidays_exc is not None:
             raise self._holidays_exc
         return list(self._holidays) if self._holidays is not None else []
+
+    async def async_relay_rooms(self, dev_id):
+        return list((self._relay_rooms or {}).get(dev_id, []))
 
     # Schedule editing (schedule-editing layer): stub + write log.
     async def async_get_schedule(self, target):

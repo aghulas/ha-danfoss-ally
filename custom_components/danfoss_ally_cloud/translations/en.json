@@ -48,6 +48,9 @@
       },
       "holiday_setpoint": {
         "name": "Holiday setpoint"
+      },
+      "relay_rooms": {
+        "name": "Rooms calling for heat"
       }
     },
     "binary_sensor": {
@@ -59,6 +62,9 @@
       },
       "holiday": {
         "name": "Holiday active"
+      },
+      "boiler_relay": {
+        "name": "Boiler relay"
       }
     },
     "switch": {

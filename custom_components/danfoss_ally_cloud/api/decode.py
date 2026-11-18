@@ -165,12 +165,17 @@ class DanfossDevice:
     schedule_active: bool | None = None  # DP 172 bit 0 (R6); None if DP absent
     preheat: bool | None = None  # DP 172 bit 1 (R6); None if DP absent
     mounting: bool | None = None  # DP 149 (mounting mode: not regulating)
+    relay_on: bool | None = None  # DP 1 on a boiler relay (category "kg"); None otherwise
     faults: list[dict[str, Any]] = field(default_factory=list)
     dps: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_head(self) -> bool:
         return self.category == "head"
+
+    @property
+    def is_relay(self) -> bool:
+        return self.category == "relay"
 
     @property
     def inconsistent(self) -> bool:
@@ -251,6 +256,8 @@ def decode_device(device: dict[str, Any]) -> DanfossDevice:
     d.min_setpoint = _num(dps.get("27"), 10)
     d.schedule_active, d.preheat = decode_operation(dps.get("172"))
     d.mounting = _bool(dps.get("149"))
+    if d.category == "relay":  # DP 1 on a relay = on/off (on a head it is preheat)
+        d.relay_on = _bool(dps.get("1"))
     ws = dps.get("25")
     if ws is not None and ws != "":
         d.window_open = _bool(ws)
