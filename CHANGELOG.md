@@ -32,6 +32,18 @@ bundle is rebuilt deterministically.
 - Still out of contract (uncaptured, §7): holiday set/exit, direct relay on/off (DP 1); room head
   attach/detach remains deferred (0.5.1).
 
+### Fixed
+
+- **`create_room` on multi-home accounts** — the home is now inferred from the devices (all heads
+  must share one home); clean errors `ambiguous_home` / `unknown_home` otherwise. Previously the
+  service refused on any account with more than one home.
+- **Room changes are visible immediately** — every structural write (create / rename / delete /
+  attach / detach, and relay link) now invalidates the room-topology cache before refreshing, so
+  the new or changed room shows up in `get_rooms` and is targetable at once instead of only at the
+  next hourly poll.
+- Clearer `config_entry_id` handling: it is only required when several *config entries* exist (not
+  several homes); distinct message when no account is configured.
+
 ## 0.5.0 — Holiday, boiler relay and room management (axis B)
 
 Brings holiday, boiler relay and room management into the contract

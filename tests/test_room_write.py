@@ -85,12 +85,16 @@ class _FakeCoord:
         self.rooms = {"g1": RoomState(group_id="g1", name="Salle", pid="03wvrwpv", head_count=2)}
         self._members = {m: "g1" for m in members}
         self.refreshed = 0
+        self.invalidated = 0
 
     def group_of(self, dev_id):
         return self._members.get(dev_id)
 
     def home_of(self, group_id):
         return "home-1" if group_id == "g1" else None
+
+    def invalidate_topology(self):
+        self.invalidated += 1
 
     async def async_request_refresh(self):
         self.refreshed += 1
@@ -109,7 +113,8 @@ async def test_create_room_adds_then_sets_devices():
         ("add", "home-1", "Classroom"),
         ("set", "new-room", ["a", "b"]),
     ]
-    assert coord.refreshed == 1
+    # the new room must be made visible immediately: topology invalidated, then a refresh
+    assert coord.invalidated == 1 and coord.refreshed == 1
 
 
 async def test_create_room_rejects_empty_and_unknown():
@@ -157,6 +162,19 @@ async def test_create_room_unknown_home():
         await ops.create_room(None, _store(coord), "X", ["a"])
     assert e.value.code == "unknown_home"
     assert not any(c[0] == "add" for c in client.calls)
+
+
+async def test_structural_writes_invalidate_topology_then_refresh():
+    # Every structural write must force the topology to be re-read so the change is visible now.
+    for action in (
+        lambda c: ops.rename_room(None, _store(c), _ROOM, "N"),
+        lambda c: ops.delete_room(None, _store(c), _ROOM),
+        lambda c: ops.attach_heads(None, _store(c), _ROOM, ["a"]),
+        lambda c: ops.detach_heads(None, _store(c), _ROOM, ["a"]),
+    ):
+        coord = _FakeCoord(_FakeClient(), members=("a", "b"))
+        await action(coord)
+        assert coord.invalidated == 1 and coord.refreshed == 1
 
 
 async def test_rename_and_delete_resolve_room_id():

@@ -302,6 +302,17 @@ async def _run_cloud_write(func, *args) -> Any:
         raise OperationError("cloud_refused", str(err)) from err
 
 
+async def _refresh_after_structural_write(coordinator) -> None:
+    """Make a structural change visible now: drop the topology cache, then refresh.
+
+    ``async_request_refresh`` alone re-reads device state but keeps the hourly-cached room topology,
+    so a new/changed/removed room would stay invisible to ``get_rooms`` and the resolver until the
+    next poll. Invalidating the topology first forces it to be re-read on this refresh.
+    """
+    coordinator.invalidate_topology()
+    await coordinator.async_request_refresh()
+
+
 def _room_target(target: dict) -> str:
     if target.get("type") != "room":
         raise OperationError("unknown_room", "this action targets a room")
@@ -378,7 +389,7 @@ async def create_room(hass: HomeAssistant, store: dict, name: str, devices: list
     home = await _resolve_devices_home(coordinator, list(devices))
     room_id = await _run_cloud_write(coordinator.client.async_room_add, home, name)
     await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, list(devices))
-    await coordinator.async_request_refresh()
+    await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id)}
 
 
@@ -400,7 +411,7 @@ async def rename_room(hass: HomeAssistant, store: dict, target: dict, name: str)
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     room_id = await _resolve_room_id(coordinator, _room_target(target))
     await _run_cloud_write(coordinator.client.async_room_update, room_id, name)
-    await coordinator.async_request_refresh()
+    await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id)}
 
 
@@ -408,7 +419,7 @@ async def delete_room(hass: HomeAssistant, store: dict, target: dict) -> dict:
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     room_id = await _resolve_room_id(coordinator, _room_target(target))
     await _run_cloud_write(coordinator.client.async_room_dismiss, room_id)
-    await coordinator.async_request_refresh()
+    await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id)}
 
 
@@ -421,7 +432,7 @@ async def attach_heads(hass: HomeAssistant, store: dict, target: dict, devices: 
     members = _current_members(coordinator, group_id)
     final = list(dict.fromkeys(members + list(devices)))
     await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, final)
-    await coordinator.async_request_refresh()
+    await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id), "heads": final, "previous_heads": members}
 
 
@@ -438,7 +449,7 @@ async def detach_heads(hass: HomeAssistant, store: dict, target: dict, devices: 
     if not final:
         raise OperationError("no_members_left", "detaching every head: use delete_room instead")
     await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, final)
-    await coordinator.async_request_refresh()
+    await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id), "heads": final, "previous_heads": members}
 
 
@@ -472,7 +483,7 @@ async def set_relay_room(
     await _run_cloud_write(
         coordinator.client.async_relay_bind, relay, match["room_id"], bool(linked)
     )
-    await coordinator.async_request_refresh()
+    await _refresh_after_structural_write(coordinator)
     return {"relay": relay, "room_id": str(match["room_id"]), "linked": bool(linked)}
 
 

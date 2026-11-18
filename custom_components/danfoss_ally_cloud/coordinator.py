@@ -79,6 +79,16 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         room = self._rooms_topology.get(group_id)
         return room.home_gid if room else None
 
+    def invalidate_topology(self) -> None:
+        """Drop the topology cache so the next refresh re-reads rooms (and holidays, relay links).
+
+        Called after a structural write (create / rename / delete / attach / detach a room, or a
+        relay link): the room topology is otherwise cached for an hour, so without this the new or
+        changed room would stay invisible to ``rooms`` / ``get_rooms`` / the room-id resolver until
+        the next hourly poll.
+        """
+        self._topology_ts = 0.0
+
     async def _ensure_topology(self, data: dict[str, DanfossDevice] | None = None) -> None:
         """Refresh the room topology if the cache expired. Best-effort: never blocks.
 

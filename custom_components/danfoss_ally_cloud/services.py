@@ -116,8 +116,12 @@ def _store(hass: HomeAssistant, call: ServiceCall) -> dict:
         if store is None:
             raise ServiceValidationError(f"unknown entry: {entry_id}")
         return store
-    if len(entries) != 1:
-        raise ServiceValidationError("several accounts configured: specify config_entry_id")
+    # One account = one config entry (several homes live under it). config_entry_id is only needed
+    # to disambiguate several CONFIG ENTRIES, not several homes.
+    if not entries:
+        raise ServiceValidationError("no danfoss_ally_cloud account configured")
+    if len(entries) > 1:
+        raise ServiceValidationError("several config entries configured: specify config_entry_id")
     return next(iter(entries.values()))
 
 
