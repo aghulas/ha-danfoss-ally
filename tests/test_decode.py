@@ -66,6 +66,41 @@ def test_decode_setpoints_per_mode():
     }
 
 
+def test_decode_active_setpoint_from_occupied_setpoint():
+    # Real-hardware R-1 (2026-11-18): on a reduced slot the head still reports the comfort setpoint
+    # on DP 16 (temp_set, 210 -> 21.0) but the ACTIVE one on DP 171 (OccupiedSetpoint, centi-°C).
+    # The active setpoint wins.
+    dps = {"2": "leaving_home", "16": 210, "171": 1400}
+    d = decode.decode_device(_head(dps))
+    assert d.setpoint == 14.0  # DP 171 (1400 centi-°C), not the comfort 21.0 from DP 16
+    assert d.mode == "leaving_home"
+
+
+def test_decode_active_setpoint_from_mode_when_no_occupied():
+    # DP 171 absent but mode + settings present: the active setpoint is the current mode's setting
+    # (setback via DP 119), not the comfort DP 16 (that would be the R-1 bug).
+    dps = {"2": "leaving_home", "16": 210, "118": 210, "119": 140}
+    d = decode.decode_device(_head(dps))
+    assert d.setpoint == 14.0
+
+
+def test_decode_active_setpoint_falls_back_to_temp_set():
+    # No DP 171 and no per-mode setting for the current mode: DP 16 (temp_set) is the last resort.
+    d = decode.decode_device(_head({"16": 195}))
+    assert d.setpoint == 19.5
+
+
+def test_decode_heating_follows_work_state():
+    # work_state (DP 3) is authoritative over the valve: NoHeat with a cracked valve = idle (R-1).
+    assert decode.decode_device(_head({"3": "NoHeat", "170": 1})).heating is False
+    assert decode.decode_device(_head({"3": "Heat", "170": 0})).heating is True
+    # DP 3 absent: fall back to the valve opening.
+    assert decode.decode_device(_head({"170": 40})).heating is True
+    assert decode.decode_device(_head({"170": 0})).heating is False
+    # Neither DP 3 nor a valve reading: unknown.
+    assert decode.decode_device(_head({})).heating is None
+
+
 def test_decode_offline():
     d = decode.decode_device(_head({"24": 200}, online=False))
     assert d.online is False

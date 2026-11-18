@@ -54,6 +54,10 @@ def aggregate_room(room: Room, members: list[DanfossDevice]) -> RoomState:
     temps = [m.temperature for m in online if m.temperature is not None]
     temperature = round(sum(temps) / len(temps), 1) if temps else None
     ref = online[0] if online else (members[0] if members else None)
+    # Heating = the heads' own work_state (DP 3), not a valve guess: a room is heating if any online
+    # head calls for heat. None when no online head reports a known state.
+    heats = [m.heating for m in online]
+    heating = (any(heats) if any(h is not None for h in heats) else None) if online else None
     return RoomState(
         group_id=room.group_id,
         name=room.name,
@@ -64,7 +68,7 @@ def aggregate_room(room: Room, members: list[DanfossDevice]) -> RoomState:
         setpoint=ref.setpoint if ref else None,
         setpoints=dict(ref.setpoints) if ref else {},
         mode=ref.mode if ref else None,
-        heating=(any((m.valve_opening or 0) > 0 for m in online) if online else None),
+        heating=heating,
         min_setpoint=ref.min_setpoint if ref else None,
         max_setpoint=ref.max_setpoint if ref else None,
     )
