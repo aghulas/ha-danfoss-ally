@@ -273,6 +273,56 @@
           "description": "If several accounts are configured."
         }
       }
+    },
+    "create_room": {
+      "name": "Create room",
+      "description": "Create a room and attach the given heads. Admin; real-hardware validation required.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "The new room's name."
+        },
+        "devices": {
+          "name": "Heads",
+          "description": "List of head devIds to attach (verified products)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
+    "rename_room": {
+      "name": "Rename room",
+      "description": "Rename a room. Admin.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "Target: type 'room' and its id (group_id)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "The new name."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
+    "delete_room": {
+      "name": "Delete room",
+      "description": "Delete a room; its heads become ungrouped. Admin; real-hardware validation required.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "Target: type 'room' and its id (group_id)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
     }
   },
   "exceptions": {
@@ -329,6 +379,12 @@
     },
     "unknown_room": {
       "message": "Unknown room."
+    },
+    "unknown_head": {
+      "message": "Head not found."
+    },
+    "empty_devices": {
+      "message": "Give at least one head."
     }
   }
 }

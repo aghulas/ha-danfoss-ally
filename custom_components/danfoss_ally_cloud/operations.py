@@ -109,6 +109,108 @@ async def get_room(store: dict, target: dict) -> dict:
     return {"room": _room_entry(coordinator, group_id), "schedule": schedule}
 
 
+# --- Room management writes (contract §4.7, §5.2). Admin-gated by the callers; structural writes
+# on the live account -> gated on real-hardware validation. ------------------------------------
+
+
+async def _run_cloud_write(func, *args) -> Any:
+    try:
+        return await func(*args)
+    except CloudError as err:
+        raise OperationError("cloud_refused", str(err)) from err
+
+
+def _room_target(target: dict) -> str:
+    if target.get("type") != "room":
+        raise OperationError("unknown_room", "this action targets a room")
+    return str(target.get("id"))
+
+
+def _validate_heads(coordinator, devices: list[str], *, require_verified: bool) -> None:
+    if not devices:
+        raise OperationError("empty_devices", "give at least one head")
+    for dev_id in devices:
+        dev = coordinator.data.get(dev_id)
+        if dev is None or not dev.is_head:
+            raise OperationError("unknown_head", f"head not found: {dev_id}")
+        if require_verified and not write_allowed(dev):
+            raise OperationError("unverified_product", f"write not verified for {dev_id}")
+
+
+def _room_name_candidates(group_name: str) -> list[str]:
+    """Room (type-4) name candidates for a schedule-group (type-5) name.
+
+    Tuya auto-labels the implicit program-group ``"<room> Group"`` when a room is created through
+    the API (observed on real hardware 2026-11-18): the schedule-group the integration tracks can
+    carry that suffix while the room keeps the base name. We therefore match the room on the group
+    name as read, and, failing that, on the group name with a trailing " Group" removed. Rooms
+    created in the app keep identical names, so the first candidate already matches there.
+    """
+    name = (group_name or "").strip()
+    candidates = [name]
+    low = name.lower()
+    if low.endswith(" group"):
+        stripped = name[: -len(" group")].strip()
+        if stripped and stripped not in candidates:
+            candidates.append(stripped)
+    return candidates
+
+
+async def _resolve_room_id(coordinator, group_id: str) -> str:
+    """Resolve the Tuya room id (type 4) for a schedule-group (type 5) the integration shows.
+
+    By name (the only link the API exposes, contract §4.7), tolerant of the ``"<room> Group"``
+    auto-label (``_room_name_candidates``). One room-map read.
+    """
+    rs = coordinator.rooms.get(group_id)
+    home = coordinator.home_of(group_id)
+    if rs is None or home is None:
+        raise OperationError("unknown_room", f"room not found: {group_id}")
+    rooms = await _run_cloud_write(coordinator.client.async_list_rooms, home)
+    by_name = {(r.get("name") or "").strip().lower(): r["room_id"] for r in rooms}
+    for candidate in _room_name_candidates(rs.name or ""):
+        room_id = by_name.get(candidate.lower())
+        if room_id is not None:
+            return room_id
+    raise OperationError("unknown_room", f"no Tuya room matching {rs.name!r}")
+
+
+async def create_room(hass: HomeAssistant, store: dict, name: str, devices: list[str]) -> dict:
+    """Create a room and attach the given heads (contract §4.7). Verified products only."""
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    _validate_heads(coordinator, devices, require_verified=True)
+    homes = await _run_cloud_write(coordinator.client.async_get_homes)
+    if len(homes) != 1:
+        raise OperationError("unknown_room", "several homes configured: create the room in the app")
+    room_id = await _run_cloud_write(coordinator.client.async_room_add, homes[0]["gid"], name)
+    await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, list(devices))
+    await coordinator.async_request_refresh()
+    return {"room_id": str(room_id)}
+
+
+async def rename_room(hass: HomeAssistant, store: dict, target: dict, name: str) -> dict:
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    room_id = await _resolve_room_id(coordinator, _room_target(target))
+    await _run_cloud_write(coordinator.client.async_room_update, room_id, name)
+    await coordinator.async_request_refresh()
+    return {"room_id": str(room_id)}
+
+
+async def delete_room(hass: HomeAssistant, store: dict, target: dict) -> dict:
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    room_id = await _resolve_room_id(coordinator, _room_target(target))
+    await _run_cloud_write(coordinator.client.async_room_dismiss, room_id)
+    await coordinator.async_request_refresh()
+    return {"room_id": str(room_id)}
+
+
+# NOTE: attach_heads / detach_heads (add/remove a head in an existing room) are DEFERRED to 0.5.1.
+# The cloud replace-list on a group-backed room (type-4 room vs implicit type-5 schedule-group,
+# §4.7) cannot be faithfully validated with the current tooling and needs the integration running
+# in situ on the Pi. create_room / rename_room / delete_room above are validated on real hardware
+# (2026-11-18). `_resolve_room_id` and the " Group"-label tolerance stay (used by rename/delete).
+
+
 async def local_survey(hass: HomeAssistant, store: dict) -> dict:
     """Read-only multi-gateway survey through the local Zigbee tunnel (contract §4.4, C4).
 

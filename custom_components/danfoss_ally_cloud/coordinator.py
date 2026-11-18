@@ -74,6 +74,11 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         """A head's room group_id, or None if the head is not grouped."""
         return self._group_of.get(head_id)
 
+    def home_of(self, group_id: str) -> str | None:
+        """The home gid a room (group) belongs to, from the cached topology."""
+        room = self._rooms_topology.get(group_id)
+        return room.home_gid if room else None
+
     async def _ensure_topology(self, data: dict[str, DanfossDevice] | None = None) -> None:
         """Refresh the room topology if the cache expired. Best-effort: never blocks.
 

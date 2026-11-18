@@ -273,6 +273,56 @@
      "description": "Si plusieurs comptes sont configurés."
     }
    }
+  },
+  "create_room": {
+   "name": "Créer une pièce",
+   "description": "Crée une pièce et y rattache les têtes. Administrateur ; validation en réel requise.",
+   "fields": {
+    "name": {
+     "name": "Nom",
+     "description": "Nom de la nouvelle pièce."
+    },
+    "devices": {
+     "name": "Têtes",
+     "description": "Liste des devId de têtes à rattacher (produits vérifiés)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
+  },
+  "rename_room": {
+   "name": "Renommer la pièce",
+   "description": "Renomme une pièce. Administrateur.",
+   "fields": {
+    "target": {
+     "name": "Cible",
+     "description": "Cible : type « room » et son identifiant (group_id)."
+    },
+    "name": {
+     "name": "Nom",
+     "description": "Nouveau nom."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
+  },
+  "delete_room": {
+   "name": "Supprimer la pièce",
+   "description": "Supprime une pièce ; ses têtes repassent non groupées. Administrateur ; validation en réel requise.",
+   "fields": {
+    "target": {
+     "name": "Cible",
+     "description": "Cible : type « room » et son identifiant (group_id)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
   }
  },
  "exceptions": {
@@ -329,6 +379,12 @@
   },
   "unknown_room": {
    "message": "Pièce inconnue."
+  },
+  "unknown_head": {
+   "message": "Tête introuvable."
+  },
+  "empty_devices": {
+   "message": "Indiquez au moins une tête."
   }
  }
 }

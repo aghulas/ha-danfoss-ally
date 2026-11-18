@@ -123,6 +123,29 @@ class FakeCloudClient:
     async def async_relay_rooms(self, dev_id):
         return list((self._relay_rooms or {}).get(dev_id, []))
 
+    # Room management writes (B5): record calls in ``writes``.
+    async def async_list_rooms(self, home_gid):
+        # One type-4 room per schedule-group, same name (so name resolution matches).
+        return [{"room_id": "room-5", "name": g.get("name")} for g in self._groups] or [
+            {"room_id": "room-5", "name": "Salle 1"}
+        ]
+
+    async def async_room_id(self, home_gid, name):
+        return "room-5"
+
+    async def async_room_add(self, gid, name):
+        self.writes.append(("room_add", gid, name))
+        return "new-7"
+
+    async def async_room_update(self, room_id, name):
+        self.writes.append(("room_update", room_id, name))
+
+    async def async_room_dismiss(self, room_id):
+        self.writes.append(("room_dismiss", room_id))
+
+    async def async_room_set_devices(self, room_id, dev_ids):
+        self.writes.append(("room_set", room_id, list(dev_ids)))
+
     # Schedule editing (schedule-editing layer): stub + write log.
     async def async_get_schedule(self, target):
         return {
