@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.5.0 — Holiday, boiler relay and room management (axis B)
+
+Brings holiday, boiler relay and room management into the contract
+(`docs/interface-contract.md` §4.5–§4.7). Cloud-first and read-first. The write features are
+**validated on real hardware (2026-11-18)**; the one write that could not be faithfully validated
+with the current tooling (room head attach/detach) is **deferred to 0.5.1**. The `api/` layer stays
+Home-Assistant-free and backward-compatible with `pydanfoss-cloud`.
+
+### Added
+
+- **Holiday (read only)** — per-home `binary_sensor` "holiday active" and `sensor` "holiday
+  setpoint" (the raw holiday record is exposed as an attribute); read services `get_holiday` and
+  WebSocket `holiday`. The app's holiday *set/exit* routes are not in the APK (runtime
+  mini-program), so there is no holiday write (contract §7).
+- **Boiler relay (read)** — per-relay `binary_sensor` "boiler relay" (DP 1) and `sensor` "rooms
+  calling for heat" (linked rooms); read services `get_relays` and WebSocket `relays`.
+- **Room management (write): create / rename / delete** — services and WebSocket commands
+  `create_room`, `rename_room`, `delete_room` (+ read `get_room`). Admin-only, value-validated.
+  **Validated on real hardware 2026-11-18.** Resolution tolerates Tuya's `"<name> Group"` auto-label
+  on the implicit schedule-group (contract §4.7).
+- **Room ↔ boiler-relay link (write)** — service and WebSocket `set_relay_room` links/unlinks a
+  room to the relay (its heat demand drives the relay). Admin-only. **Validated on real hardware
+  2026-11-18.**
+- New `api/client.py` read methods (holiday, relay, room map, room-id resolver) and room/relay
+  write methods, mirroring the calls validated by the MCP connector.
+
+### Deferred to 0.5.1
+
+- **Room head attach/detach** (add/remove a head in an existing room). The cloud replace-list on a
+  group-backed room (type-4 room vs implicit type-5 schedule-group, §4.7) can't be faithfully
+  validated with the current tooling — it needs the integration running in situ on the running
+  0.5.0 install. The `async_room_set_devices` primitive ships (create_room uses it); only the
+  standalone attach/detach operations/services/WS are withheld.
+
+### Notes
+
+- Still out of contract (uncaptured, §7): holiday set/exit, direct relay on/off (DP 1).
+
 ## 0.4.0 — Local tunnel wired (axis C)
 
 Wires the local Zigbee tunnel primitives (ported in the `pydanfoss_cloud.local.tunnel` layer) to
