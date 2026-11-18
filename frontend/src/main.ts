@@ -7,22 +7,44 @@
  * manipulation manuelle (critère de fin du lot 3).
  */
 import "./schedule-card";
+import "./room-card";
 import { CARD_VERSION } from "./version";
 
-const CARD_TYPE = "danfoss-ally-schedule-card";
+const DOC_URL = "https://github.com/aghulas/ha-danfoss-ally";
 
-window.customCards = window.customCards ?? [];
-if (!window.customCards.some((card) => card.type === CARD_TYPE)) {
-  window.customCards.push({
-    type: CARD_TYPE,
-    // Textes du sélecteur : le frontend HA n'est pas encore localisé pour cette
-    // carte au lot 3 ; libellés bilingues courts en attendant le lot 4.
+interface CustomCardEntry {
+  type: string;
+  name: string;
+  description: string;
+  preview?: boolean;
+  documentationURL?: string;
+}
+
+const CARDS: CustomCardEntry[] = [
+  {
+    type: "danfoss-ally-schedule-card",
+    // Libellés bilingues courts (le frontend HA ne localise pas encore ces entrées).
     name: "Danfoss Ally — Programme / Schedule",
     description:
       "Programme hebdomadaire d'une pièce Danfoss Ally (cloud). / Weekly schedule of a Danfoss Ally room.",
     preview: false,
-    documentationURL: "https://github.com/aghulas/ha-danfoss-ally",
-  });
+    documentationURL: DOC_URL,
+  },
+  {
+    type: "danfoss-ally-room-card",
+    name: "Danfoss Ally — Pièce / Room",
+    description:
+      "Une pièce Danfoss Ally : climat, programme, têtes et actions. / A Danfoss Ally room: climate, schedule, thermostats and actions.",
+    preview: false,
+    documentationURL: DOC_URL,
+  },
+];
+
+window.customCards = window.customCards ?? [];
+for (const card of CARDS) {
+  if (!window.customCards.some((c) => c.type === card.type)) {
+    window.customCards.push(card);
+  }
 }
 
 // eslint-disable-next-line no-console

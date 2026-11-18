@@ -6,6 +6,7 @@
  * développer la carte sans instance HA. Démarrage : `npm run demo`.
  */
 import "../src/main";
+import type { DanfossAllyRoomCard } from "../src/room-card";
 import type { DanfossAllyScheduleCard } from "../src/schedule-card";
 import type { DanfossAllyScheduleCardEditor } from "../src/schedule-card-editor";
 import type {
@@ -330,6 +331,22 @@ const fakeHass: HassLike = {
       };
     },
   },
+  async callService(
+    domain: string,
+    service: string,
+    data?: Record<string, unknown>,
+  ): Promise<unknown> {
+    await new Promise((r) => setTimeout(r, 120));
+    // Simule climate.set_temperature : met à jour la consigne de la pièce ciblée.
+    if (domain === "climate" && service === "set_temperature") {
+      const entity = String(data?.entity_id ?? "");
+      const room = ROOMS.find((r) => r.climate_entity_id === entity);
+      if (room) {
+        room.setpoint = Number(data?.temperature);
+      }
+    }
+    return undefined;
+  },
   async callWS<T>(msg: Record<string, unknown>): Promise<T> {
     // Simule la latence et les commandes du contrat §5.3.
     await new Promise((r) => setTimeout(r, 120));
@@ -382,6 +399,11 @@ const fakeHass: HassLike = {
     throw new Error(`commande non simulée : ${String(msg.type)}`);
   },
 };
+
+const roomCard = document.createElement("danfoss-ally-room-card") as DanfossAllyRoomCard;
+roomCard.setConfig({ room_id: "13000000" });
+roomCard.hass = fakeHass;
+document.getElementById("room")?.appendChild(roomCard);
 
 const card = document.createElement("danfoss-ally-schedule-card") as DanfossAllyScheduleCard;
 card.setConfig({ room_id: "13000000" });
