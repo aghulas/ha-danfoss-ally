@@ -101,6 +101,29 @@ def _bool(v: Any) -> bool | None:
     return None
 
 
+_HOLIDAY_TEMP_KEYS = ("temp", "temperature", "tempSet", "holidayTemp", "setTemp", "value")
+
+
+def holiday_temperature(detail: dict[str, Any] | None) -> float | None:
+    """Best-effort holiday setpoint (°C) from a ``vacation.detail`` record.
+
+    The holiday record's exact shape is cloud-defined (the set/exit routes are uncaptured, §4.5);
+    this reads the first recognised numeric temperature field and applies the standard Danfoss
+    tenths-of-°C scale when the raw value is >= 50 (every Danfoss temperature DP is tenths). Returns
+    ``None`` when no recognised field is present (rather than fabricating a value). The caller also
+    exposes the raw ``detail`` as attributes, so nothing is hidden.
+    """
+    if not isinstance(detail, dict):
+        return None
+    for key in _HOLIDAY_TEMP_KEYS:
+        if key in detail:
+            raw = _num(detail[key])
+            if raw is None:
+                continue
+            return round(raw / 10, 1) if raw >= 50 else raw
+    return None
+
+
 def category_of(category: str | None) -> str:
     """Raw Tuya category -> readable category."""
     c = (category or "").lower()

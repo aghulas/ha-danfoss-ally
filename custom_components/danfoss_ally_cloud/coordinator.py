@@ -41,6 +41,9 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         # refresh from the cached topology and the current head state.
         self.rooms: dict[str, RoomState] = {}
         self.grouped_ids: set[str] = set()
+        # Per-home holiday state (read only, contract §4.5), keyed by gid. Refreshed on the
+        # topology cadence (hourly): a holiday changes rarely and the read is best-effort.
+        self.holidays: dict[str, dict] = {}
         self._rooms_topology: dict[str, Room] = {}
         self._group_of: dict[str, str] = {}
         self._topology_ts: float = 0.0
@@ -87,6 +90,16 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
             self._rooms_topology, self._group_of, self._topology_ts = {}, {}, now
             return
         self._rooms_topology, self._group_of, self._topology_ts = rooms_topology, group_of, now
+        await self._refresh_holidays()
+
+    async def _refresh_holidays(self) -> None:
+        """Refresh the per-home holiday state (best-effort; keeps the previous value on failure)."""
+        try:
+            holidays = await self.client.async_list_holidays()
+        except CloudError as err:
+            _LOGGER.debug("holiday read skipped (%s)", err)
+            return
+        self.holidays = {h["gid"]: h for h in holidays}
 
     async def _fetch_topology(self) -> tuple[dict[str, Room], dict[str, str]]:
         """Read the rooms (groups) and their members of each home (path 1a)."""

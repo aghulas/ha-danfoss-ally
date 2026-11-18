@@ -45,6 +45,9 @@
       },
       "fault": {
         "name": "Fault code"
+      },
+      "holiday_setpoint": {
+        "name": "Holiday setpoint"
       }
     },
     "binary_sensor": {
@@ -53,6 +56,9 @@
       },
       "window": {
         "name": "Window"
+      },
+      "holiday": {
+        "name": "Holiday active"
       }
     },
     "switch": {

@@ -47,3 +47,30 @@ class DanfossEntity(CoordinatorEntity[DanfossCoordinator]):
         if group_id is not None:
             info["via_device"] = (DOMAIN, f"group_{group_id}")
         return info
+
+
+class DanfossHomeEntity(CoordinatorEntity[DanfossCoordinator]):
+    """Entity attached to a HOME (account "home"), not to a device.
+
+    Home-level reads (holiday, contract §4.5) have no device of their own: they hang off a dedicated
+    "home" device so they group cleanly in the UI. Always available (connectivity is per head).
+    """
+
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator: DanfossCoordinator, gid: str, name: str | None) -> None:
+        super().__init__(coordinator)
+        self._gid = gid
+        self._home_name = name
+
+    @property
+    def holiday(self) -> dict | None:
+        return self.coordinator.holidays.get(self._gid)
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"home_{self._gid}")},
+            name=self._home_name or f"Home {self._gid}",
+            manufacturer="Danfoss",
+        )

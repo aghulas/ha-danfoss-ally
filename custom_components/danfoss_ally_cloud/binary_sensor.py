@@ -17,7 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import DanfossCoordinator
-from .entity import DanfossEntity
+from .entity import DanfossEntity, DanfossHomeEntity
 
 
 async def async_setup_entry(
@@ -30,6 +30,9 @@ async def async_setup_entry(
             continue
         entities.append(DanfossConnectivity(coordinator, dev.id))
         entities.append(DanfossWindow(coordinator, dev.id))
+    # Holiday (read only, contract §4.5): one per home.
+    for gid, holiday in coordinator.holidays.items():
+        entities.append(DanfossHoliday(coordinator, gid, holiday.get("name")))
     async_add_entities(entities)
 
 
@@ -65,3 +68,29 @@ class DanfossWindow(DanfossEntity, BinarySensorEntity):
     def is_on(self) -> bool | None:
         dev = self.device
         return dev.window_open if dev else None
+
+
+class DanfossHoliday(DanfossHomeEntity, BinarySensorEntity):
+    """Holiday active on a home (read only, contract §4.5).
+
+    The holiday *set/exit* routes are uncaptured, so there is no write counterpart. The full holiday
+    record is exposed as an attribute (``detail``).
+    """
+
+    _attr_translation_key = "holiday"
+    _attr_icon = "mdi:bag-suitcase"
+
+    def __init__(self, coordinator: DanfossCoordinator, gid: str, name: str | None) -> None:
+        super().__init__(coordinator, gid, name)
+        self._attr_unique_id = f"home_{gid}_holiday"
+
+    @property
+    def is_on(self) -> bool | None:
+        holiday = self.holiday
+        return bool(holiday["active"]) if holiday else None
+
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        holiday = self.holiday
+        detail = holiday.get("detail") if holiday else None
+        return {"detail": detail} if detail else None
