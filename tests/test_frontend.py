@@ -112,3 +112,66 @@ async def test_register_conserve_les_autres_ressources(hass: HomeAssistant):
     urls_apres = [str(i["url"]) for i in resources.async_items()]
     assert urls_apres == ["/autre/carte.js"]  # we removed ONLY ours
     assert autre["id"]  # (sanity) l'item tiers existait bien
+
+
+# --- D4: side panel registration (contract §8.2) ----------------------------------------------
+
+
+class _FakePanelCustom:
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def async_register_panel(self, hass, **kwargs):  # noqa: ARG002 - signature HA
+        self.calls.append(kwargs)
+
+
+async def test_panel_registration_idempotent(hass: HomeAssistant, monkeypatch):
+    fake = _FakePanelCustom()
+    monkeypatch.setattr(frontend, "panel_custom", fake)
+
+    await frontend._async_register_panel(hass, f"{RES_BASE}?v={VERSION}")
+    assert len(fake.calls) == 1
+    call = fake.calls[0]
+    assert call["frontend_url_path"] == frontend.PANEL_URL_PATH
+    assert call["webcomponent_name"] == frontend.PANEL_COMPONENT
+    assert call["module_url"] == f"{RES_BASE}?v={VERSION}"
+    assert call["require_admin"] is False
+    assert hass.data[frontend._DATA_PANEL_REGISTERED] is True
+
+    # A second registration does not duplicate the panel.
+    await frontend._async_register_panel(hass, f"{RES_BASE}?v={VERSION}")
+    assert len(fake.calls) == 1
+
+
+async def test_panel_registration_absent_panel_custom(hass: HomeAssistant, monkeypatch):
+    # panel_custom unavailable (minimal HA): degrade cleanly, no flag, no raise.
+    monkeypatch.setattr(frontend, "panel_custom", None)
+    await frontend._async_register_panel(hass, f"{RES_BASE}?v={VERSION}")
+    assert hass.data.get(frontend._DATA_PANEL_REGISTERED) is None
+
+
+async def test_panel_registration_error_is_swallowed(hass: HomeAssistant, monkeypatch):
+    class _Boom:
+        async def async_register_panel(self, hass, **kwargs):  # noqa: ARG002
+            raise ValueError("already registered")
+
+    monkeypatch.setattr(frontend, "panel_custom", _Boom())
+    # Best-effort: must not block setup.
+    await frontend._async_register_panel(hass, f"{RES_BASE}?v={VERSION}")
+    assert hass.data.get(frontend._DATA_PANEL_REGISTERED) is None
+
+
+async def test_panel_removal(hass: HomeAssistant, monkeypatch):
+    import homeassistant.components.frontend as ha_frontend
+
+    removed: list[str] = []
+    monkeypatch.setattr(ha_frontend, "async_remove_panel", lambda hass, path: removed.append(path))
+
+    hass.data[frontend._DATA_PANEL_REGISTERED] = True
+    frontend._async_remove_panel(hass)
+    assert removed == [frontend.PANEL_URL_PATH]
+    assert hass.data[frontend._DATA_PANEL_REGISTERED] is False
+
+    # Removing when not registered is a no-op.
+    frontend._async_remove_panel(hass)
+    assert removed == [frontend.PANEL_URL_PATH]

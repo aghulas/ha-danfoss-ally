@@ -8,6 +8,7 @@
  */
 import "./schedule-card";
 import "./room-card";
+import "./panel";
 import { CARD_VERSION } from "./version";
 
 const DOC_URL = "https://github.com/aghulas/ha-danfoss-ally";
