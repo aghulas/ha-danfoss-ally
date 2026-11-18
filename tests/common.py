@@ -146,6 +146,10 @@ class FakeCloudClient:
     async def async_room_set_devices(self, room_id, dev_ids):
         self.writes.append(("room_set", room_id, list(dev_ids)))
 
+    async def async_relay_bind(self, dev_id, room_id, linked):
+        self.writes.append(("relay_bind", dev_id, room_id, bool(linked)))
+        return {"ok": True}
+
     # Schedule editing (schedule-editing layer): stub + write log.
     async def async_get_schedule(self, target):
         return {

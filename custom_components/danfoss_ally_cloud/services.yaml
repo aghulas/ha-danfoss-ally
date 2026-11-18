@@ -68,6 +68,28 @@ delete_room:
         config_entry:
           integration: danfoss_ally_cloud
 
+set_relay_room:
+  fields:
+    relay:
+      required: true
+      example: "<relay devId>"
+      selector:
+        text:
+    target:
+      required: true
+      example: '{"type": "room", "id": "<group_id>"}'
+      selector:
+        object:
+    linked:
+      required: true
+      selector:
+        boolean:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
 get_local_survey:
   fields:
     config_entry_id:
