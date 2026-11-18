@@ -112,6 +112,38 @@
     }
    }
   },
+  "set_override": {
+   "name": "Poser une dérogation de consigne",
+   "description": "Dérogation ponctuelle de consigne sur une tête, via le tunnel Zigbee local. Dure jusqu'au prochain changement du programme de la tête (pas une consigne durable).",
+   "fields": {
+    "target": {
+     "name": "Tête",
+     "description": "Tête cible : type device et son identifiant d'appareil (voir l'exemple du service)."
+    },
+    "temperature": {
+     "name": "Température",
+     "description": "Température de dérogation en °C (5 à 35, par 0,5)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
+  },
+  "clear_override": {
+   "name": "Annuler la dérogation de consigne",
+   "description": "Met fin à une dérogation en réappliquant la consigne prévue par le programme à cet instant.",
+   "fields": {
+    "target": {
+     "name": "Tête",
+     "description": "Tête cible : type device et son identifiant d'appareil (voir l'exemple du service)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
+  },
   "get_schedule": {
    "name": "Lire le programme",
    "description": "Programme hebdomadaire d'une pièce ou d'une tête isolée.",
@@ -244,6 +276,12 @@
   },
   "invalid_day": {
    "message": "Jour inconnu (attendu : mon, tue, wed, thu, fri, sat ou sun)."
+  },
+  "invalid_setpoint": {
+   "message": "Consigne hors plage (5 à 35 °C, par 0,5)."
+  },
+  "no_schedule": {
+   "message": "Aucun programme où revenir ; la dérogation cesse au prochain changement programmé."
   }
  }
 }

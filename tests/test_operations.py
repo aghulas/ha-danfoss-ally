@@ -1,8 +1,11 @@
 """Shared operations tests (services/WebSocket): rooms, validation, write, jobs."""
 
+from datetime import datetime
+
 import pytest
 
 from custom_components.danfoss_ally_cloud import operations as ops
+from custom_components.danfoss_ally_cloud.api.local import tunnel
 from custom_components.danfoss_ally_cloud.const import (
     DATA_COORDINATOR,
     DATA_JOBS,
@@ -112,10 +115,18 @@ class _FakeManagerW:
     def __init__(self, gateways=("gw-1",)):
         self.gateway_ids = set(gateways)
         self.calls: list = []
+        self.schedule: dict = {}
 
     def descale(self, head, day, hour):
         self.calls.append((head.dev_id, day, hour))
         return True
+
+    def set_override(self, head, celsius):
+        self.calls.append(("override", head.dev_id, celsius))
+        return int(round(celsius * 100))
+
+    def read_schedule(self, head):
+        return self.schedule
 
 
 class _FakeLocalW:
@@ -185,19 +196,88 @@ async def test_set_descaling_invalid_time():
 
 
 async def test_set_descaling_write_refused():
-    from custom_components.danfoss_ally_cloud.api.local import tunnel as _tun
-
     store, _ = _store()
     local = _FakeLocalW()
 
     def _boom(head, day, hour):
-        raise _tun.LocalError("refused")
+        raise tunnel.LocalError("refused")
 
     local.manager.descale = _boom
     store[DATA_LOCAL] = local
     with pytest.raises(ops.OperationError) as exc:
         await ops.set_descaling(_FakeHass(), store, _DEVICE, "wed", "13:00")
     assert exc.value.code == "local_write_failed"
+
+
+# --- C1: setpoint override ---------------------------------------------------------------------
+
+
+def test_scheduled_setpoint_now_current_day():
+    now = datetime(2026, 11, 16, 12, 0)
+    wd = tunnel.WEEKDAYS[now.weekday()]
+    days = {wd: [{"h": "06:00", "c": 21.0}, {"h": "22:00", "c": 17.0}]}
+    assert ops._scheduled_setpoint_now(days, now) == 21.0
+    assert ops._scheduled_setpoint_now(days, now.replace(hour=23)) == 17.0
+
+
+def test_scheduled_setpoint_now_before_first_uses_prev_day():
+    now = datetime(2026, 11, 16, 5, 0)
+    wd = tunnel.WEEKDAYS[now.weekday()]
+    prev = tunnel.WEEKDAYS[(now.weekday() - 1) % 7]
+    days = {
+        prev: [{"h": "07:00", "c": 20.0}, {"h": "21:00", "c": 16.0}],
+        wd: [{"h": "06:00", "c": 21.0}],
+    }
+    assert ops._scheduled_setpoint_now(days, now) == 16.0
+
+
+def test_scheduled_setpoint_now_empty():
+    assert ops._scheduled_setpoint_now({}, datetime(2026, 11, 16, 12, 0)) is None
+
+
+async def test_set_override_ok():
+    store, _ = _store()
+    local = _FakeLocalW()
+    store[DATA_LOCAL] = local
+    res = await ops.set_override(_FakeHass(), store, _DEVICE, 20.0)
+    assert res["setpoint"] == 20.0 and res["published_raw"] == 2000
+    assert local.manager.calls == [("override", "a", 20.0)]
+
+
+async def test_set_override_out_of_range():
+    store, _ = _store()
+    store[DATA_LOCAL] = _FakeLocalW()
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.set_override(_FakeHass(), store, _DEVICE, 40.0)
+    assert exc.value.code == "invalid_setpoint"
+
+
+async def test_set_override_bad_step():
+    store, _ = _store()
+    store[DATA_LOCAL] = _FakeLocalW()
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.set_override(_FakeHass(), store, _DEVICE, 20.3)
+    assert exc.value.code == "invalid_setpoint"
+
+
+async def test_clear_override_ok():
+    store, _ = _store()
+    local = _FakeLocalW()
+    now = datetime.now().astimezone()
+    wd = tunnel.WEEKDAYS[now.weekday()]
+    local.manager.schedule = {wd: [{"h": "00:00", "c": 18.5}]}
+    store[DATA_LOCAL] = local
+    res = await ops.clear_override(_FakeHass(), store, _DEVICE)
+    assert res["restored_setpoint"] == 18.5
+    assert local.manager.calls == [("override", "a", 18.5)]
+
+
+async def test_clear_override_no_schedule():
+    store, _ = _store()
+    store[DATA_LOCAL] = _FakeLocalW()  # schedule = {}
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.clear_override(_FakeHass(), store, _DEVICE)
+    assert exc.value.code == "no_schedule"
 
 
 # --- Lecture -----------------------------------------------------------------------------------

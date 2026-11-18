@@ -32,6 +32,13 @@ _SET_DESCALING = vol.Schema(
         vol.Optional("config_entry_id"): cv.string,
     }
 )
+_SET_OVERRIDE = vol.Schema(
+    {
+        vol.Required("target"): _TARGET,
+        vol.Required("temperature"): vol.Coerce(float),
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
 _GET_SCHEDULE = vol.Schema(
     {
         vol.Required("target"): _TARGET,
@@ -108,6 +115,24 @@ def async_register_services(hass: HomeAssistant) -> None:
         except ops.OperationError as err:
             _raise(err)
 
+    async def set_override(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.set_override(
+                hass, store, call.data["target"], call.data["temperature"]
+            )
+        except ops.OperationError as err:
+            _raise(err)
+
+    async def clear_override(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.clear_override(hass, store, call.data["target"])
+        except ops.OperationError as err:
+            _raise(err)
+
     async def get_schedule(call: ServiceCall) -> dict:
         try:
             return await ops.get_schedule(
@@ -154,6 +179,8 @@ def async_register_services(hass: HomeAssistant) -> None:
     reg(DOMAIN, "get_rooms", get_rooms, _GET_ROOMS, SupportsResponse.ONLY)
     reg(DOMAIN, "get_local_survey", get_local_survey, _GET_ROOMS, SupportsResponse.ONLY)
     reg(DOMAIN, "set_descaling", set_descaling, _SET_DESCALING, SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "set_override", set_override, _SET_OVERRIDE, SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "clear_override", clear_override, _RESTORE, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "get_schedule", get_schedule, _GET_SCHEDULE, SupportsResponse.ONLY)
     reg(DOMAIN, "set_schedule", set_schedule, _SET_SCHEDULE, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "copy_schedule", copy_schedule, _COPY_SCHEDULE, SupportsResponse.OPTIONAL)

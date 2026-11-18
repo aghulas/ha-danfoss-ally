@@ -85,6 +85,32 @@ def test_descale_unknown_gateway():
         mgr.descale(Head("devX", "nodeX", "gw-inconnue"), "monday", "08:00")
 
 
+def test_set_override_ok(monkeypatch):
+    monkeypatch.setattr(tunnel, "write_setpoint", lambda link, d, n, celsius: int(celsius * 100))
+    state = {}
+
+    class _L:
+        def close(self):
+            state["closed"] = True
+
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: _L())
+    assert mgr.set_override(Head("dev1", "node1", "gw1"), 20.0) == 2000
+    assert state["closed"] is True
+
+
+def test_read_schedule_passthrough(monkeypatch):
+    sched = {"monday": [{"h": "06:00", "c": 21.0}]}
+    monkeypatch.setattr(tunnel, "read_schedule", lambda link, d, n: sched)
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: _ReadFakeLink("node1", 0x03))
+    assert mgr.read_schedule(Head("dev1", "node1", "gw1")) == sched
+
+
+def test_set_override_unknown_gateway():
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: None)
+    with pytest.raises(tunnel.LocalUnavailable):
+        mgr.set_override(Head("x", "y", "gw-inconnue"), 20.0)
+
+
 def test_survey_heads_summarizes(monkeypatch):
     """survey_heads runs the tunnel survey and summarizes each head (read-only)."""
     raw = {

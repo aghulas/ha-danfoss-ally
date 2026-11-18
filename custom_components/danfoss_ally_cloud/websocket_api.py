@@ -40,6 +40,8 @@ def async_register(hass: HomeAssistant) -> None:
     reg(hass, ws_rooms)
     reg(hass, ws_local_survey)
     reg(hass, ws_set_descaling)
+    reg(hass, ws_set_override)
+    reg(hass, ws_clear_override)
     reg(hass, ws_schedule_get)
     reg(hass, ws_schedule_validate)
     reg(hass, ws_schedule_set)
@@ -111,6 +113,51 @@ async def ws_set_descaling(hass: HomeAssistant, connection, msg: dict) -> None:
         return
     try:
         result = await ops.set_descaling(hass, store, msg["target"], msg["day"], msg["time"])
+    except ops.OperationError as err:
+        _send_op_error(connection, msg["id"], err)
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/set_override",
+        vol.Required("target"): dict,
+        vol.Required("temperature"): vol.Coerce(float),
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_set_override(hass: HomeAssistant, connection, msg: dict) -> None:
+    store = _store(hass, msg)
+    if store is None:
+        connection.send_error(msg["id"], "unknown_target", "no account configured")
+        return
+    try:
+        result = await ops.set_override(hass, store, msg["target"], msg["temperature"])
+    except ops.OperationError as err:
+        _send_op_error(connection, msg["id"], err)
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/clear_override",
+        vol.Required("target"): dict,
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_clear_override(hass: HomeAssistant, connection, msg: dict) -> None:
+    store = _store(hass, msg)
+    if store is None:
+        connection.send_error(msg["id"], "unknown_target", "no account configured")
+        return
+    try:
+        result = await ops.clear_override(hass, store, msg["target"])
     except ops.OperationError as err:
         _send_op_error(connection, msg["id"], err)
         return
