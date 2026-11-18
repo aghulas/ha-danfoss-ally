@@ -227,6 +227,106 @@ class CloudClient:
             "channel": meta.get("zigChannel"),
         }
 
+    # --- Axis B reads (holiday, boiler relay, room map): read-only, contract §4.5-§4.7 -----------
+
+    async def async_get_vacation(self, home_id: str | int) -> dict:
+        """Active holiday detail of a home (tuya.m.solution.wkf.vacation.detail). {} if none.
+
+        Read-only (contract §4.5): the holiday *set/exit* routes are uncaptured (runtime
+        mini-program), so the integration never writes a holiday.
+        """
+        r = await self._request(
+            "tuya.m.solution.wkf.vacation.detail", "1.0", {"homeId": str(home_id)}
+        )
+        return r if isinstance(r, dict) else {}
+
+    async def async_list_holidays(self) -> list[dict]:
+        """Per-home holiday state of the account: [{gid, name, active, detail}]. Read-only.
+
+        A non-empty ``vacation.detail`` means a holiday is in force; its fields are passed through
+        unmodified. A per-home read failure degrades to ``active=False`` (never raises for the set).
+        """
+        out: list[dict] = []
+        for home in await self.async_get_homes():
+            try:
+                detail = await self.async_get_vacation(home["gid"])
+            except CloudError:
+                detail = {}
+            out.append(
+                {
+                    "gid": str(home["gid"]),
+                    "name": home.get("name"),
+                    "active": bool(detail),
+                    "detail": detail or None,
+                }
+            )
+        return out
+
+    async def async_list_relays(self, gid: str | int) -> list[dict]:
+        """Boiler relays (Tuya category ``kg``) of a home: [{dev_id, name, on, online, mesh_id}].
+
+        Read-only (contract §4.6): DP ``1`` = on/off. The direct device-level write is uncaptured;
+        only the state read and the room<->relay link (``async_relay_rooms`` + the edit path) are
+        in contract.
+        """
+        raw = await self._request(
+            "tuya.m.my.group.device.list", "1.0", None, extra_params={"gid": gid}
+        )
+        out: list[dict] = []
+        for d in raw if isinstance(raw, list) else []:
+            if not isinstance(d, dict) or d.get("category") != "kg":
+                continue
+            dps = d.get("dps") or {}
+            zb = (d.get("moduleMap") or {}).get("zigbee") or {}
+            out.append(
+                {
+                    "dev_id": d.get("devId"),
+                    "name": (d.get("name") or "").strip(),
+                    "on": bool(dps.get("1")),
+                    "online": bool(zb.get("isOnline", d.get("isOnline", False))),
+                    "mesh_id": d.get("meshId"),
+                }
+            )
+        return out
+
+    async def async_relay_rooms(self, dev_id: str) -> list[dict]:
+        """Rooms eligible to drive a relay and whether they do (m.life.solution.wkf.reference.room).
+
+        ``gwId == devId`` of the relay. A room is **linked** when ``enable`` is set and ``cancel``
+        is not (unchecking a room in the app sets ``cancel``). Read-only. Returns
+        [{room_id, name, linked}].
+        """
+        r = await self._request(
+            "m.life.solution.wkf.reference.room", "1.0", {"devId": dev_id, "gwId": dev_id}
+        )
+        out: list[dict] = []
+        for x in r if isinstance(r, list) else []:
+            if not isinstance(x, dict):
+                continue
+            out.append(
+                {
+                    "room_id": x.get("roomId"),
+                    "name": x.get("roomName"),
+                    "linked": bool(x.get("enable")) and not bool(x.get("cancel")),
+                }
+            )
+        return out
+
+    async def async_list_rooms(self, gid: str | int) -> list[dict]:
+        """Room map of a home (m.life.group.room.map.get): [{room_id, name}]. Read-only.
+
+        A Tuya *room* (type 4) carries the human name and is the ``parentId`` of attach/detach; it
+        is distinct from the *schedule-group* (type 5, ``async_list_groups``). Mapping group<->room
+        is by name.
+        """
+        r = await self._request("m.life.group.room.map.get", "1.0", {"gid": gid})
+        rooms = r.get("rooms") if isinstance(r, dict) else None
+        out: list[dict] = []
+        for x in rooms if isinstance(rooms, list) else []:
+            if isinstance(x, dict) and x.get("id") is not None:
+                out.append({"room_id": str(x.get("id")), "name": x.get("name")})
+        return out
+
     async def async_write_setting(
         self, dev_id: str, pid: str, dps: dict, *, gw_id: str | int | None = None
     ) -> object:
