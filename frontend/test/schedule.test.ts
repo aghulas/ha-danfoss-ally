@@ -91,6 +91,13 @@ function head(partial: Partial<HeadState>): HeadState {
     preheat: false,
     mounting: false,
     inconsistent: false,
+    battery: null,
+    valve_opening: null,
+    heat_request: null,
+    window_open: null,
+    window_detection: null,
+    child_lock: null,
+    faults: [],
     ...partial,
   };
 }

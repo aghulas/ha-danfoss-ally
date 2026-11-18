@@ -10,6 +10,7 @@ import type { DanfossAllyScheduleCard } from "../src/schedule-card";
 import type { DanfossAllyScheduleCardEditor } from "../src/schedule-card-editor";
 import type {
   DayKey,
+  FleetOverview,
   HassLike,
   Info,
   Room,
@@ -57,9 +58,16 @@ const ROOMS: Room[] = [
     id: "13000000",
     name: "Salle 1",
     home: "Maison",
-    product_id: "synthetic00",
+    product_id: "03wvrwpv",
     comfort: 21.0,
     setback: 14.0,
+    temperature: 20.4,
+    setpoint: 21.0,
+    mode: "at_home",
+    heating: true,
+    online: true,
+    writable: true,
+    climate_entity_id: "climate.salle_1",
     heads: [
       {
         device_id: "head-synth-1",
@@ -71,6 +79,13 @@ const ROOMS: Room[] = [
         preheat: false,
         mounting: false,
         inconsistent: false,
+        battery: 92,
+        valve_opening: 45,
+        heat_request: true,
+        window_open: false,
+        window_detection: true,
+        child_lock: false,
+        faults: [],
       },
       {
         device_id: "head-synth-2",
@@ -82,6 +97,13 @@ const ROOMS: Room[] = [
         preheat: false,
         mounting: false,
         inconsistent: false,
+        battery: 15,
+        valve_opening: 30,
+        heat_request: true,
+        window_open: true,
+        window_detection: true,
+        child_lock: false,
+        faults: [{ code: "E14", bit: 13, label: "low battery" }],
       },
     ],
   },
@@ -89,9 +111,16 @@ const ROOMS: Room[] = [
     id: "13000001",
     name: "Salle 2",
     home: "Maison",
-    product_id: "synthetic00",
+    product_id: "03wvrwpv",
     comfort: 20.5,
     setback: 15.0,
+    temperature: 19.8,
+    setpoint: 15.0,
+    mode: "leaving_home",
+    heating: false,
+    online: true,
+    writable: true,
+    climate_entity_id: "climate.salle_2",
     heads: [
       {
         device_id: "head-synth-3",
@@ -103,6 +132,13 @@ const ROOMS: Room[] = [
         preheat: null,
         mounting: false,
         inconsistent: true,
+        battery: 80,
+        valve_opening: 0,
+        heat_request: false,
+        window_open: false,
+        window_detection: false,
+        child_lock: true,
+        faults: [],
       },
       {
         device_id: "head-synth-4",
@@ -114,10 +150,73 @@ const ROOMS: Room[] = [
         preheat: null,
         mounting: false,
         inconsistent: false,
+        battery: null,
+        valve_opening: null,
+        heat_request: null,
+        window_open: null,
+        window_detection: null,
+        child_lock: null,
+        faults: [],
       },
     ],
   },
 ];
+
+// Vue d'ensemble synthétique (contrat §3.6).
+const OVERVIEW: FleetOverview = {
+  homes: [
+    {
+      gid: "home-synth",
+      name: "Maison",
+      holiday_active: false,
+      gateways: [{ device_id: "gw-synth", name: "Passerelle", online: true }],
+      rooms: [
+        {
+          id: "13000000",
+          name: "Salle 1",
+          head_count: 2,
+          offline: 0,
+          low_battery: 1,
+          heating: true,
+          window_open: true,
+          inconsistent: 0,
+          faults: 1,
+        },
+        {
+          id: "13000001",
+          name: "Salle 2",
+          head_count: 2,
+          offline: 1,
+          low_battery: 0,
+          heating: false,
+          window_open: false,
+          inconsistent: 1,
+          faults: 0,
+        },
+      ],
+      relays: [
+        {
+          device_id: "relay-synth",
+          name: "Relais chaudière",
+          on: true,
+          online: true,
+          linked_rooms: 1,
+        },
+      ],
+    },
+  ],
+  totals: {
+    homes: 1,
+    gateways: 1,
+    rooms: 2,
+    heads: 4,
+    offline: 1,
+    low_battery: 1,
+    heating: 1,
+    faults: 1,
+    relays_on: 1,
+  },
+};
 
 // Programmes d'essai synthétiques (contrat §3.2). Heures HH:MM, jours mon..sun.
 const SCHEDULES: Record<string, Schedule> = {
@@ -239,6 +338,9 @@ const fakeHass: HassLike = {
     }
     if (msg.type === "danfoss_ally_cloud/rooms") {
       return { rooms: ROOMS } as unknown as T;
+    }
+    if (msg.type === "danfoss_ally_cloud/overview") {
+      return OVERVIEW as unknown as T;
     }
     if (msg.type === "danfoss_ally_cloud/schedule/get") {
       const target = msg.target as { id?: string } | undefined;
