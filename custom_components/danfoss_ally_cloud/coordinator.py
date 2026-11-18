@@ -86,8 +86,12 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         relay link): the room topology is otherwise cached for an hour, so without this the new or
         changed room would stay invisible to ``rooms`` / ``get_rooms`` / the room-id resolver until
         the next hourly poll.
+
+        Uses ``-inf`` (not ``0``): the freshness guard is ``now - _topology_ts < TTL`` with ``now =
+        time.monotonic()``, which can be smaller than the TTL on a freshly booted host, so ``0``
+        would not reliably force the refetch. ``-inf`` always does.
         """
-        self._topology_ts = 0.0
+        self._topology_ts = float("-inf")
 
     async def _ensure_topology(self, data: dict[str, DanfossDevice] | None = None) -> None:
         """Refresh the room topology if the cache expired. Best-effort: never blocks.
