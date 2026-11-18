@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased — Head unbind (disconnect), GATED
+
+### Added
+
+- **Head unbind ("disconnect") — GATED, pending real-hardware validation through HA.** New service
+  `danfoss_ally_cloud.disconnect_head` (and `CloudClient.async_device_reset`) unbinds a single head
+  from the Zigbee network — the app's "disconnect". Cloud call `thing.m.device.reset` v3.0, sent
+  under its signed/wire name `smartlife.m.device.reset`, body `{devId, resetFactory}` (captured on
+  real hardware 2026-11-18, see `~/dev/danfoss-ally-signing-re/NOTES.md`, "GATE A/D"; already
+  shipped guarded in the MCP connector, PR #5). `wipe_data` (= `resetFactory`): **false**
+  ("disconnect") keeps the head's identity — re-added on its own gateway without a wipe, it returns
+  with the **same devId** and name (rediscovery); **true** ("disconnect and wipe data") is a factory
+  reset — the head returns with a **new devId**, identity and name **lost**, **irreversible**. In
+  both cases the head leaves the network and disappears from the account, and its room membership is
+  lost and must be reassigned.
+  - **Triple-gated** (most destructive write in the integration): admin-only, behind the new option
+    **Enable head unbind** (`enable_head_unbind`, default **off** → the service raises
+    `unbind_disabled`), and requires an explicit `confirm: true` (`confirmation_required`). The
+    target must be a known head of a verified product (`WRITE_VERIFIED_PRODUCTS`), else
+    `unverified_product`; a gateway/relay target is refused (`unknown_head`). **No one-click path.**
+  - **Pairing (add) is OUT OF SCOPE** and not exposed: opening the gateway's permit-join is an MQTT
+    order (not an HTTP `m.*` call) and needs a physical action on the head, on site. See
+    `docs/roadmap.md`.
+  - **No real unbind has been performed through this integration.** Validating a real disconnect via
+    HA needs the integrator present, a real head, and the Danfoss app signed out of path 1a (shared
+    `deviceId` session, unless `distinct_device_id` is on).
+
+
 ## 1.0.1 — Frontend card bundle version fix
 
 Patch release. The 1.0.0 artifact shipped the Lovelace card bundle still stamped `0.6.1` — the

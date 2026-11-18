@@ -35,6 +35,7 @@ from .api.local import tunnel
 from .api.local.manager import Head
 from .const import (
     DATA_COORDINATOR,
+    DATA_HEAD_UNBIND,
     DATA_JOBS,
     DATA_LOCAL,
     DATA_SCHEDULES,
@@ -733,6 +734,79 @@ async def end_vacation(
     )
     await _refresh_after_structural_write(coordinator)
     return {"home": gid, "ended": True, "temperature": tenths / 10, "rooms": room_ids}
+
+
+# --- Head UNBIND / "disconnect" (contract write-safety). The most DESTRUCTIVE cloud write: the head
+# leaves the Zigbee network and disappears from the account; re-pairing needs a physical action on
+# site. Triple-gated: opt-in (DATA_HEAD_UNBIND, OFF by default), admin (caller), verified product,
+# AND an explicit ``confirm`` flag — no one-click path. Captured/validated on real hardware via the
+# MCP connector (2026-11-18); validation THROUGH this integration is still pending. ----------------
+
+
+def _require_unbind(store: dict) -> None:
+    if not store.get(DATA_HEAD_UNBIND):
+        raise OperationError(
+            "unbind_disabled",
+            "head unbind is disabled; enable it in the integration options "
+            "(for a supervised real-hardware validation session)",
+        )
+
+
+async def disconnect_head(
+    hass: HomeAssistant,
+    store: dict,
+    target: dict,
+    wipe_data: bool = False,
+    confirm: bool = False,
+) -> dict:
+    """Unbind (disconnect) a head from the network (``smartlife.m.device.reset``). ⚠ DESTRUCTIVE.
+
+    Gates, in order: opt-in flag (``unbind_disabled``), target is a known head of a verified product
+    (``device_only`` / ``unknown_head`` / ``unverified_product``), and an explicit ``confirm=True``
+    (``confirmation_required``) so it can never fire by accident. The caller also enforces admin.
+
+    ``wipe_data`` (= ``resetFactory``): ``False`` = "disconnect" (identity kept; re-added on its own
+    gateway without a wipe, the head returns with the SAME devId); ``True`` = "disconnect and wipe
+    data" (factory reset — a NEW devId, identity/name LOST, IRREVERSIBLE on the identity). In both
+    cases re-pairing needs a physical action on site (permit-join is MQTT, not path 1a).
+    """
+    _require_unbind(store)
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    if target.get("type") != "device":
+        raise OperationError("device_only", "disconnect_head targets a head (type=device)")
+    dev_id = str(target.get("id"))
+    dev = coordinator.data.get(dev_id)
+    if dev is None or not dev.is_head:
+        raise OperationError("unknown_head", f"head not found: {dev_id}")
+    if not write_allowed(dev):
+        raise OperationError("unverified_product", f"unbind not verified for {dev_id}")
+    if not confirm:
+        raise OperationError(
+            "confirmation_required",
+            "destructive action: pass confirm=true to unbind this head",
+        )
+    wipe = bool(wipe_data)
+    await _run_cloud_write(coordinator.client.async_device_reset, dev_id, wipe)
+    await _refresh_after_structural_write(coordinator)
+    return {
+        "device_id": dev_id,
+        "name": dev.name,
+        "mode": "disconnect_and_wipe" if wipe else "disconnect",
+        "wipe_data": wipe,
+        "irreversible": wipe,
+        "consequences": [
+            "the head left the Zigbee network and is gone from the account",
+            "re-pairing requires a physical action on the head, on site (not drivable from here)",
+            (
+                "data wiped: it will return with a NEW devId — identity and name LOST "
+                "(irreversible)"
+                if wipe
+                else "identity kept: re-added on its gateway without a wipe, it returns with the "
+                "same devId and name (rediscovery)"
+            ),
+            "its room membership is lost and must be reassigned after re-pairing",
+        ],
+    }
 
 
 async def local_survey(hass: HomeAssistant, store: dict) -> dict:

@@ -33,6 +33,7 @@
      "distinct_device_id": "Utiliser un identifiant d'appareil dédié (cohabiter avec l'app Danfoss / le connecteur MCP sans se déconnecter mutuellement)",
      "enable_local": "Activer le tunnel Zigbee local (passerelles) pour les écritures que le cloud rate",
      "enable_vacation_write": "Activer les écritures de vacances (pose/annulation). Désactivé par défaut — n'activez que pour une validation réelle supervisée",
+     "enable_head_unbind": "Activer le décrochage de tête (dissociation du réseau). Destructif — désactivé par défaut ; n'activez que pour une validation réelle supervisée",
      "mqtt_mode": "Publication MQTT : off, discovery (entités HA auto), zigbee2mqtt (topics compatibles z2m)",
      "mqtt_source": "Source des valeurs publiées : cloud ou local",
      "mqtt_base_topic": "Préfixe de topic MQTT"
@@ -533,6 +534,28 @@
      "description": "Si plusieurs comptes sont configurés."
     }
    }
+  },
+  "disconnect_head": {
+   "name": "Décrocher (dissocier) une tête",
+   "description": "Décroche une tête du réseau (le « disconnect » de l'app). DESTRUCTIF : la tête quitte le réseau et disparaît du compte ; le ré-appairage exige un geste physique sur place. Désactivé par défaut — activez le décrochage dans les options. Administrateur.",
+   "fields": {
+    "target": {
+     "name": "Cible",
+     "description": "Cible : type « device » et le devId de la tête."
+    },
+    "wipe_data": {
+     "name": "Effacer les données (retour usine)",
+     "description": "Désactivé = décrochage (identité conservée ; même devId au ré-appairage). Activé = décrochage + effacement (retour usine : nouveau devId, identité et nom perdus — IRRÉVERSIBLE)."
+    },
+    "confirm": {
+     "name": "Confirmer",
+     "description": "Doit être activé : garde-fou contre un déclenchement destructif accidentel."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
   }
  },
  "exceptions": {
@@ -610,6 +633,12 @@
   },
   "vacation_disabled": {
    "message": "Les écritures de vacances sont désactivées ; activez-les dans les options de l'intégration (pour une session de validation réelle)."
+  },
+  "unbind_disabled": {
+   "message": "Le décrochage de tête est désactivé ; activez-le dans les options de l'intégration (pour une session de validation réelle supervisée)."
+  },
+  "confirmation_required": {
+   "message": "Action destructive : passez confirm à vrai pour décrocher cette tête."
   },
   "invalid_date": {
    "message": "Date invalide (format attendu AAAAMMJJ)."

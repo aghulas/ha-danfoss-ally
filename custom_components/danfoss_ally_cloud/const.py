@@ -46,6 +46,7 @@ DATA_MQTT = "mqtt_publisher"  # MQTT publisher, None if mqtt_mode = off
 DATA_JOBS = "jobs"  # in-memory queue of write jobs (WriteJob)
 DATA_SCHEDULES = "schedules"  # per-target schedule cache (read on demand)
 DATA_VACATION_WRITE = "vacation_write"  # bool: vacation-write gate (CONF_ENABLE_VACATION_WRITE)
+DATA_HEAD_UNBIND = "head_unbind"  # bool: head-unbind gate (CONF_ENABLE_HEAD_UNBIND)
 
 # LOCAL survey (Zigbee tunnel) interval: slow, ~8 s per head. Distinct from the cloud polling.
 DEFAULT_LOCAL_SCAN_INTERVAL = 900  # seconds
@@ -76,11 +77,19 @@ CONF_MQTT_BASE_TOPIC = "mqtt_base_topic"
 # write services refuse (`vacation_disabled`) until it is deliberately enabled for a validation
 # session. Reads (holiday active / setpoint) are unaffected.
 CONF_ENABLE_VACATION_WRITE = "enable_vacation_write"
+# Head UNBIND (disconnect) WRITE gate. Unbinding a head is the most DESTRUCTIVE cloud write: the
+# head leaves the Zigbee network and disappears from the account, and re-pairing requires a physical
+# action on site (not drivable from here). The cloud call itself was captured and validated on real
+# hardware (via the MCP connector, 2026-11-18), but it has NOT been validated through this HA
+# integration yet, so it is OFF by default: the disconnect_head service refuses (`unbind_disabled`)
+# until it is deliberately enabled for a supervised validation session. See docs/roadmap.md.
+CONF_ENABLE_HEAD_UNBIND = "enable_head_unbind"
 
 # Conservative defaults: the account's quota and security come first.
 DEFAULT_SCAN_INTERVAL = 90  # seconds
 DEFAULT_DISTINCT_DEVICE_ID = True
 DEFAULT_ENABLE_VACATION_WRITE = False
+DEFAULT_ENABLE_HEAD_UNBIND = False
 DEFAULT_MQTT_MODE = "off"
 DEFAULT_MQTT_SOURCE = "cloud"
 DEFAULT_MQTT_BASE_TOPIC = "danfoss_ally_cloud"

@@ -20,6 +20,25 @@
 Cross-cutting goal: exercise the code on other installs (firmwares, product ids, gateway models) to
 make the DP assumptions more reliable.
 
+## Device lifecycle: unbind shipped (gated), pairing out of scope
+
+- **Unbind ("disconnect") — shipped, GATED.** A head can be unbound from the network via the
+  `disconnect_head` service (`smartlife.m.device.reset` v3.0 `{devId, resetFactory}`, captured on
+  real hardware 2026-11-18 — see `~/dev/danfoss-ally-signing-re/NOTES.md`, "GATE A/D"). Triple-gated
+  (admin + the `enable_head_unbind` option, **off by default** + explicit `confirm`), verified
+  products only. `resetFactory=false` keeps the head's identity (same devId on re-pairing to its
+  gateway); `resetFactory=true` is a factory reset (new devId, identity lost, irreversible).
+  **Validating a real disconnect through HA is still pending** (integrator present, real head, app
+  signed out of path 1a): it is left off by default until then.
+
+- **Pairing (add) — OUT OF SCOPE, no path-1a route.** Re-adding/pairing a head is deliberately NOT
+  exposed. Opening the gateway's permit-join is **not** an HTTP `m.*` call: the "open network" order
+  travels over **MQTT** (`m1.tuyaeu.com:8883`) to the chosen gateway, outside the path-1a HTTP
+  client, and completing a pairing requires a **physical action on the head, on site**. A full
+  re-pairing (after a wipe, or onto another gateway) mints a new devId through the activator flow,
+  again MQTT-driven. Covering it would need the gateway MQTT channel (and, to observe the Zigbee
+  `leave`/join frames, a radio sniffer with the network key) — a separate track, not path 1a.
+
 ## Per-room schedules and embedded frontend
 
 Work described by `docs/interface-requirements.md`, framed by the contract

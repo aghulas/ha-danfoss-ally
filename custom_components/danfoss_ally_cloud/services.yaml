@@ -109,6 +109,29 @@ detach_heads:
         config_entry:
           integration: danfoss_ally_cloud
 
+disconnect_head:
+  fields:
+    target:
+      required: true
+      example: '{"type": "device", "id": "<devId>"}'
+      selector:
+        object:
+    wipe_data:
+      required: false
+      default: false
+      selector:
+        boolean:
+    confirm:
+      required: true
+      default: false
+      selector:
+        boolean:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
 set_relay_room:
   fields:
     relay:

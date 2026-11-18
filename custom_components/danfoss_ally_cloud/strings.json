@@ -33,6 +33,7 @@
           "distinct_device_id": "Use a dedicated device id (coexist with the Danfoss app / MCP connector without logging each other out)",
           "enable_local": "Enable the local Zigbee tunnel (gateways) for writes the cloud misses",
           "enable_vacation_write": "Enable vacation writes (holiday set/cancel). Off by default — turn on only for a supervised real-hardware validation",
+          "enable_head_unbind": "Enable head unbind (disconnect from the network). Destructive — off by default; turn on only for a supervised real-hardware validation",
           "mqtt_mode": "MQTT publishing: off, discovery (auto HA entities), zigbee2mqtt (z2m-compatible topics)",
           "mqtt_source": "Source of published values: cloud or local",
           "mqtt_base_topic": "MQTT topic prefix"
@@ -533,6 +534,28 @@
           "description": "If several accounts are configured."
         }
       }
+    },
+    "disconnect_head": {
+      "name": "Disconnect (unbind) head",
+      "description": "Unbind a head from the network (the app's \"disconnect\"). DESTRUCTIVE: the head leaves the network and disappears from the account; re-pairing needs a physical action on site. Off by default — enable head unbind in the options. Admin.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "Target: type 'device' and the head's devId."
+        },
+        "wipe_data": {
+          "name": "Wipe data (factory reset)",
+          "description": "Off = disconnect (identity kept; same devId on re-pairing). On = disconnect and wipe data (factory reset: new devId, identity and name lost — IRREVERSIBLE)."
+        },
+        "confirm": {
+          "name": "Confirm",
+          "description": "Must be on: guard against an accidental destructive call."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
     }
   },
   "exceptions": {
@@ -610,6 +633,12 @@
     },
     "vacation_disabled": {
       "message": "Vacation writes are disabled; enable them in the integration options (for a real-hardware validation session)."
+    },
+    "unbind_disabled": {
+      "message": "Head unbind is disabled; enable it in the integration options (for a supervised real-hardware validation session)."
+    },
+    "confirmation_required": {
+      "message": "Destructive action: set confirm to true to unbind this head."
     },
     "invalid_date": {
       "message": "Invalid date (expected YYYYMMDD)."
