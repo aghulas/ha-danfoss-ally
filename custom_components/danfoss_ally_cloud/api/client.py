@@ -340,6 +340,43 @@ class CloudClient:
                 return room["room_id"]
         return None
 
+    # --- Room management writes (contract §4.7). Validated on real hardware by the MCP connector.
+    # These mutate the live account structure (regrouping heads changes shared schedules): a caller
+    # must gate them on real-hardware validation and admin rights.
+
+    async def async_room_add(self, home_gid: str | int, name: str) -> str:
+        """Create a Tuya room (smartlife.m.room.add v2.0 {gid, name}). Returns the new room id."""
+        r = await self._request("smartlife.m.room.add", "2.0", {"gid": home_gid, "name": name})
+        room_id = r.get("id") if isinstance(r, dict) else r
+        if room_id in (None, ""):
+            raise CloudWriteError("room creation returned no id")
+        return str(room_id)
+
+    async def async_room_update(self, room_id: str | int, name: str) -> None:
+        """Rename a room (smartlife.m.room.update v1.0 {roomId, name})."""
+        await self._request("smartlife.m.room.update", "1.0", {"roomId": room_id, "name": name})
+
+    async def async_room_dismiss(self, room_id: str | int) -> None:
+        """Delete a room (smartlife.m.custom.wfk.room.dismiss v1.0). Its heads become ungrouped."""
+        await self._request("smartlife.m.custom.wfk.room.dismiss", "1.0", {"roomId": room_id})
+
+    async def async_room_set_devices(self, room_id: str | int, dev_ids: list[str]) -> None:
+        """Set a room's member heads (smartlife.m.custom.wkf.device.relations.selected.save v1.0).
+
+        ⚠ REPLACES the whole member list: the caller sends ``current ∪ added`` (attach) or
+        ``current − removed`` (detach), never a delta.
+        """
+        await self._request(
+            "smartlife.m.custom.wkf.device.relations.selected.save",
+            "1.0",
+            {
+                "bizs": [{"id": d, "type": 6} for d in dev_ids],
+                "onlyParent": True,
+                "parentId": room_id,
+                "parentType": 4,
+            },
+        )
+
     async def async_write_setting(
         self, dev_id: str, pid: str, dps: dict, *, gw_id: str | int | None = None
     ) -> object:

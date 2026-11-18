@@ -311,3 +311,70 @@ async def test_ws_room_get_device_refused(setup):
     ws.ws_room_get(hass, conn, {"id": 21, "target": {"type": "device", "id": "a"}})
     await hass.async_block_till_done()
     assert conn.errors and conn.errors[-1][0] == "unknown_room"
+
+
+# --- B5: room management writes ----------------------------------------------------------------
+
+
+async def test_service_create_room(setup):
+    hass, _, fake = setup
+    res = await hass.services.async_call(
+        DOMAIN,
+        "create_room",
+        {"name": "Classroom", "devices": ["a", "b"]},
+        blocking=True,
+        return_response=True,
+    )
+    assert res["room_id"] == "new-7"
+    assert ("room_add", 1, "Classroom") in fake.writes
+    assert ("room_set", "new-7", ["a", "b"]) in fake.writes
+
+
+async def test_service_create_room_not_admin(setup):
+    hass, _, _ = setup
+    ctx = Context(user_id="non-admin")
+    with (
+        patch.object(hass.auth, "async_get_user", return_value=SimpleNamespace(is_admin=False)),
+        pytest.raises((Unauthorized, ServiceValidationError)),
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            "create_room",
+            {"name": "X", "devices": ["a"]},
+            blocking=True,
+            context=ctx,
+            return_response=True,
+        )
+
+
+async def test_ws_room_rename_and_delete(setup):
+    hass, _, fake = setup
+    conn = _FakeConn(is_admin=True)
+    ws.ws_room_rename(hass, conn, {"id": 30, "target": _ROOM_TARGET, "name": "New"})
+    await hass.async_block_till_done()
+    assert conn.results[30]["room_id"] == "room-5"
+    assert ("room_update", "room-5", "New") in fake.writes
+    ws.ws_room_delete(hass, conn, {"id": 31, "target": _ROOM_TARGET})
+    await hass.async_block_till_done()
+    assert ("room_dismiss", "room-5") in fake.writes
+
+
+async def test_ws_room_attach_detach(setup):
+    hass, _, fake = setup
+    conn = _FakeConn(is_admin=True)
+    ws.ws_room_attach(hass, conn, {"id": 32, "target": _ROOM_TARGET, "devices": ["a"]})
+    await hass.async_block_till_done()
+    # a (already a member) + b (member): the member list stays {a, b}
+    assert conn.results[32]["heads"] == ["a", "b"]
+    ws.ws_room_detach(hass, conn, {"id": 33, "target": _ROOM_TARGET, "devices": ["b"]})
+    await hass.async_block_till_done()
+    assert conn.results[33]["heads"] == ["a"]
+    assert ("room_set", "room-5", ["a"]) in fake.writes
+
+
+async def test_ws_room_create(setup):
+    hass, _, fake = setup
+    conn = _FakeConn(is_admin=True)
+    ws.ws_room_create(hass, conn, {"id": 34, "name": "C", "devices": ["a", "b"]})
+    await hass.async_block_till_done()
+    assert conn.results[34]["room_id"] == "new-7"

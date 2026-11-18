@@ -49,6 +49,11 @@ def async_register(hass: HomeAssistant) -> None:
     reg(hass, ws_schedule_set)
     reg(hass, ws_schedule_restore)
     reg(hass, ws_jobs_subscribe)
+    reg(hass, ws_room_create)
+    reg(hass, ws_room_rename)
+    reg(hass, ws_room_delete)
+    reg(hass, ws_room_attach)
+    reg(hass, ws_room_detach)
 
 
 @websocket_api.websocket_command(
@@ -283,6 +288,95 @@ async def ws_schedule_restore(hass: HomeAssistant, connection, msg: dict) -> Non
         _send_op_error(connection, msg["id"], err)
         return
     connection.send_result(msg["id"], job)
+
+
+def _ws_store_or_error(hass: HomeAssistant, connection, msg: dict) -> dict | None:
+    store = _store(hass, msg)
+    if store is None:
+        connection.send_error(msg["id"], "unknown_target", "no account configured")
+        return None
+    return store
+
+
+async def _ws_room_write(hass, connection, msg, func, *args) -> None:
+    store = _ws_store_or_error(hass, connection, msg)
+    if store is None:
+        return
+    try:
+        result = await func(hass, store, *args)
+    except ops.OperationError as err:
+        _send_op_error(connection, msg["id"], err)
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/room/create",
+        vol.Required("name"): str,
+        vol.Required("devices"): [str],
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_room_create(hass: HomeAssistant, connection, msg: dict) -> None:
+    await _ws_room_write(hass, connection, msg, ops.create_room, msg["name"], msg["devices"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/room/rename",
+        vol.Required("target"): dict,
+        vol.Required("name"): str,
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_room_rename(hass: HomeAssistant, connection, msg: dict) -> None:
+    await _ws_room_write(hass, connection, msg, ops.rename_room, msg["target"], msg["name"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/room/delete",
+        vol.Required("target"): dict,
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_room_delete(hass: HomeAssistant, connection, msg: dict) -> None:
+    await _ws_room_write(hass, connection, msg, ops.delete_room, msg["target"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/room/attach",
+        vol.Required("target"): dict,
+        vol.Required("devices"): [str],
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_room_attach(hass: HomeAssistant, connection, msg: dict) -> None:
+    await _ws_room_write(hass, connection, msg, ops.attach_heads, msg["target"], msg["devices"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/room/detach",
+        vol.Required("target"): dict,
+        vol.Required("devices"): [str],
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_room_detach(hass: HomeAssistant, connection, msg: dict) -> None:
+    await _ws_room_write(hass, connection, msg, ops.detach_heads, msg["target"], msg["devices"])
 
 
 @websocket_api.websocket_command(

@@ -72,6 +72,27 @@ _RESTORE = vol.Schema({vol.Required("target"): _TARGET, vol.Optional("config_ent
 _GET_JOB = vol.Schema(
     {vol.Required("job_id"): cv.string, vol.Optional("config_entry_id"): cv.string}
 )
+_CREATE_ROOM = vol.Schema(
+    {
+        vol.Required("name"): cv.string,
+        vol.Required("devices"): [cv.string],
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
+_RENAME_ROOM = vol.Schema(
+    {
+        vol.Required("target"): _TARGET,
+        vol.Required("name"): cv.string,
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
+_ATTACH = vol.Schema(
+    {
+        vol.Required("target"): _TARGET,
+        vol.Required("devices"): [cv.string],
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
 
 
 def _store(hass: HomeAssistant, call: ServiceCall) -> dict:
@@ -198,6 +219,46 @@ def async_register_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(f"unknown job: {call.data['job_id']}")
         return job.to_dict()
 
+    async def create_room(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.create_room(hass, store, call.data["name"], call.data["devices"])
+        except ops.OperationError as err:
+            _raise(err)
+
+    async def rename_room(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.rename_room(hass, store, call.data["target"], call.data["name"])
+        except ops.OperationError as err:
+            _raise(err)
+
+    async def delete_room(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.delete_room(hass, store, call.data["target"])
+        except ops.OperationError as err:
+            _raise(err)
+
+    async def attach_heads(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.attach_heads(hass, store, call.data["target"], call.data["devices"])
+        except ops.OperationError as err:
+            _raise(err)
+
+    async def detach_heads(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.detach_heads(hass, store, call.data["target"], call.data["devices"])
+        except ops.OperationError as err:
+            _raise(err)
+
     reg = hass.services.async_register
     reg(DOMAIN, "get_rooms", get_rooms, _GET_ROOMS, SupportsResponse.ONLY)
     reg(DOMAIN, "get_room", get_room, _RESTORE, SupportsResponse.ONLY)
@@ -213,3 +274,8 @@ def async_register_services(hass: HomeAssistant) -> None:
     reg(DOMAIN, "copy_schedule", copy_schedule, _COPY_SCHEDULE, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "restore_schedule", restore_schedule, _RESTORE, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "get_write_job", get_write_job, _GET_JOB, SupportsResponse.ONLY)
+    reg(DOMAIN, "create_room", create_room, _CREATE_ROOM, SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "rename_room", rename_room, _RENAME_ROOM, SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "delete_room", delete_room, _RESTORE, SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "attach_heads", attach_heads, _ATTACH, SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "detach_heads", detach_heads, _ATTACH, SupportsResponse.OPTIONAL)

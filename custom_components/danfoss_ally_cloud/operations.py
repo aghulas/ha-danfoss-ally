@@ -109,6 +109,112 @@ async def get_room(store: dict, target: dict) -> dict:
     return {"room": _room_entry(coordinator, group_id), "schedule": schedule}
 
 
+# --- Room management writes (contract §4.7, §5.2). Admin-gated by the callers; structural writes
+# on the live account -> gated on real-hardware validation. ------------------------------------
+
+
+async def _run_cloud_write(func, *args) -> Any:
+    try:
+        return await func(*args)
+    except CloudError as err:
+        raise OperationError("cloud_refused", str(err)) from err
+
+
+def _room_target(target: dict) -> str:
+    if target.get("type") != "room":
+        raise OperationError("unknown_room", "this action targets a room")
+    return str(target.get("id"))
+
+
+def _validate_heads(coordinator, devices: list[str], *, require_verified: bool) -> None:
+    if not devices:
+        raise OperationError("empty_devices", "give at least one head")
+    for dev_id in devices:
+        dev = coordinator.data.get(dev_id)
+        if dev is None or not dev.is_head:
+            raise OperationError("unknown_head", f"head not found: {dev_id}")
+        if require_verified and not write_allowed(dev):
+            raise OperationError("unverified_product", f"write not verified for {dev_id}")
+
+
+def _current_members(coordinator, group_id: str) -> list[str]:
+    return [
+        dev.id
+        for dev in coordinator.data.values()
+        if dev.is_head and coordinator.group_of(dev.id) == group_id
+    ]
+
+
+async def _resolve_room_id(coordinator, group_id: str) -> str:
+    rs = coordinator.rooms.get(group_id)
+    home = coordinator.home_of(group_id)
+    if rs is None or home is None:
+        raise OperationError("unknown_room", f"room not found: {group_id}")
+    room_id = await _run_cloud_write(coordinator.client.async_room_id, home, rs.name)
+    if room_id is None:
+        raise OperationError("unknown_room", f"no Tuya room named {rs.name!r}")
+    return room_id
+
+
+async def create_room(hass: HomeAssistant, store: dict, name: str, devices: list[str]) -> dict:
+    """Create a room and attach the given heads (contract §4.7). Verified products only."""
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    _validate_heads(coordinator, devices, require_verified=True)
+    homes = await _run_cloud_write(coordinator.client.async_get_homes)
+    if len(homes) != 1:
+        raise OperationError("unknown_room", "several homes configured: create the room in the app")
+    room_id = await _run_cloud_write(coordinator.client.async_room_add, homes[0]["gid"], name)
+    await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, list(devices))
+    await coordinator.async_request_refresh()
+    return {"room_id": str(room_id)}
+
+
+async def rename_room(hass: HomeAssistant, store: dict, target: dict, name: str) -> dict:
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    room_id = await _resolve_room_id(coordinator, _room_target(target))
+    await _run_cloud_write(coordinator.client.async_room_update, room_id, name)
+    await coordinator.async_request_refresh()
+    return {"room_id": str(room_id)}
+
+
+async def delete_room(hass: HomeAssistant, store: dict, target: dict) -> dict:
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    room_id = await _resolve_room_id(coordinator, _room_target(target))
+    await _run_cloud_write(coordinator.client.async_room_dismiss, room_id)
+    await coordinator.async_request_refresh()
+    return {"room_id": str(room_id)}
+
+
+async def attach_heads(hass: HomeAssistant, store: dict, target: dict, devices: list[str]) -> dict:
+    """Add heads to a room (contract §4.7). REPLACES the member list with current ∪ given."""
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    group_id = _room_target(target)
+    _validate_heads(coordinator, devices, require_verified=True)
+    room_id = await _resolve_room_id(coordinator, group_id)
+    members = _current_members(coordinator, group_id)
+    final = list(dict.fromkeys(members + list(devices)))
+    await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, final)
+    await coordinator.async_request_refresh()
+    return {"room_id": str(room_id), "heads": final, "previous_heads": members}
+
+
+async def detach_heads(hass: HomeAssistant, store: dict, target: dict, devices: list[str]) -> dict:
+    """Remove heads from a room (contract §4.7). Refuses to empty a room (use delete_room)."""
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    group_id = _room_target(target)
+    _validate_heads(coordinator, devices, require_verified=False)  # removal: any known head
+    room_id = await _resolve_room_id(coordinator, group_id)
+    members = _current_members(coordinator, group_id)
+    if not any(d in members for d in devices):
+        raise OperationError("unknown_head", "none of these heads are in the room")
+    final = [d for d in members if d not in devices]
+    if not final:
+        raise OperationError("no_members_left", "detaching every head: use delete_room instead")
+    await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, final)
+    await coordinator.async_request_refresh()
+    return {"room_id": str(room_id), "heads": final, "previous_heads": members}
+
+
 async def local_survey(hass: HomeAssistant, store: dict) -> dict:
     """Read-only multi-gateway survey through the local Zigbee tunnel (contract §4.4, C4).
 
