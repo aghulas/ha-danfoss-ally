@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { HassLike, Room } from "../src/types";
-import { fetchInfo, fetchRooms, pickRoom } from "../src/ws";
+import type { FleetOverview, HassLike, Room } from "../src/types";
+import { fetchInfo, fetchOverview, fetchRooms, pickRoom } from "../src/ws";
 
 const ROOMS: Room[] = [
   {
@@ -59,6 +59,37 @@ describe("fetchRooms", () => {
   it("se dégrade en liste vide si la réponse n'a pas de `rooms`", async () => {
     const hass = hassWith(async () => ({}));
     expect(await fetchRooms(hass)).toEqual([]);
+  });
+});
+
+describe("fetchOverview", () => {
+  const OVERVIEW: FleetOverview = {
+    homes: [
+      { gid: "h1", name: "Home", holiday_active: false, gateways: [], rooms: [], relays: [] },
+    ],
+    totals: {
+      homes: 1,
+      gateways: 0,
+      rooms: 0,
+      heads: 0,
+      offline: 0,
+      low_battery: 0,
+      heating: 0,
+      faults: 0,
+      relays_on: 0,
+    },
+  };
+
+  it("renvoie la vue d'ensemble quand la commande existe", async () => {
+    const hass = hassWith(async () => OVERVIEW);
+    expect(await fetchOverview(hass)).toEqual(OVERVIEW);
+  });
+
+  it("se dégrade en null quand la commande manque (backend 0.5.x)", async () => {
+    const hass = hassWith(async () => {
+      throw new Error("unknown_command");
+    });
+    expect(await fetchOverview(hass)).toBeNull();
   });
 });
 

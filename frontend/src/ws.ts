@@ -8,6 +8,7 @@
  */
 import type {
   DayKey,
+  FleetOverview,
   HassLike,
   Info,
   Room,
@@ -36,6 +37,18 @@ export async function fetchRooms(hass: HassLike): Promise<Room[]> {
     return res?.rooms ?? [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * Vue d'ensemble de la flotte (contrat §5.3 `overview`, §3.6). Renvoie `null` si
+ * la commande manque (backend 0.5.x) ou échoue : le panneau se dégrade proprement.
+ */
+export async function fetchOverview(hass: HassLike): Promise<FleetOverview | null> {
+  try {
+    return await hass.callWS<FleetOverview>({ type: "danfoss_ally_cloud/overview" });
+  } catch {
+    return null;
   }
 }
 

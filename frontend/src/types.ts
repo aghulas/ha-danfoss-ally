@@ -9,6 +9,14 @@ export interface Target {
   id: string;
 }
 
+/** Défaut décodé d'une tête (contrat §3.3, table DP 45/184). */
+export interface Fault {
+  code: string;
+  bit?: number;
+  label?: string;
+  action?: string;
+}
+
 /** État d'une tête (contrat §3.3). */
 export interface HeadState {
   device_id: string;
@@ -20,17 +28,34 @@ export interface HeadState {
   preheat: boolean | null;
   mounting: boolean;
   inconsistent: boolean;
+  // Champs d'état (lecture seule, ajoutés en 0.6.0 / axe D) ; `null` si le DP est absent.
+  battery: number | null;
+  valve_opening: number | null;
+  heat_request: boolean | null;
+  window_open: boolean | null;
+  window_detection: boolean | null;
+  child_lock: boolean | null;
+  faults: Fault[];
 }
 
 /** Pièce (contrat §3.4). */
 export interface Room {
   id: string;
   name: string;
-  home: string;
+  home?: string;
   product_id: string;
   heads: HeadState[];
   comfort: number | null;
   setback: number | null;
+  // Climat vivant + droits d'écriture (lecture seule, axe D) ; optionnels pour rester
+  // compatibles avec un backend 0.5.x qui ne les renvoie pas encore.
+  temperature?: number | null;
+  setpoint?: number | null;
+  mode?: string | null;
+  heating?: boolean | null;
+  online?: boolean;
+  writable?: boolean;
+  climate_entity_id?: string | null;
 }
 
 /** Jours de la semaine, lundi d'abord (contrat §3). */
@@ -114,4 +139,71 @@ export interface ScheduleCardConfig {
   type?: string;
   /** `group_id` de la pièce (en chaîne), cf. contrat §1. */
   room_id?: string;
+}
+
+/** Configuration de la carte `danfoss-ally-room-card` (axe D). */
+export interface RoomCardConfig {
+  type?: string;
+  /** `group_id` de la pièce (en chaîne). */
+  room_id?: string;
+}
+
+// --- Vue d'ensemble de la flotte (contrat §3.6, axe D) : lecture seule. ---
+
+/** Passerelle dans la vue d'ensemble. */
+export interface FleetGateway {
+  device_id: string;
+  name: string;
+  online: boolean;
+}
+
+/** Santé agrégée d'une pièce dans la vue d'ensemble. */
+export interface FleetRoom {
+  id: string;
+  name: string;
+  head_count: number;
+  offline: number;
+  low_battery: number;
+  heating: boolean;
+  window_open: boolean;
+  inconsistent: number;
+  faults: number;
+}
+
+/** Relais de chaudière dans la vue d'ensemble. */
+export interface FleetRelay {
+  device_id: string;
+  name: string;
+  on: boolean | null;
+  online: boolean;
+  linked_rooms: number;
+}
+
+/** Une maison (account "home") dans la vue d'ensemble. */
+export interface FleetHome {
+  gid: string;
+  name: string;
+  holiday_active: boolean;
+  gateways: FleetGateway[];
+  rooms: FleetRoom[];
+  relays: FleetRelay[];
+}
+
+/** Totaux à l'échelle du bâtiment. */
+export interface FleetTotals {
+  homes: number;
+  gateways: number;
+  rooms: number;
+  heads: number;
+  offline: number;
+  low_battery: number;
+  heating: number;
+  faults: number;
+  relays_on: number;
+}
+
+/** Réponse de `danfoss_ally_cloud/overview` (contrat §3.6). */
+export interface FleetOverview {
+  homes: FleetHome[];
+  totals: FleetTotals;
 }
