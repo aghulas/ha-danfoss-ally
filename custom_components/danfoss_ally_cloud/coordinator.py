@@ -44,6 +44,9 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         # Per-home holiday state (read only, contract §4.5), keyed by gid. Refreshed on the
         # topology cadence (hourly): a holiday changes rarely and the read is best-effort.
         self.holidays: dict[str, dict] = {}
+        # Rooms that drive each boiler relay (read only, contract §4.6), keyed by relay devId.
+        # Refreshed on the topology cadence; the relay on/off state itself is in ``data`` each poll.
+        self.relay_rooms: dict[str, list[dict]] = {}
         self._rooms_topology: dict[str, Room] = {}
         self._group_of: dict[str, str] = {}
         self._topology_ts: float = 0.0
@@ -58,7 +61,7 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         except CloudError as err:
             raise UpdateFailed(str(err)) from err
         data = {dev.id: dev for dev in devices}
-        await self._ensure_topology()
+        await self._ensure_topology(data)
         self.rooms = {
             gid: aggregate_room(room, members)
             for gid, room in self._rooms_topology.items()
@@ -71,11 +74,11 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         """A head's room group_id, or None if the head is not grouped."""
         return self._group_of.get(head_id)
 
-    async def _ensure_topology(self) -> None:
+    async def _ensure_topology(self, data: dict[str, DanfossDevice] | None = None) -> None:
         """Refresh the room topology if the cache expired. Best-effort: never blocks.
 
         On a read failure: keep the previous cache if any, else an empty topology (all heads treated
-        as isolated - read-only thermostat).
+        as isolated - read-only thermostat). Holiday and relay-room reads ride the same cadence.
         """
         now = time.monotonic()
         if self._rooms_topology and (now - self._topology_ts) < _TOPOLOGY_TTL:
@@ -91,6 +94,23 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
             return
         self._rooms_topology, self._group_of, self._topology_ts = rooms_topology, group_of, now
         await self._refresh_holidays()
+        await self._refresh_relay_rooms(data or {})
+
+    async def _refresh_relay_rooms(self, data: dict[str, DanfossDevice]) -> None:
+        """Refresh, per boiler relay, the rooms that drive it.
+
+        Best-effort: a per-relay read failure keeps the previous linkage for that relay.
+        """
+        out: dict[str, list[dict]] = {}
+        for dev in data.values():
+            if not dev.is_relay:
+                continue
+            try:
+                out[dev.id] = await self.client.async_relay_rooms(dev.id)
+            except CloudError as err:
+                _LOGGER.debug("relay rooms kept for %s (read failed: %s)", dev.id, err)
+                out[dev.id] = self.relay_rooms.get(dev.id, [])
+        self.relay_rooms = out
 
     async def _refresh_holidays(self) -> None:
         """Refresh the per-home holiday state (best-effort; keeps the previous value on failure)."""

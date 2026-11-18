@@ -30,6 +30,10 @@ async def async_setup_entry(
             continue
         entities.append(DanfossConnectivity(coordinator, dev.id))
         entities.append(DanfossWindow(coordinator, dev.id))
+    # Boiler relay on/off (read only, contract §4.6): one per relay device.
+    for dev in coordinator.data.values():
+        if dev.is_relay:
+            entities.append(DanfossRelay(coordinator, dev.id))
     # Holiday (read only, contract §4.5): one per home.
     for gid, holiday in coordinator.holidays.items():
         entities.append(DanfossHoliday(coordinator, gid, holiday.get("name")))
@@ -68,6 +72,28 @@ class DanfossWindow(DanfossEntity, BinarySensorEntity):
     def is_on(self) -> bool | None:
         dev = self.device
         return dev.window_open if dev else None
+
+
+class DanfossRelay(DanfossEntity, BinarySensorEntity):
+    """Boiler relay on/off (DP 1, read only — contract §4.6).
+
+    Stays available even when the relay is briefly offline (the last state is still informative);
+    ``is_on`` is ``None`` when the DP is absent.
+    """
+
+    _require_online = False
+    _attr_device_class = BinarySensorDeviceClass.RUNNING
+    _attr_translation_key = "boiler_relay"
+    _attr_icon = "mdi:water-boiler"
+
+    def __init__(self, coordinator: DanfossCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_boiler_relay"
+
+    @property
+    def is_on(self) -> bool | None:
+        dev = self.device
+        return dev.relay_on if dev else None
 
 
 class DanfossHoliday(DanfossHomeEntity, BinarySensorEntity):

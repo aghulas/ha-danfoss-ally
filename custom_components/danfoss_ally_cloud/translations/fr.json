@@ -48,6 +48,9 @@
    },
    "holiday_setpoint": {
     "name": "Consigne vacances"
+   },
+   "relay_rooms": {
+    "name": "Pièces demandant de la chauffe"
    }
   },
   "binary_sensor": {
@@ -59,6 +62,9 @@
    },
    "holiday": {
     "name": "Vacances actives"
+   },
+   "boiler_relay": {
+    "name": "Relais chaudière"
    }
   },
   "switch": {

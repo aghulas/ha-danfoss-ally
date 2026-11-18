@@ -87,6 +87,10 @@ async def async_setup_entry(
         DanfossHolidaySetpoint(coordinator, gid, holiday.get("name"))
         for gid, holiday in coordinator.holidays.items()
     )
+    # Boiler relay: rooms driving it (read only, contract §4.6): one per relay device.
+    entities.extend(
+        DanfossRelayRooms(coordinator, dev.id) for dev in coordinator.data.values() if dev.is_relay
+    )
     async_add_entities(entities)
 
 
@@ -133,3 +137,32 @@ class DanfossHolidaySetpoint(DanfossHomeEntity, SensorEntity):
         if not holiday or not holiday.get("active"):
             return None
         return holiday_temperature(holiday.get("detail"))
+
+
+class DanfossRelayRooms(DanfossEntity, SensorEntity):
+    """Number of rooms currently driving a boiler relay (read only — contract §4.6).
+
+    Available even offline (the linkage is a cloud configuration, not a live reading). The linked
+    rooms are exposed as the ``rooms`` attribute.
+    """
+
+    _require_online = False
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_translation_key = "relay_rooms"
+    _attr_icon = "mdi:home-thermometer"
+
+    def __init__(self, coordinator: DanfossCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_relay_rooms"
+
+    def _linked(self) -> list[dict]:
+        rooms = self.coordinator.relay_rooms.get(self._device_id) or []
+        return [r for r in rooms if r.get("linked")]
+
+    @property
+    def native_value(self) -> int:
+        return len(self._linked())
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"rooms": [r.get("name") for r in self._linked()]}
