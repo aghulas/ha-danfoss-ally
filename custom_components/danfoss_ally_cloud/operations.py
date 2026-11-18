@@ -22,7 +22,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
 
-from .api import ScheduleValidationError, UnknownTargetError, head_state, write_allowed
+from .api import (
+    ScheduleValidationError,
+    UnknownTargetError,
+    encode_setpoint,
+    head_state,
+    write_allowed,
+)
 from .api import schedule as sch
 from .api.client import CloudError
 from .api.local import tunnel
@@ -32,7 +38,10 @@ from .const import (
     DATA_JOBS,
     DATA_LOCAL,
     DATA_SCHEDULES,
+    DATA_VACATION_WRITE,
     DOMAIN,
+    SETPOINT_MAX,
+    SETPOINT_MIN,
     WRITE_VERIFIED_PRODUCTS,
 )
 from .writejob import (
@@ -508,6 +517,181 @@ async def set_relay_room(
     )
     await _refresh_after_structural_write(coordinator)
     return {"relay": relay, "room_id": str(match["room_id"]), "linked": bool(linked)}
+
+
+# --- Vacation (holiday) writes (contract §4.5, §5.2). GATED: a vacation write acts on the live
+# heating and its exact request shape is pending a real-hardware validation. Admin-gated by the
+# callers AND behind the opt-in ``DATA_VACATION_WRITE`` flag (CONF_ENABLE_VACATION_WRITE). --------
+
+_DATE_RE = re.compile(r"^\d{8}$")  # YYYYMMDD
+
+
+def _require_vacation_write(store: dict) -> None:
+    if not store.get(DATA_VACATION_WRITE):
+        raise OperationError(
+            "vacation_disabled",
+            "vacation writes are disabled; enable them in the integration options "
+            "(for a real-hardware validation session)",
+        )
+
+
+def _check_date(value: str, field: str) -> str:
+    if not _DATE_RE.match(value or ""):
+        raise OperationError("invalid_date", f"{field} must be YYYYMMDD")
+    return value
+
+
+def _check_time(value: str, field: str) -> str:
+    if not _HHMM.match(value or ""):
+        raise OperationError("invalid_time", f"{field} must be HH:MM")
+    return value
+
+
+def _vacation_temperature_tenths(temperature: float) -> int:
+    """°C -> tenths, validated against the product bounds (reuses the setpoint encoder)."""
+    try:
+        return encode_setpoint(temperature, SETPOINT_MIN, SETPOINT_MAX)
+    except Exception as err:  # noqa: BLE001 - map any value error to a stable contract code
+        raise OperationError("invalid_setpoint", str(err)) from err
+
+
+async def _resolve_vacation_rooms(coordinator, gid: str, rooms: list[dict] | None) -> list[str]:
+    """Tuya room ids (type 4) the vacation applies to.
+
+    ``rooms`` is an optional list of room targets ({type:"room", id:group_id}); each is resolved to
+    its Tuya room id (``_resolve_room_id``). When omitted, the vacation covers EVERY room of the
+    home (what the app does). Raises ``empty_rooms`` if the home has none.
+    """
+    if rooms:
+        out: list[str] = []
+        for target in rooms:
+            group_id = _room_target(target)
+            if coordinator.home_of(group_id) != gid:
+                raise OperationError("unknown_room", f"room {group_id} is not in home {gid}")
+            out.append(await _resolve_room_id(coordinator, group_id))
+        return out
+    all_rooms = await _run_cloud_write(coordinator.client.async_list_rooms, gid)
+    ids = [str(r["room_id"]) for r in all_rooms if r.get("room_id") is not None]
+    if not ids:
+        raise OperationError("empty_rooms", f"home {gid} has no room for a vacation")
+    return ids
+
+
+async def _resolve_home(coordinator, home: str) -> str:
+    homes = await _run_cloud_write(coordinator.client.async_get_homes)
+    valid = {str(h["gid"]) for h in homes}
+    gid = str(home)
+    if gid not in valid:
+        raise OperationError("unknown_home", f"home {home!r} not found in the account")
+    return gid
+
+
+async def set_vacation(
+    hass: HomeAssistant,
+    store: dict,
+    home: str,
+    start_date: str,
+    start_time: str,
+    end_date: str,
+    end_time: str,
+    temperature: float,
+    rooms: list[dict] | None = None,
+    time_zone: str = "Europe/Paris",
+) -> dict:
+    """Set / edit an *away* vacation on a home (contract §4.5, ``vacation.plan.leave``). GATED."""
+    _require_vacation_write(store)
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    gid = await _resolve_home(coordinator, home)
+    _check_date(start_date, "start_date")
+    _check_time(start_time, "start_time")
+    _check_date(end_date, "end_date")
+    _check_time(end_time, "end_time")
+    if (end_date, end_time) <= (start_date, start_time):
+        raise OperationError("invalid_vacation_period", "the end must be after the start")
+    tenths = _vacation_temperature_tenths(temperature)
+    room_ids = await _resolve_vacation_rooms(coordinator, gid, rooms)
+    await _run_cloud_write(
+        coordinator.client.async_vacation_leave,
+        gid,
+        start_date,
+        start_time,
+        end_date,
+        end_time,
+        tenths,
+        room_ids,
+        time_zone,
+    )
+    await _refresh_after_structural_write(coordinator)
+    return {
+        "home": gid,
+        "mode": "away",
+        "start": f"{start_date} {start_time}",
+        "end": f"{end_date} {end_time}",
+        "temperature": tenths / 10,
+        "rooms": room_ids,
+    }
+
+
+async def set_vacation_at_home(
+    hass: HomeAssistant,
+    store: dict,
+    home: str,
+    start_date: str,
+    end_date: str,
+    rooms: list[dict] | None = None,
+    time_zone: str = "Europe/Paris",
+) -> dict:
+    """Set / edit an *at-home* vacation (contract §4.5, ``vacation.plan.athome``). GATED.
+
+    No temperature: each head follows its Saturday schedule. The cloud refuses it when a room has
+    no Saturday program (surfaced as ``cloud_refused``).
+    """
+    _require_vacation_write(store)
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    gid = await _resolve_home(coordinator, home)
+    _check_date(start_date, "start_date")
+    _check_date(end_date, "end_date")
+    if end_date < start_date:
+        raise OperationError("invalid_vacation_period", "the end must not be before the start")
+    room_ids = await _resolve_vacation_rooms(coordinator, gid, rooms)
+    await _run_cloud_write(
+        coordinator.client.async_vacation_athome, gid, start_date, end_date, room_ids, time_zone
+    )
+    await _refresh_after_structural_write(coordinator)
+    return {"home": gid, "mode": "at_home", "start": start_date, "end": end_date, "rooms": room_ids}
+
+
+async def cancel_vacation(
+    hass: HomeAssistant, store: dict, home: str, time_zone: str = "Europe/Paris"
+) -> dict:
+    """Cancel a *planned* vacation before it starts (contract §4.5, ``vacation.cancel``). GATED."""
+    _require_vacation_write(store)
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    gid = await _resolve_home(coordinator, home)
+    await _run_cloud_write(coordinator.client.async_vacation_cancel, gid, time_zone)
+    await _refresh_after_structural_write(coordinator)
+    return {"home": gid, "cancelled": True}
+
+
+async def end_vacation(
+    hass: HomeAssistant,
+    store: dict,
+    home: str,
+    temperature: float,
+    rooms: list[dict] | None = None,
+    time_zone: str = "Europe/Paris",
+) -> dict:
+    """End an *in-progress* vacation now (contract §4.5, ``vacation.leave.now``). GATED."""
+    _require_vacation_write(store)
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    gid = await _resolve_home(coordinator, home)
+    tenths = _vacation_temperature_tenths(temperature)
+    room_ids = await _resolve_vacation_rooms(coordinator, gid, rooms)
+    await _run_cloud_write(
+        coordinator.client.async_vacation_leave_now, gid, room_ids, tenths, time_zone
+    )
+    await _refresh_after_structural_write(coordinator)
+    return {"home": gid, "ended": True, "temperature": tenths / 10, "rooms": room_ids}
 
 
 async def local_survey(hass: HomeAssistant, store: dict) -> dict:

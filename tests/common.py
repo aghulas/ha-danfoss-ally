@@ -154,6 +154,57 @@ class FakeCloudClient:
         self.writes.append(("relay_bind", dev_id, room_id, bool(linked)))
         return {"ok": True}
 
+    # Vacation writes (axis A): record calls in ``writes`` (no network).
+    @staticmethod
+    def _csv(room_ids):
+        return room_ids if isinstance(room_ids, str) else ",".join(str(r) for r in room_ids)
+
+    async def async_vacation_leave(
+        self,
+        home_id,
+        start_date,
+        start_time,
+        end_date,
+        end_time,
+        temperature_tenths,
+        room_ids,
+        time_zone="Europe/Paris",
+    ):
+        self.writes.append(
+            (
+                "vac_leave",
+                str(home_id),
+                start_date,
+                start_time,
+                end_date,
+                end_time,
+                int(temperature_tenths),
+                self._csv(room_ids),
+                time_zone,
+            )
+        )
+        return {"ok": True}
+
+    async def async_vacation_athome(
+        self, home_id, start_date, end_date, room_ids, time_zone="Europe/Paris"
+    ):
+        self.writes.append(
+            ("vac_athome", str(home_id), start_date, end_date, self._csv(room_ids), time_zone)
+        )
+        return {"ok": True}
+
+    async def async_vacation_cancel(self, home_id, time_zone="Europe/Paris"):
+        self.writes.append(("vac_cancel", str(home_id), time_zone))
+        return {"ok": True}
+
+    async def async_vacation_leave_now(
+        self, home_id, room_ids, temperature_tenths, time_zone="Europe/Paris"
+    ):
+        self.writes.append(
+            ("vac_leave_now", str(home_id), self._csv(room_ids), int(temperature_tenths), time_zone)
+        )
+        return {"ok": True}
+
     # Schedule editing (schedule-editing layer): stub + write log.
     async def async_get_schedule(self, target):
         return {

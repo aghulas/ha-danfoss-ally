@@ -32,6 +32,7 @@
      "scan_interval": "Intervalle d'interrogation du cloud (secondes)",
      "distinct_device_id": "Utiliser un identifiant d'appareil dédié (cohabiter avec l'app Danfoss / le connecteur MCP sans se déconnecter mutuellement)",
      "enable_local": "Activer le tunnel Zigbee local (passerelles) pour les écritures que le cloud rate",
+     "enable_vacation_write": "Activer les écritures de vacances (pose/annulation). Désactivé par défaut — n'activez que pour une validation réelle supervisée",
      "mqtt_mode": "Publication MQTT : off, discovery (entités HA auto), zigbee2mqtt (topics compatibles z2m)",
      "mqtt_source": "Source des valeurs publiées : cloud ou local",
      "mqtt_base_topic": "Préfixe de topic MQTT"
@@ -92,6 +93,122 @@
   "get_rooms": {
    "name": "Lister les pièces",
    "description": "Pièces et état de leurs têtes."
+  },
+  "set_vacation": {
+   "name": "Définir des vacances (absence)",
+   "description": "Définir ou modifier des vacances d'absence pour une maison : les pièces tiennent une température fixe pendant la période. VERROUILLÉ : activez d'abord les écritures de vacances dans les options.",
+   "fields": {
+    "home": {
+     "name": "Maison",
+     "description": "Identifiant de maison (gid) concerné."
+    },
+    "start_date": {
+     "name": "Date de début",
+     "description": "Date de début, AAAAMMJJ."
+    },
+    "start_time": {
+     "name": "Heure de début",
+     "description": "Heure de début, HH:MM."
+    },
+    "end_date": {
+     "name": "Date de fin",
+     "description": "Date de fin, AAAAMMJJ."
+    },
+    "end_time": {
+     "name": "Heure de fin",
+     "description": "Heure de fin, HH:MM."
+    },
+    "temperature": {
+     "name": "Température",
+     "description": "Température maintenue en degrés C (5 à 35, par 0,5)."
+    },
+    "rooms": {
+     "name": "Pièces",
+     "description": "Cibles de pièces optionnelles ; par défaut : toutes les pièces de la maison."
+    },
+    "time_zone": {
+     "name": "Fuseau horaire",
+     "description": "Fuseau horaire IANA (par défaut Europe/Paris)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
+  },
+  "set_vacation_at_home": {
+   "name": "Définir des vacances (à la maison)",
+   "description": "Définir ou modifier des vacances à la maison : chaque tête suit son programme du samedi pendant la période (pas de température). VERROUILLÉ. Nécessite un programme du samedi sur les pièces.",
+   "fields": {
+    "home": {
+     "name": "Maison",
+     "description": "Identifiant de maison (gid) concerné."
+    },
+    "start_date": {
+     "name": "Date de début",
+     "description": "Date de début, AAAAMMJJ."
+    },
+    "end_date": {
+     "name": "Date de fin",
+     "description": "Date de fin, AAAAMMJJ."
+    },
+    "rooms": {
+     "name": "Pièces",
+     "description": "Cibles de pièces optionnelles ; par défaut : toutes les pièces de la maison."
+    },
+    "time_zone": {
+     "name": "Fuseau horaire",
+     "description": "Fuseau horaire IANA (par défaut Europe/Paris)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
+  },
+  "cancel_vacation": {
+   "name": "Annuler les vacances",
+   "description": "Annuler des vacances planifiées avant leur début. VERROUILLÉ.",
+   "fields": {
+    "home": {
+     "name": "Maison",
+     "description": "Identifiant de maison (gid) concerné."
+    },
+    "time_zone": {
+     "name": "Fuseau horaire",
+     "description": "Fuseau horaire IANA (par défaut Europe/Paris)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
+  },
+  "end_vacation": {
+   "name": "Terminer les vacances maintenant",
+   "description": "Terminer des vacances en cours maintenant et réappliquer une température aux pièces. VERROUILLÉ.",
+   "fields": {
+    "home": {
+     "name": "Maison",
+     "description": "Identifiant de maison (gid) concerné."
+    },
+    "temperature": {
+     "name": "Température",
+     "description": "Température à réappliquer, en degrés C (5 à 35, par 0,5)."
+    },
+    "rooms": {
+     "name": "Pièces",
+     "description": "Cibles de pièces optionnelles ; par défaut : toutes les pièces de la maison."
+    },
+    "time_zone": {
+     "name": "Fuseau horaire",
+     "description": "Fuseau horaire IANA (par défaut Europe/Paris)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
   },
   "get_local_survey": {
    "name": "Relevé local du parc",
@@ -490,6 +607,18 @@
   },
   "ambiguous_home": {
    "message": "Les têtes indiquées sont dans des maisons différentes ; créez une pièce par maison."
+  },
+  "vacation_disabled": {
+   "message": "Les écritures de vacances sont désactivées ; activez-les dans les options de l'intégration (pour une session de validation réelle)."
+  },
+  "invalid_date": {
+   "message": "Date invalide (format attendu AAAAMMJJ)."
+  },
+  "invalid_vacation_period": {
+   "message": "Période de vacances invalide : la fin doit être après le début."
+  },
+  "empty_rooms": {
+   "message": "Cette maison n'a aucune pièce pour des vacances."
   }
  }
 }

@@ -102,6 +102,47 @@ _ATTACH = vol.Schema(
         vol.Optional("config_entry_id"): cv.string,
     }
 )
+# Vacation (holiday) writes (GATED). A vacation is set per HOME (gid), optionally scoped to a list
+# of room targets (default: every room of the home).
+_SET_VACATION = vol.Schema(
+    {
+        vol.Required("home"): cv.string,
+        vol.Required("start_date"): cv.string,
+        vol.Required("start_time"): cv.string,
+        vol.Required("end_date"): cv.string,
+        vol.Required("end_time"): cv.string,
+        vol.Required("temperature"): vol.Coerce(float),
+        vol.Optional("rooms"): [_TARGET],
+        vol.Optional("time_zone", default="Europe/Paris"): cv.string,
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
+_SET_VACATION_ATHOME = vol.Schema(
+    {
+        vol.Required("home"): cv.string,
+        vol.Required("start_date"): cv.string,
+        vol.Required("end_date"): cv.string,
+        vol.Optional("rooms"): [_TARGET],
+        vol.Optional("time_zone", default="Europe/Paris"): cv.string,
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
+_CANCEL_VACATION = vol.Schema(
+    {
+        vol.Required("home"): cv.string,
+        vol.Optional("time_zone", default="Europe/Paris"): cv.string,
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
+_END_VACATION = vol.Schema(
+    {
+        vol.Required("home"): cv.string,
+        vol.Required("temperature"): vol.Coerce(float),
+        vol.Optional("rooms"): [_TARGET],
+        vol.Optional("time_zone", default="Europe/Paris"): cv.string,
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
 
 
 def _store(hass: HomeAssistant, call: ServiceCall) -> dict:
@@ -293,6 +334,64 @@ def async_register_services(hass: HomeAssistant) -> None:
         except ops.OperationError as err:
             _raise(err)
 
+    async def set_vacation(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.set_vacation(
+                hass,
+                store,
+                call.data["home"],
+                call.data["start_date"],
+                call.data["start_time"],
+                call.data["end_date"],
+                call.data["end_time"],
+                call.data["temperature"],
+                call.data.get("rooms"),
+                call.data["time_zone"],
+            )
+        except ops.OperationError as err:
+            _raise(err)
+
+    async def set_vacation_at_home(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.set_vacation_at_home(
+                hass,
+                store,
+                call.data["home"],
+                call.data["start_date"],
+                call.data["end_date"],
+                call.data.get("rooms"),
+                call.data["time_zone"],
+            )
+        except ops.OperationError as err:
+            _raise(err)
+
+    async def cancel_vacation(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.cancel_vacation(hass, store, call.data["home"], call.data["time_zone"])
+        except ops.OperationError as err:
+            _raise(err)
+
+    async def end_vacation(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.end_vacation(
+                hass,
+                store,
+                call.data["home"],
+                call.data["temperature"],
+                call.data.get("rooms"),
+                call.data["time_zone"],
+            )
+        except ops.OperationError as err:
+            _raise(err)
+
     reg = hass.services.async_register
     reg(DOMAIN, "get_rooms", get_rooms, _GET_ROOMS, SupportsResponse.ONLY)
     reg(DOMAIN, "get_room", get_room, _RESTORE, SupportsResponse.ONLY)
@@ -317,3 +416,13 @@ def async_register_services(hass: HomeAssistant) -> None:
     reg(DOMAIN, "set_relay_room", set_relay_room, _SET_RELAY_ROOM, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "attach_heads", attach_heads, _ATTACH, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "detach_heads", detach_heads, _ATTACH, SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "set_vacation", set_vacation, _SET_VACATION, SupportsResponse.OPTIONAL)
+    reg(
+        DOMAIN,
+        "set_vacation_at_home",
+        set_vacation_at_home,
+        _SET_VACATION_ATHOME,
+        SupportsResponse.OPTIONAL,
+    )
+    reg(DOMAIN, "cancel_vacation", cancel_vacation, _CANCEL_VACATION, SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "end_vacation", end_vacation, _END_VACATION, SupportsResponse.OPTIONAL)

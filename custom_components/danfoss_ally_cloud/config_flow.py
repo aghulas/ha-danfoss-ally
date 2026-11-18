@@ -22,6 +22,7 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
     CONF_ENABLE_LOCAL,
+    CONF_ENABLE_VACATION_WRITE,
     CONF_MQTT_BASE_TOPIC,
     CONF_MQTT_MODE,
     CONF_MQTT_SOURCE,
@@ -31,6 +32,7 @@ from .const import (
     CONF_SIGN_KEY,
     CONF_USERNAME,
     DEFAULT_DISTINCT_DEVICE_ID,
+    DEFAULT_ENABLE_VACATION_WRITE,
     DEFAULT_MQTT_BASE_TOPIC,
     DEFAULT_MQTT_MODE,
     DEFAULT_MQTT_SOURCE,
@@ -115,6 +117,10 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
                     default=o.get(CONF_DISTINCT_DEVICE_ID, DEFAULT_DISTINCT_DEVICE_ID),
                 ): bool,
                 vol.Optional(CONF_ENABLE_LOCAL, default=o.get(CONF_ENABLE_LOCAL, False)): bool,
+                vol.Optional(
+                    CONF_ENABLE_VACATION_WRITE,
+                    default=o.get(CONF_ENABLE_VACATION_WRITE, DEFAULT_ENABLE_VACATION_WRITE),
+                ): bool,
                 vol.Optional(
                     CONF_MQTT_MODE, default=o.get(CONF_MQTT_MODE, DEFAULT_MQTT_MODE)
                 ): vol.In(["off", "discovery", "zigbee2mqtt"]),
