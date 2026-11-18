@@ -345,6 +345,26 @@
      "description": "Si plusieurs comptes sont configurés."
     }
    }
+  },
+  "get_holiday": {
+   "name": "Lire les vacances",
+   "description": "État de vacances par maison (lecture seule).",
+   "fields": {
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
+  },
+  "get_relays": {
+   "name": "Lire les relais chaudière",
+   "description": "Relais chaudière et pièces qui les pilotent (lecture seule).",
+   "fields": {
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
   }
  },
  "exceptions": {

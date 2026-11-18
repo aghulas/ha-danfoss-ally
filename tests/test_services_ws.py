@@ -365,3 +365,39 @@ async def test_ws_room_create(setup):
     ws.ws_room_create(hass, conn, {"id": 34, "name": "C", "devices": ["a", "b"]})
     await hass.async_block_till_done()
     assert conn.results[34]["room_id"] == "new-7"
+
+
+# --- B7: read services for holiday / relays ----------------------------------------------------
+
+
+def test_holidays_payload_shape():
+    from types import SimpleNamespace
+
+    from custom_components.danfoss_ally_cloud.const import DATA_COORDINATOR
+
+    coord = SimpleNamespace(
+        holidays={"1": {"name": "H", "active": True, "detail": {"temp": 150}}},
+    )
+    out = ops.holidays_payload({DATA_COORDINATOR: coord})
+    assert out == {"holidays": [{"home": "H", "gid": "1", "active": True, "detail": {"temp": 150}}]}
+
+
+async def test_service_get_holiday_and_relays(setup):
+    hass, _, _ = setup
+    hol = await hass.services.async_call(
+        DOMAIN, "get_holiday", {}, blocking=True, return_response=True
+    )
+    assert "holidays" in hol
+    rel = await hass.services.async_call(
+        DOMAIN, "get_relays", {}, blocking=True, return_response=True
+    )
+    assert "relays" in rel
+
+
+async def test_ws_holiday_and_relays(setup):
+    hass, _, _ = setup
+    conn = _FakeConn()
+    ws.ws_holiday(hass, conn, {"id": 40})
+    ws.ws_relays(hass, conn, {"id": 41})
+    assert "holidays" in conn.results[40]
+    assert "relays" in conn.results[41]

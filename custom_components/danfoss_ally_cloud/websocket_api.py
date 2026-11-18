@@ -39,6 +39,8 @@ def async_register(hass: HomeAssistant) -> None:
     reg(hass, ws_info)
     reg(hass, ws_rooms)
     reg(hass, ws_room_get)
+    reg(hass, ws_holiday)
+    reg(hass, ws_relays)
     reg(hass, ws_local_survey)
     reg(hass, ws_set_descaling)
     reg(hass, ws_set_override)
@@ -82,6 +84,30 @@ def ws_rooms(hass: HomeAssistant, connection, msg: dict) -> None:
         connection.send_error(msg["id"], "unknown_target", "no account configured")
         return
     connection.send_result(msg["id"], ops.rooms_payload(store))
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "danfoss_ally_cloud/holiday", vol.Optional("entry_id"): str}
+)
+@callback
+def ws_holiday(hass: HomeAssistant, connection, msg: dict) -> None:
+    store = _store(hass, msg)
+    if store is None:
+        connection.send_error(msg["id"], "unknown_target", "no account configured")
+        return
+    connection.send_result(msg["id"], ops.holidays_payload(store))
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "danfoss_ally_cloud/relays", vol.Optional("entry_id"): str}
+)
+@callback
+def ws_relays(hass: HomeAssistant, connection, msg: dict) -> None:
+    store = _store(hass, msg)
+    if store is None:
+        connection.send_error(msg["id"], "unknown_target", "no account configured")
+        return
+    connection.send_result(msg["id"], ops.relays_payload(store))
 
 
 @websocket_api.websocket_command(
