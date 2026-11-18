@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.1 — Frontend card bundle version fix
+
+Patch release. The 1.0.0 artifact shipped the Lovelace card bundle still stamped `0.6.1` — the
+versioned bundle was not rebuilt on the 1.0.0 version bump (the "bundle up to date" check is
+path-filtered and did not run on a manifest-only commit). This only affected the card's internal
+reload heuristic. The bundle is rebuilt so `CARD_VERSION` matches the release. No functional or
+API change. HACS/Marketplace validation now runs with no ignored checks (brands served from the
+local `brand/` folder).
+
+
 ## 1.0.0 — Coexistence, hardening and vacation writes (axis A)
 
 Path-1a coexistence with the Danfoss app / MCP connector, plus 1.0 hardening, plus the new **gated**

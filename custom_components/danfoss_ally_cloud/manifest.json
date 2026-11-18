@@ -19,5 +19,5 @@
     "pycryptodome==3.21.0",
     "tinytuya==1.15.1"
   ],
-  "version": "1.0.0"
+  "version": "1.0.1"
 }
