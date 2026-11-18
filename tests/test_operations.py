@@ -106,6 +106,100 @@ async def test_local_survey_ok():
     assert "surveyed_at" in res
 
 
+class _FakeManagerW:
+    """Write-side fake manager: the heads of _Coord sit on gateway 'gw-1'."""
+
+    def __init__(self, gateways=("gw-1",)):
+        self.gateway_ids = set(gateways)
+        self.calls: list = []
+
+    def descale(self, head, day, hour):
+        self.calls.append((head.dev_id, day, hour))
+        return True
+
+
+class _FakeLocalW:
+    def __init__(self, gateways=("gw-1",)):
+        self.manager = _FakeManagerW(gateways)
+
+
+_DEVICE = {"type": "device", "id": "a"}
+
+
+async def test_set_descaling_ok():
+    store, _ = _store()
+    local = _FakeLocalW()
+    store[DATA_LOCAL] = local
+    res = await ops.set_descaling(_FakeHass(), store, _DEVICE, "wed", "13:00")
+    assert res["accepted"] is True and res["day"] == "wed" and res["time"] == "13:00"
+    # "wed" mapped to the tunnel weekday name:
+    assert local.manager.calls == [("a", "wednesday", "13:00")]
+
+
+async def test_set_descaling_disabled():
+    store, _ = _store()
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.set_descaling(_FakeHass(), store, _DEVICE, "wed", "13:00")
+    assert exc.value.code == "local_disabled"
+
+
+async def test_set_descaling_device_only():
+    store, _ = _store()
+    store[DATA_LOCAL] = _FakeLocalW()
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.set_descaling(_FakeHass(), store, _ROOM, "wed", "13:00")
+    assert exc.value.code == "device_only"
+
+
+async def test_set_descaling_unverified_product():
+    store, coord = _store()
+    coord.data["a"].product_id = "not-verified"
+    store[DATA_LOCAL] = _FakeLocalW()
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.set_descaling(_FakeHass(), store, _DEVICE, "wed", "13:00")
+    assert exc.value.code == "unverified_product"
+
+
+async def test_set_descaling_unreachable():
+    store, _ = _store()
+    store[DATA_LOCAL] = _FakeLocalW(gateways=())  # head's gateway not reachable
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.set_descaling(_FakeHass(), store, _DEVICE, "wed", "13:00")
+    assert exc.value.code == "local_unreachable"
+
+
+async def test_set_descaling_invalid_day():
+    store, _ = _store()
+    store[DATA_LOCAL] = _FakeLocalW()
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.set_descaling(_FakeHass(), store, _DEVICE, "funday", "13:00")
+    assert exc.value.code == "invalid_day"
+
+
+async def test_set_descaling_invalid_time():
+    store, _ = _store()
+    store[DATA_LOCAL] = _FakeLocalW()
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.set_descaling(_FakeHass(), store, _DEVICE, "wed", "25:00")
+    assert exc.value.code == "invalid_time"
+
+
+async def test_set_descaling_write_refused():
+    from custom_components.danfoss_ally_cloud.api.local import tunnel as _tun
+
+    store, _ = _store()
+    local = _FakeLocalW()
+
+    def _boom(head, day, hour):
+        raise _tun.LocalError("refused")
+
+    local.manager.descale = _boom
+    store[DATA_LOCAL] = local
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.set_descaling(_FakeHass(), store, _DEVICE, "wed", "13:00")
+    assert exc.value.code == "local_write_failed"
+
+
 # --- Lecture -----------------------------------------------------------------------------------
 
 

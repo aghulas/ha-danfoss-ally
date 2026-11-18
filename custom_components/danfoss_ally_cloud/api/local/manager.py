@@ -108,3 +108,19 @@ class LocalTunnelManager:
             return status == 0
         finally:
             link.close()
+
+    def descale(self, head: Head, day: str, hour: str) -> bool:
+        """Set the weekly valve descaling day/time (0x4010/0x4011).
+
+        ``day`` = a tunnel weekday name ("monday"..."sunday"); ``hour`` = "HH:MM".
+        True if the head accepts (status 0). Raises LocalError (bad day/no response) or
+        LocalUnavailable (unknown gateway).
+        """
+        if head.gateway_id not in self._gateways:
+            raise tunnel.LocalUnavailable(f"unknown gateway: {head.gateway_id}")
+        link = self._open_link(self._gateways[head.gateway_id])
+        try:
+            status = tunnel.write_descale(link, head.dev_id, head.node_id, day, hour)
+            return status == 0
+        finally:
+            link.close()

@@ -14,6 +14,30 @@ get_local_survey:
         config_entry:
           integration: danfoss_ally_cloud
 
+set_descaling:
+  fields:
+    target:
+      required: true
+      example: '{"type": "device", "id": "<devId>"}'
+      selector:
+        object:
+    day:
+      required: true
+      example: wed
+      selector:
+        select:
+          options: [mon, tue, wed, thu, fri, sat, sun]
+    time:
+      required: true
+      example: "13:00"
+      selector:
+        time:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
 get_schedule:
   fields:
     target:
