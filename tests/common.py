@@ -124,6 +124,12 @@ class FakeCloudClient:
         return list((self._relay_rooms or {}).get(dev_id, []))
 
     # Room management writes (B5): record calls in ``writes``.
+    async def async_list_rooms(self, home_gid):
+        # One type-4 room per schedule-group, same name (so name resolution matches).
+        return [{"room_id": "room-5", "name": g.get("name")} for g in self._groups] or [
+            {"room_id": "room-5", "name": "Salle 1"}
+        ]
+
     async def async_room_id(self, home_gid, name):
         return "room-5"
 

@@ -145,15 +145,42 @@ def _current_members(coordinator, group_id: str) -> list[str]:
     ]
 
 
+def _room_name_candidates(group_name: str) -> list[str]:
+    """Room (type-4) name candidates for a schedule-group (type-5) name.
+
+    Tuya auto-labels the implicit program-group ``"<room> Group"`` when a room is created through
+    the API (observed on real hardware 2026-11-18): the schedule-group the integration tracks can
+    carry that suffix while the room keeps the base name. We therefore match the room on the group
+    name as read, and, failing that, on the group name with a trailing " Group" removed. Rooms
+    created in the app keep identical names, so the first candidate already matches there.
+    """
+    name = (group_name or "").strip()
+    candidates = [name]
+    low = name.lower()
+    if low.endswith(" group"):
+        stripped = name[: -len(" group")].strip()
+        if stripped and stripped not in candidates:
+            candidates.append(stripped)
+    return candidates
+
+
 async def _resolve_room_id(coordinator, group_id: str) -> str:
+    """Resolve the Tuya room id (type 4) for a schedule-group (type 5) the integration shows.
+
+    By name (the only link the API exposes, contract §4.7), tolerant of the ``"<room> Group"``
+    auto-label (``_room_name_candidates``). One room-map read.
+    """
     rs = coordinator.rooms.get(group_id)
     home = coordinator.home_of(group_id)
     if rs is None or home is None:
         raise OperationError("unknown_room", f"room not found: {group_id}")
-    room_id = await _run_cloud_write(coordinator.client.async_room_id, home, rs.name)
-    if room_id is None:
-        raise OperationError("unknown_room", f"no Tuya room named {rs.name!r}")
-    return room_id
+    rooms = await _run_cloud_write(coordinator.client.async_list_rooms, home)
+    by_name = {(r.get("name") or "").strip().lower(): r["room_id"] for r in rooms}
+    for candidate in _room_name_candidates(rs.name or ""):
+        room_id = by_name.get(candidate.lower())
+        if room_id is not None:
+            return room_id
+    raise OperationError("unknown_room", f"no Tuya room matching {rs.name!r}")
 
 
 async def create_room(hass: HomeAssistant, store: dict, name: str, devices: list[str]) -> dict:

@@ -43,17 +43,19 @@ async def test_room_set_devices_replaces_list():
 
 
 class _FakeClient:
-    def __init__(self, homes=None, room_id="r1"):
+    def __init__(self, homes=None, room_id="r1", room_map=None):
         self.calls: list = []
         self._homes = homes or [{"gid": "home-1", "name": "H"}]
         self._room_id = room_id
+        # Room map (type-4 rooms); default: one room named "Salle" (matches _FakeCoord's group).
+        self._rooms = room_map if room_map is not None else [{"room_id": room_id, "name": "Salle"}]
 
     async def async_get_homes(self):
         return list(self._homes)
 
-    async def async_room_id(self, home, name):
-        self.calls.append(("room_id", home, name))
-        return self._room_id
+    async def async_list_rooms(self, home):
+        self.calls.append(("list_rooms", home))
+        return list(self._rooms)
 
     async def async_room_add(self, gid, name):
         self.calls.append(("add", gid, name))
@@ -165,4 +167,31 @@ async def test_room_action_refuses_non_room_target():
     coord = _FakeCoord(_FakeClient())
     with pytest.raises(ops.OperationError) as e:
         await ops.rename_room(None, _store(coord), {"type": "device", "id": "a"}, "X")
+    assert e.value.code == "unknown_room"
+
+
+# --- room(type 4) vs implicit schedule-group(type 5) name duality (2026-11-18 field finding) ----
+
+
+def test_room_name_candidates_strips_group_suffix():
+    assert ops._room_name_candidates("Salle") == ["Salle"]
+    assert ops._room_name_candidates("Salle 1 Group") == ["Salle 1 Group", "Salle 1"]
+    assert ops._room_name_candidates("  Classroom Group ") == ["Classroom Group", "Classroom"]
+
+
+async def test_resolve_room_tolerates_group_suffix():
+    # The schedule-group the integration shows is auto-labelled "<room> Group"; the room map keeps
+    # the base name. Resolution must still find the room and address its type-4 id on the write.
+    client = _FakeClient(room_map=[{"room_id": "r-base", "name": "Salle"}])
+    coord = _FakeCoord(client)
+    coord.rooms["g1"] = RoomState(group_id="g1", name="Salle Group", pid="03wvrwpv", head_count=2)
+    await ops.rename_room(None, _store(coord), _ROOM, "New")
+    assert ("update", "r-base", "New") in client.calls
+
+
+async def test_resolve_room_unknown_when_no_name_match():
+    client = _FakeClient(room_map=[{"room_id": "x", "name": "Other"}])
+    coord = _FakeCoord(client)
+    with pytest.raises(ops.OperationError) as e:
+        await ops.delete_room(None, _store(coord), _ROOM)
     assert e.value.code == "unknown_room"

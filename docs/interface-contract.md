@@ -327,10 +327,24 @@ by the MCP connector (`smartlife.m.*` family; the APK also exposes the `thing.m.
 | Set a room's heads | `smartlife.m.custom.wkf.device.relations.selected.save` | 1.0 | `{"bizs": [{"id": devId, "type": 6}], "onlyParent": true, "parentId": R, "parentType": 4}` | — |
 
 - **Attach / detach REPLACE the whole member list**: the backend sends `current ∪ added` to attach and
-  `current − removed` to detach; it snapshots the previous membership for restoration.
-- Room ↔ schedule-group mapping is **by name** (`room.map.get` + `group.device.group.list` §4.1).
+  `current − removed` to detach; it snapshots the previous membership for restoration. The current
+  members are read from the **schedule-group** membership (not by name), so they are correct even
+  when the names below diverge. The write addresses the **room (type 4)** via `parentId`.
+- **Room (type 4) vs implicit schedule-group (type 5).** Grouping ≥ 2 compatible heads creates an
+  *implicit* schedule-group (`m.light.room.implicit.group.*`). When a room is created **through the
+  API**, Tuya auto-labels that group `"<room name> Group"`, so the group name the integration tracks
+  (from `group.device.group.list`, §4.1) can differ from the room name (from `room.map.get`). Rooms
+  created **in the app** keep identical names. Observed on real hardware 2026-11-18.
+- **Room ↔ schedule-group mapping is by name** (the only link the API exposes), tolerant of that
+  `" Group"` suffix: the backend matches the room on the group name, then on the group name with a
+  trailing `" Group"` removed.
+- **`rename_room` renames the room (type 4) only.** The implicit schedule-group may keep its old
+  `"<old name> Group"` label until Tuya re-derives it; the integration's room device name follows the
+  group name, so it can lag a rename. No schedule-group rename API is known.
 - These writes mutate the live account structure (regrouping/ungrouping heads changes shared
-  schedules) → **real-hardware validation required** before use.
+  schedules) → **real-hardware validation required** before use. **Attach / detach specifically were
+  not exercised end-to-end as of 0.5.0** (the room-vs-group duality above surfaced during the
+  2026-11-18 validation): the replace-list effect on the implicit group must be confirmed on hardware.
 
 ## 5. What the integration exposes
 
