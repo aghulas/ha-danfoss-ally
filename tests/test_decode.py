@@ -137,4 +137,12 @@ def test_head_state_contract_shape():
         "preheat": False,
         "mounting": False,
         "inconsistent": False,
+        # Status fields (axis D): absent DPs decode to None / [] (nothing fabricated).
+        "battery": None,
+        "valve_opening": None,
+        "heat_request": None,
+        "window_open": None,
+        "window_detection": None,
+        "child_lock": None,
+        "faults": [],
     }

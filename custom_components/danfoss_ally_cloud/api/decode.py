@@ -204,7 +204,11 @@ def decode_operation(dp172: Any) -> tuple[bool | None, bool | None]:
 
 
 def head_state(dev: DanfossDevice, room_id: str | None = None) -> dict[str, Any]:
-    """Contract `HeadState` (§3.3) built from a decoded device."""
+    """Contract `HeadState` (§3.3) built from a decoded device.
+
+    The status fields (battery, valve, window, lock, faults) are read-only and come straight from
+    the already-decoded device (no extra cloud call): they let the UI (axis D) show per-head health.
+    """
     return {
         "device_id": dev.id,
         "name": dev.name,
@@ -215,6 +219,13 @@ def head_state(dev: DanfossDevice, room_id: str | None = None) -> dict[str, Any]
         "preheat": dev.preheat,
         "mounting": bool(dev.mounting),
         "inconsistent": dev.inconsistent,
+        "battery": dev.battery,
+        "valve_opening": dev.valve_opening,
+        "heat_request": dev.heat_request,
+        "window_open": dev.window_open,
+        "window_detection": dev.window_detection,
+        "child_lock": dev.child_lock,
+        "faults": list(dev.faults),
     }
 
 

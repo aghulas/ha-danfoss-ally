@@ -106,6 +106,14 @@ get_relays:
         config_entry:
           integration: danfoss_ally_cloud
 
+get_overview:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
 get_local_survey:
   fields:
     config_entry_id:
