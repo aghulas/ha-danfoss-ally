@@ -141,6 +141,35 @@ All times are `HH:MM` strings over 24 h, from `00:00` to `23:59`. Days are named
 }
 ```
 
+### 3.4b Holiday (`Holiday`, read only)
+
+```json
+{
+  "home": "Home",
+  "gid": "13000000",
+  "active": true,
+  "detail": { "start": "…", "end": "…", "temp": 15.0 }
+}
+```
+- `active`: a holiday period is in force (`vacation.detail` non-empty).
+- `detail`: the cloud's holiday record, passed through unmodified (fields vary; may be `null`).
+
+### 3.4c Boiler relay (`Relay`)
+
+```json
+{
+  "device_id": "<devId>",
+  "name": "Boiler relay",
+  "home": "Home",
+  "on": true,
+  "online": true,
+  "rooms": [{ "room_id": "13000000", "name": "Room 1", "linked": true }]
+}
+```
+- `on`: DP `1`, read only in contract (§4.6).
+- `rooms`: every eligible room with whether it currently drives the relay (`linked`). Writing
+  `linked` goes through `set_relay_room` (§5.2), gated on real-hardware validation.
+
 ### 3.5 Write tracking (`WriteJob`)
 
 ```json
@@ -244,6 +273,65 @@ reference, over the published product schema.
 > head as `7`, idle — whereas a `10⁰` reading of `700` would have clamped to the upper bound and
 > requested heat). Do not "correct" the code to the schema.
 
+### 4.5 Holiday (read only)
+
+The app's **holiday set / exit** routes are **not** in the APK (loaded as a runtime mini-program):
+they are **uncaptured**, so the integration **cannot write** a holiday period. R5 already states that
+`holiday` published via DP 2 is only a **label**. Holiday is therefore **read only** in the
+integration; the write stays out of contract (§7) until a capture is done (Rémi + the app).
+
+The read routes observed on the APK (`danfoss-app-capture/ROUTES.md`), replayed read-only by the MCP
+connector (`vacances`):
+
+| Operation | API | Version | Body | Returns |
+|---|---|---|---|---|
+| Active holiday of a home | `tuya.m.solution.wkf.vacation.detail` | 1.0 | `{"homeId": "<gid>"}` | detail dict, `{}` if none |
+| Rooms covered by the holiday | `tuya.m.solution.wkf.vacation.rooms.list` | 1.0 | `{"homeId": "<gid>"}` | list of rooms (optional) |
+
+A non-empty `vacation.detail` means a holiday is active; its fields (start/end, setpoint) are passed
+through as read by the cloud (no re-interpretation). DP 121 (`holiday_setting`) is the per-head
+holiday setpoint, decoded already (§4.3, `setpoints.holiday`).
+
+### 4.6 Boiler relay
+
+A **boiler relay** is a standalone Zigbee switch (Tuya `category` `kg`, one per home), not attached to
+a room/group. Its single DP `1` = on/off. The useful control is *which rooms drive it* (the relay
+follows the heat demand of the rooms **linked** to it, a server-side Danfoss function).
+
+| Operation | API | Version | Body | Notes |
+|---|---|---|---|---|
+| Relay state | `tuya.m.my.group.device.list` | 1.0 | `gid` (URL param) | filter `category == "kg"`; `dps["1"]` = on/off |
+| Rooms driving the relay (read) | `m.life.solution.wkf.reference.room` | 1.0 | `{"devId": R, "gwId": R}` | `[{roomId, roomName, enable, cancel}]`; **linked** = `enable` and not `cancel` |
+| Link / unlink a room (write) | `m.life.solution.wkf.reference.edit` | 1.0 | `{"devId": R, "gwId": R, "roomId", "status": "bind"\|"unbind"}` | one room per call; **real-hardware validation required** |
+
+- `gwId == devId` of the relay (not a `meshId`) for both relay calls — observed on the app, proven on
+  the read path (2026-11-15); the write (`reference.edit`) is captured but **to validate on real
+  hardware** (it changes the boiler's heat demand).
+- **Direct relay on/off (DP `1`, device level) is NOT in contract**: the device-level publish method is
+  uncaptured (the candidates reject the parameter format). Reading the state is in contract; forcing it
+  is not (§7). While the Danfoss gateways drive the relay, the server can rewrite the DP at its own
+  cadence anyway.
+
+### 4.7 Room management
+
+A **room** is a Tuya room (`type` 4); grouping ≥ 2 heads of the same type into a room creates the
+schedule-group (`type` 5) that §1 and §4.1 drive. Routes captured and **validated on real hardware**
+by the MCP connector (`smartlife.m.*` family; the APK also exposes the `thing.m.*` twins):
+
+| Operation | API | Version | Body | Returns |
+|---|---|---|---|---|
+| Room map (name ↔ roomId) | `m.life.group.room.map.get` | 1.0 | `{"gid": G}` | `{"rooms": [{id, name}]}` |
+| Create a room | `smartlife.m.room.add` | 2.0 | `{"gid": G, "name": N}` | `{"id": roomId}` |
+| Rename a room | `smartlife.m.room.update` | 1.0 | `{"roomId": R, "name": N}` | — |
+| Delete a room | `smartlife.m.custom.wfk.room.dismiss` | 1.0 | `{"roomId": R}` | — (heads become ungrouped) |
+| Set a room's heads | `smartlife.m.custom.wkf.device.relations.selected.save` | 1.0 | `{"bizs": [{"id": devId, "type": 6}], "onlyParent": true, "parentId": R, "parentType": 4}` | — |
+
+- **Attach / detach REPLACE the whole member list**: the backend sends `current ∪ added` to attach and
+  `current − removed` to detach; it snapshots the previous membership for restoration.
+- Room ↔ schedule-group mapping is **by name** (`room.map.get` + `group.device.group.list` §4.1).
+- These writes mutate the live account structure (regrouping/ungrouping heads changes shared
+  schedules) → **real-hardware validation required** before use.
+
 ## 5. What the integration exposes
 
 ### 5.1 Devices and entities
@@ -259,6 +347,12 @@ reference, over the published product schema.
   proven on real hardware 2026-11-16, PR #10). Outside these modes, or for an ungrouped head, the
   write fails cleanly (an error rather than a misleading value). The room's `number` entities offer
   the same setting, per room; the thermostat remains the per-head access.
+- **Holiday (read only)**: per home, a `binary_sensor` "holiday active" and a `sensor` "holiday
+  setpoint" (the holiday record's temperature, `null` if none). No holiday *write* entity (§4.5, §7).
+- **Boiler relay (read only)**: per relay device (`category` `kg`), a `binary_sensor` "boiler relay"
+  (DP `1`) and a `sensor` "rooms calling for heat" (count of linked rooms). No relay on/off *switch*
+  (the device-level write is uncaptured, §4.6, §7); the room ↔ relay link is changed via
+  `set_relay_room` (§5.2).
 
 ### 5.2 Actions (services)
 
@@ -273,8 +367,19 @@ take `config_entry_id` when several accounts are configured.
 | `copy_schedule` | `source`, `targets` (list), `days` (optional) | `{"jobs": [WriteJob]}` | copy the schedule |
 | `restore_schedule` | `target` | `WriteJob` | R4: rewrite the 7 days then publish `at_home` |
 | `get_write_job` | `job_id` | `WriteJob` | read |
+| `get_holiday` | — | `{"holidays": [Holiday]}` | read |
+| `get_relays` | — | `{"relays": [Relay]}` | read |
+| `get_room` | `target` (room) | `{"room": Room, "schedule": Schedule}` | read |
+| `create_room` | `name`, `devices` (list of devId) | `{"room_id": "…"}` | create a room + attach heads |
+| `rename_room` | `target` (room), `name` | `{"room_id": "…"}` | rename |
+| `delete_room` | `target` (room) | `{"room_id": "…"}` | delete (heads ungrouped) |
+| `attach_heads` | `target` (room), `devices` | `{"room_id": "…", "heads": […]}` | add heads (replaces list) |
+| `detach_heads` | `target` (room), `devices` | `{"room_id": "…", "heads": […]}` | remove heads |
+| `set_relay_room` | `relay` (devId), `target` (room), `linked` (bool) | `{"relay": "…", "room_id": "…", "linked": bool}` | link/unlink a room to the boiler relay |
 
-`set_schedule` touches only the given days; the others stay as they are in the cloud.
+`set_schedule` touches only the given days; the others stay as they are in the cloud. The room
+write actions and `set_relay_room` refuse a non-administrator (`not_admin`); they are gated on
+real-hardware validation (they mutate the live account / the boiler's heat demand).
 
 ### 5.3 WebSocket commands (for the frontend)
 
@@ -287,6 +392,15 @@ take `config_entry_id` when several accounts are configured.
 | `danfoss_ally_cloud/schedule/set` | `target`, `days` | `WriteJob` | administrator |
 | `danfoss_ally_cloud/schedule/restore` | `target` | `WriteJob` | administrator |
 | `danfoss_ally_cloud/jobs/subscribe` | — | `WriteJob` events on every change | all |
+| `danfoss_ally_cloud/holiday` | `entry_id` (optional) | `{"holidays": [Holiday]}` | all |
+| `danfoss_ally_cloud/relays` | `entry_id` (optional) | `{"relays": [Relay]}` | all |
+| `danfoss_ally_cloud/room/get` | `target` | `{"room": Room, "schedule": Schedule}` | all |
+| `danfoss_ally_cloud/room/create` | `name`, `devices` | `{"room_id": "…"}` | administrator |
+| `danfoss_ally_cloud/room/rename` | `target`, `name` | `{"room_id": "…"}` | administrator |
+| `danfoss_ally_cloud/room/delete` | `target` | `{"room_id": "…"}` | administrator |
+| `danfoss_ally_cloud/room/attach` | `target`, `devices` | `{"room_id": "…", "heads": […]}` | administrator |
+| `danfoss_ally_cloud/room/detach` | `target`, `devices` | `{"room_id": "…", "heads": […]}` | administrator |
+| `danfoss_ally_cloud/relay/set_room` | `relay`, `target`, `linked` | `{…}` | administrator |
 
 The WebSocket commands and the actions share the same implementation: one function per operation.
 
@@ -306,6 +420,11 @@ stable.
 | `not_admin` | write by a non-administrator user |
 | `cloud_refused` | the cloud refused the call |
 | `session_expired` | session to renew (re-authentication in progress) |
+| `unknown_room` | named room not found in the account |
+| `unknown_relay` | relay devId not found |
+| `unknown_head` | head devId not found when attaching/detaching |
+| `empty_devices` | a room create/attach was given no head |
+| `no_members_left` | detaching would leave the room with no head (use `delete_room`) |
 
 ## 6. Embedded frontend
 
@@ -325,7 +444,14 @@ stable.
 
 ## 7. Out of contract for now
 
-Holiday (write unknown), one-off override outside comfort / setback modes (R5), room management
-(create, rename, attach), boiler relay, firmware, full panel. Each will be the subject of an
-addition to this contract. (The durable room setpoint, however, is now in the contract — see §5.1,
-PR #10.)
+Axis B (0.5.0) brought holiday **read** (§4.5), the boiler relay **read** + room↔relay **link**
+(§4.6), and room management (§4.7) into the contract. What stays out:
+
+- **Holiday set / exit (write).** The app's holiday pose/exit routes are **not** in the APK (runtime
+  mini-program): uncaptured. R5: DP 2 `holiday` is a label only, never a real holiday write. Blocked
+  until an app capture (Rémi + the app), like the distinct-`deviceId` capture (`architecture.md`).
+- **Direct boiler-relay on/off (DP `1`, device level).** The device-level publish method is
+  uncaptured (candidates reject the parameter format). Only the relay *state read* and the room↔relay
+  *link* are in contract. While the Danfoss gateways drive the relay, the server rewrites the DP at
+  its own cadence anyway.
+- **Firmware, the full embedded panel.** Each will be the subject of a later addition.
