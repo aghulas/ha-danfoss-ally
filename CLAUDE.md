@@ -6,8 +6,8 @@ gateway-key fetching and MQTT publishing of the devices.
 
 ## What we are building
 
-- **HA domain**: `danfoss_ally_cloud` (distinct from MTrab's `danfoss_ally`, to coexist and have its
-  own entry in `home-assistant/brands`).
+- **HA domain**: `danfoss_ally_cloud` (distinct from MTrab's `danfoss_ally`, to coexist; its brand
+  icons ship in `custom_components/danfoss_ally_cloud/brand/`).
 - **Repo**: `aghulas/ha-danfoss-ally` (private at first, intended for the HACS Marketplace once
   hardened).
 - Public release is intended: bring features to the community **and** exercise the code on other
@@ -80,8 +80,9 @@ redacted diagnostics, dependency audit.
 
 Prerequisites already in place: `manifest.json` (domain, name, semver version, codeowners,
 documentation, issue_tracker, iot_class, config_flow), `hacs.json`, CI workflows, a single component
-under `custom_components/`. Remaining before inclusion: brand assets (separate PR in
-`home-assistant/brands`, at least `icon.png`), tagged releases, then an inclusion PR (only the
+under `custom_components/`. Brand icons ship in the component's `brand/` folder (HA >= 2026.3;
+`home-assistant/brands` no longer accepts new custom integrations). Remaining before inclusion:
+tagged releases, then an inclusion PR (only the
 owner/major contributor can submit it). Installable as a custom repository already.
 
 ## Commit, push, discipline
