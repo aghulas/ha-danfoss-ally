@@ -28,6 +28,7 @@ from .const import (
     CONF_MQTT_MODE,
     CONF_MQTT_SOURCE,
     CONF_PASSWORD,
+    CONF_POST_COMMAND_REFRESH,
     CONF_REGION,
     CONF_SCAN_INTERVAL,
     CONF_SIGN_KEY,
@@ -38,6 +39,7 @@ from .const import (
     DEFAULT_MQTT_BASE_TOPIC,
     DEFAULT_MQTT_MODE,
     DEFAULT_MQTT_SOURCE,
+    DEFAULT_POST_COMMAND_REFRESH,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
@@ -119,6 +121,10 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
                     default=o.get(CONF_DISTINCT_DEVICE_ID, DEFAULT_DISTINCT_DEVICE_ID),
                 ): bool,
                 vol.Optional(CONF_ENABLE_LOCAL, default=o.get(CONF_ENABLE_LOCAL, False)): bool,
+                vol.Optional(
+                    CONF_POST_COMMAND_REFRESH,
+                    default=o.get(CONF_POST_COMMAND_REFRESH, DEFAULT_POST_COMMAND_REFRESH),
+                ): bool,
                 vol.Optional(
                     CONF_ENABLE_VACATION_WRITE,
                     default=o.get(CONF_ENABLE_VACATION_WRITE, DEFAULT_ENABLE_VACATION_WRITE),

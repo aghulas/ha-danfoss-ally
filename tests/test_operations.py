@@ -66,9 +66,13 @@ class _Coord:
         }
         self._group = {"a": "13000000", "b": "13000000"} if grouped else {}
         self.refreshed = False
+        self.commanded: list[str] = []
 
     def group_of(self, head_id):
         return self._group.get(head_id)
+
+    def note_commanded(self, head_ids):
+        self.commanded.extend(head_ids)
 
     async def async_request_refresh(self):
         self.refreshed = True

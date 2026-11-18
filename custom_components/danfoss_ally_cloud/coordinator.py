@@ -15,9 +15,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import CloudAuthError, CloudClient, CloudError, DanfossDevice
+from .api import CloudAuthError, CloudClient, CloudError, DanfossDevice, apply_dps_overlay
 from .api.local.manager import Head, LocalTunnelManager
 from .api.rooms import Room, RoomState, aggregate_room
+from .const import POST_COMMAND_REFRESH_MAX_HEADS, POST_COMMAND_REFRESH_TTL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,7 +30,14 @@ _TOPOLOGY_TTL = 3600  # seconds
 class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
     """Gathers the fleet state: heads (``data``) + aggregated rooms (``rooms``)."""
 
-    def __init__(self, hass: HomeAssistant, client: CloudClient, scan_interval: int) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: CloudClient,
+        scan_interval: int,
+        *,
+        post_command_refresh: bool = False,
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
@@ -37,6 +45,11 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
             update_interval=timedelta(seconds=scan_interval),
         )
         self.client = client
+        # Post-command refresh (R-3): head_id -> monotonic deadline until which the head is read via
+        # the per-device route instead of trusting the lagging bulk list. Empty (and a no-op) unless
+        # the option is on.
+        self._post_command_refresh = post_command_refresh
+        self._commanded: dict[str, float] = {}
         # Aggregated rooms (group_id -> RoomState) and head -> room membership, recomputed on each
         # refresh from the cached topology and the current head state.
         self.rooms: dict[str, RoomState] = {}
@@ -61,6 +74,7 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         except CloudError as err:
             raise UpdateFailed(str(err)) from err
         data = {dev.id: dev for dev in devices}
+        await self._overlay_commanded(data)
         await self._ensure_topology(data)
         self.rooms = {
             gid: aggregate_room(room, members)
@@ -69,6 +83,44 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         }
         self.grouped_ids = {head_id for head_id in self._group_of if head_id in data}
         return data
+
+    def note_commanded(self, head_ids: list[str] | set[str]) -> None:
+        """Mark heads just commanded so the next polls read them via the per-device route (R-3).
+
+        No-op unless the post-command refresh option is on. Called by the write paths (room
+        setpoint, schedule set / restore) right after a successful cloud write, including before the
+        write's own ``async_request_refresh`` — so that first refresh already overlays the fresh
+        per-device state instead of the lagging bulk list. Each call (re)arms the window for
+        ``POST_COMMAND_REFRESH_TTL`` seconds; expired ids are pruned on the next poll.
+        """
+        if not self._post_command_refresh:
+            return
+        deadline = time.monotonic() + POST_COMMAND_REFRESH_TTL
+        for head_id in head_ids:
+            if head_id:
+                self._commanded[head_id] = deadline
+
+    async def _overlay_commanded(self, data: dict[str, DanfossDevice]) -> None:
+        """Overlay the per-device (fresh) DPs onto recently commanded heads (R-3). Best-effort.
+
+        Bounded on purpose (the user's real account): only heads still inside their post-command
+        window are read, at most ``POST_COMMAND_REFRESH_MAX_HEADS`` per poll, one per-device read
+        each. A read failure or an empty response keeps the bulk value (never raises). Expired
+        entries are pruned so a head returns to the bulk route after its window.
+        """
+        if not self._post_command_refresh or not self._commanded:
+            return
+        now = time.monotonic()
+        self._commanded = {h: dl for h, dl in self._commanded.items() if dl > now}
+        hot = [h for h in self._commanded if h in data and data[h].is_head]
+        for head_id in hot[:POST_COMMAND_REFRESH_MAX_HEADS]:
+            try:
+                fresh = await self.client.async_get_device_dps(head_id)
+            except CloudError as err:
+                _LOGGER.debug("post-command refresh kept bulk for %s (%s)", head_id, err)
+                continue
+            if fresh:
+                data[head_id] = apply_dps_overlay(data[head_id], fresh)
 
     def group_of(self, head_id: str) -> str | None:
         """A head's room group_id, or None if the head is not grouped."""

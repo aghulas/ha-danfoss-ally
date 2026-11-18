@@ -26,6 +26,7 @@ from .client import (
 )
 from .decode import (
     DanfossDevice,
+    apply_dps_overlay,
     decode_device,
     decode_operation,
     head_state,
@@ -45,6 +46,7 @@ __all__ = [
     "Schedule",
     "ScheduleValidationError",
     "UnknownTargetError",
+    "apply_dps_overlay",
     "async_fetch_gateway_keys",
     "count_transitions",
     "decode_device",

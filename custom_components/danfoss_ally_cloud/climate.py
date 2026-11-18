@@ -180,6 +180,15 @@ class DanfossRoomClimate(CoordinatorEntity[DanfossCoordinator], ClimateEntity):
             await self.coordinator.client.async_set_group_setpoint(self._group_id, room.pid, dps)
         except CloudError as err:
             raise HomeAssistantError(f"setpoint write refused: {err}") from err
+        # R-3: the room's heads just changed; read them via the per-device route on the next polls
+        # (incl. the refresh below) so the write round-trip is reflected without the bulk-route lag.
+        self.coordinator.note_commanded(
+            [
+                dev.id
+                for dev in self.coordinator.data.values()
+                if dev.is_head and self.coordinator.group_of(dev.id) == self._group_id
+            ]
+        )
         await self.coordinator.async_request_refresh()
 
 

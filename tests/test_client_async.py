@@ -277,3 +277,28 @@ async def test_async_set_group_setpoint_without_pid_does_not_rewrite():
     apis = [a for a, *_ in fake.calls]
     assert "s.m.dev.group.dp.publish" in apis
     assert "tuya.m.custom.wkf.week.timer.list" not in apis  # pid inconnu → pas de re-push
+
+
+# --- R-3 per-device fresh read (async_get_device_dps via smartlife.m.device.get v4.0) -----------
+
+
+async def test_get_device_dps_returns_fresh_dps():
+    fake = FakeHttp({"smartlife.m.device.get": {"name": "Salon", "dps": {"170": 82, "16": 210}}})
+    with patch(_HTTP, return_value=fake):
+        dps = await _client().async_get_device_dps("dev-1")
+    assert dps == {"170": 82, "16": 210}
+    api, version, body, _ = fake.calls[0]
+    assert (api, version, body) == ("smartlife.m.device.get", "4.0", {"devId": "dev-1"})
+
+
+async def test_get_device_dps_none_when_no_dps():
+    # The route carries only meta (gateways): no DPs -> None (caller keeps the bulk value).
+    fake = FakeHttp({"smartlife.m.device.get": {"name": "GW", "meta": {"zigChannel": 15}}})
+    with patch(_HTTP, return_value=fake):
+        assert await _client().async_get_device_dps("gw-1") is None
+
+
+async def test_get_device_dps_coerces_keys_to_str():
+    fake = FakeHttp({"smartlife.m.device.get": {"dps": {170: 50}}})
+    with patch(_HTTP, return_value=fake):
+        assert await _client().async_get_device_dps("dev-1") == {"170": 50}

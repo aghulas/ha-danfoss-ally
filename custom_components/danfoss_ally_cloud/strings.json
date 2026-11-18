@@ -32,6 +32,7 @@
           "scan_interval": "Cloud polling interval (seconds)",
           "distinct_device_id": "Use a dedicated device id (coexist with the Danfoss app / MCP connector without logging each other out)",
           "enable_local": "Enable the local Zigbee tunnel (gateways) for writes the cloud misses",
+          "post_command_refresh": "Refresh just-commanded heads via the per-device route (R-3: the bulk poll lags for minutes after a change). Off by default — turn on for a real-hardware validation session",
           "enable_vacation_write": "Enable vacation writes (holiday set/cancel). Off by default — turn on only for a supervised real-hardware validation",
           "enable_head_unbind": "Enable device unbind (disconnect a head, sensor or relay from the network). Destructive — off by default; turn on only for a supervised real-hardware validation",
           "mqtt_mode": "MQTT publishing: off, discovery (auto HA entities), zigbee2mqtt (z2m-compatible topics)",

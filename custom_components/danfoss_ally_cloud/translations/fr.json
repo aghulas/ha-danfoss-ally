@@ -32,6 +32,7 @@
      "scan_interval": "Intervalle d'interrogation du cloud (secondes)",
      "distinct_device_id": "Utiliser un identifiant d'appareil dédié (cohabiter avec l'app Danfoss / le connecteur MCP sans se déconnecter mutuellement)",
      "enable_local": "Activer le tunnel Zigbee local (passerelles) pour les écritures que le cloud rate",
+     "post_command_refresh": "Rafraîchir les têtes qui viennent d'être commandées via la route individuelle (R-3 : la liste groupée retarde de plusieurs minutes après un changement). Désactivé par défaut — activez-le pour une session de validation réelle",
      "enable_vacation_write": "Activer les écritures de vacances (pose/annulation). Désactivé par défaut — n'activez que pour une validation réelle supervisée",
      "enable_head_unbind": "Activer le décrochage d'appareil (dissocier une tête, un capteur ou un relais du réseau). Destructif — désactivé par défaut ; n'activez que pour une validation réelle supervisée",
      "mqtt_mode": "Publication MQTT : off, discovery (entités HA auto), zigbee2mqtt (topics compatibles z2m)",
