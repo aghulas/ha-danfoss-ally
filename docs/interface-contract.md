@@ -119,13 +119,26 @@ All times are `HH:MM` strings over 24 h, from `00:00` to `23:59`. Days are named
   "schedule_active": true,
   "preheat": false,
   "mounting": false,
-  "inconsistent": false
+  "inconsistent": false,
+  "battery": 90,
+  "valve_opening": 40,
+  "heat_request": true,
+  "window_open": false,
+  "window_detection": true,
+  "child_lock": false,
+  "faults": [{ "code": "E14", "bit": 13, "label": "low battery", "action": "…" }]
 }
 ```
 - `schedule_active`, `preheat`: decoded from DP 172 (R6); `null` if the DP is absent.
 - `inconsistent`: `mode_displayed` is `at_home` or `leaving_home` while `schedule_active` is `false`
   (head left in manual without the app knowing).
 - `mounting`: DP 149 (head in mounting mode, not regulating).
+- Status fields (all **read only**, decoded from the device DPs, `null` when the DP is absent):
+  `battery` (%, DP 34), `valve_opening` (%, DP 170 `pi_heating_demand`), `heat_request` (DP 162),
+  `window_open` (DP 25), `window_detection` (DP 116), `child_lock` (DP 30). `faults` is the decoded
+  fault list (DP 45 / DP 184, same table as ZHA/Z2M); `E14`/`E15` mark low / critical battery. These
+  were surfaced on `HeadState` in 0.6.0 (axis D) so the UI can show per-head battery / valve / window
+  / fault; they add **no** cloud call (all come from `tuya.m.my.group.device.list`, §4.3).
 
 ### 3.4 Room (`Room`)
 
@@ -137,9 +150,23 @@ All times are `HH:MM` strings over 24 h, from `00:00` to `23:59`. Days are named
   "product_id": "03wvrwpv",
   "heads": [ /* HeadState */ ],
   "comfort": 21.0,
-  "setback": 14.0
+  "setback": 14.0,
+  "temperature": 20.4,
+  "setpoint": 21.0,
+  "mode": "at_home",
+  "heating": true,
+  "online": true,
+  "writable": true,
+  "climate_entity_id": "climate.room_1"
 }
 ```
+- `temperature`, `setpoint`, `mode`, `heating`, `online`: the aggregated room state (same values the
+  room `climate` entity exposes). Added in 0.6.0 (axis D) so the room card shows the live climate
+  without a second round-trip; read only.
+- `writable`: the room's product is in `WRITE_VERIFIED_PRODUCTS` (setpoint write allowed on the
+  room `climate`). `climate_entity_id`: the room thermostat's entity id (resolved from the entity
+  registry, `unique_id = group_id`), or `null` if not registered yet. The room card uses it to call
+  the **existing, already-validated** `climate.set_temperature`; it introduces no new write path.
 
 ### 3.4b Holiday (`Holiday`, read only)
 
@@ -190,6 +217,51 @@ All times are `HH:MM` strings over 24 h, from `00:00` to `23:59`. Days are named
 - Verification: for the mode, DP 172 on the next refresh; for the schedule, reading from the head
   via the local tunnel **if the local fallback is enabled**, otherwise `unverified`.
 - Jobs are kept in memory (the last 50), not persisted.
+
+### 3.6 Fleet overview (`FleetOverview`, read only)
+
+Building / fleet snapshot for the side panel (§8). Aggregated **entirely from the coordinator's
+cached state** — no extra cloud call (added in 0.6.0, axis D).
+
+```json
+{
+  "homes": [
+    {
+      "gid": "13000000",
+      "name": "Home",
+      "holiday_active": false,
+      "gateways": [
+        { "device_id": "<devId>", "name": "Gateway", "online": true }
+      ],
+      "rooms": [
+        {
+          "id": "13000000",
+          "name": "Room 1",
+          "head_count": 3,
+          "offline": 0,
+          "low_battery": 1,
+          "heating": true,
+          "window_open": false,
+          "inconsistent": 0,
+          "faults": 1
+        }
+      ],
+      "relays": [
+        { "device_id": "<devId>", "name": "Boiler relay", "on": true, "online": true, "linked_rooms": 2 }
+      ]
+    }
+  ],
+  "totals": {
+    "homes": 1, "gateways": 1, "rooms": 1, "heads": 3,
+    "offline": 0, "low_battery": 1, "heating": 1, "faults": 1, "relays_on": 1
+  }
+}
+```
+- Per room: `offline` / `low_battery` / `inconsistent` / `faults` are counts over the member heads;
+  `low_battery` counts heads with an `E14`/`E15` fault **or** `battery` ≤ 10 %; `heating` is true if
+  any member head requests heat (`heat_request`) or the aggregated room is heating; `window_open` is
+  true if any member head reports an open window.
+- `totals` sums the per-home figures (building-wide health at a glance). Everything is **read only**.
 
 ## 4. Cloud calls (`api/` layer)
 
@@ -388,6 +460,7 @@ take `config_entry_id` when several accounts are configured.
 | `get_write_job` | `job_id` | `WriteJob` | read |
 | `get_holiday` | — | `{"holidays": [Holiday]}` | read |
 | `get_relays` | — | `{"relays": [Relay]}` | read |
+| `get_overview` | — | `FleetOverview` (§3.6) | read |
 | `get_room` | `target` (room) | `{"room": Room, "schedule": Schedule}` | read |
 | `create_room` | `name`, `devices` (list of devId) | `{"room_id": "…"}` | create a room + attach heads |
 | `rename_room` | `target` (room), `name` | `{"room_id": "…"}` | rename |
@@ -413,6 +486,7 @@ real-hardware validation (they mutate the live account / the boiler's heat deman
 | `danfoss_ally_cloud/jobs/subscribe` | — | `WriteJob` events on every change | all |
 | `danfoss_ally_cloud/holiday` | `entry_id` (optional) | `{"holidays": [Holiday]}` | all |
 | `danfoss_ally_cloud/relays` | `entry_id` (optional) | `{"relays": [Relay]}` | all |
+| `danfoss_ally_cloud/overview` | `entry_id` (optional) | `FleetOverview` (§3.6) | all |
 | `danfoss_ally_cloud/room/get` | `target` | `{"room": Room, "schedule": Schedule}` | all |
 | `danfoss_ally_cloud/room/create` | `name`, `devices` | `{"room_id": "…"}` | administrator |
 | `danfoss_ally_cloud/room/rename` | `target`, `name` | `{"room_id": "…"}` | administrator |
@@ -456,10 +530,10 @@ stable.
 - Registration in `async_setup` (once per instance), never in `async_setup_entry`.
 - On load, the frontend compares its version (injected at build) to `danfoss_ally_cloud/info`; if
   they differ, it offers to reload the page.
-- Declared elements: `danfoss-ally-schedule-card` (Schedule card); later `danfoss-ally-room-card`
-  and the `danfoss-ally-panel` panel.
+- Declared elements: `danfoss-ally-schedule-card` (Schedule card) and, since 0.6.0 (axis D),
+  `danfoss-ally-room-card` (Room card, §8) and the `danfoss-ally-panel` side panel (§8).
 - The frontend calls **only** the commands of section 5.3 and the entities; never the cloud.
-- A non-administrator user (`is_admin` false) sees the card read-only.
+- A non-administrator user (`is_admin` false) sees the cards read-only.
 
 ## 7. Out of contract for now
 
@@ -473,4 +547,41 @@ Axis B (0.5.0) brought holiday **read** (§4.5), the boiler relay **read** + roo
   uncaptured (candidates reject the parameter format). Only the relay *state read* and the room↔relay
   *link* are in contract. While the Danfoss gateways drive the relay, the server rewrites the DP at
   its own cadence anyway.
-- **Firmware, the full embedded panel.** Each will be the subject of a later addition.
+- **Firmware management.** The subject of a later addition.
+
+Axis D (0.6.0) brought the **UI layer** into contract: the per-room card and the side panel (§8).
+
+## 8. UI layer (axis D, 0.6.0)
+
+The axis-D UI is a **presentation layer over the existing read commands and validated writes** — it
+adds **no new cloud/local write primitive**. Its only writes reuse already-validated paths:
+`schedule/set`, `schedule/restore` (R4), and `climate.set_temperature` on the room thermostat
+(`async_set_group_setpoint`, proven on real hardware 2026-11-16).
+
+### 8.1 Room card (`danfoss-ally-room-card`)
+
+One room at a glance and its day-to-day actions. Configured by `room_id` (= `group_id`). Reads
+`room/get` (Room §3.4 + Schedule §3.2) and subscribes to `jobs/subscribe`.
+
+- **Shows**: room name; current temperature, mode and active setpoint; comfort / setback chips; a
+  compact 7-day schedule strip (reuses the Schedule card's rendering); per-head badges —
+  online/offline, battery (with low-battery emphasis on `E14`/`E15` or `battery` ≤ 10 %), valve
+  opening, window open, mounting, fault, schedule-active/inconsistent.
+- **Actions** (administrator only, degrade to read-only otherwise): raise / lower the room setpoint
+  by one step via `climate.set_temperature` on `climate_entity_id` — shown only when `writable` and
+  the entity id is present, and in comfort/setback mode (the climate entity refuses other modes
+  cleanly); "back to schedule" (R4) via `schedule/restore` when a head stopped following its
+  schedule; and a link to open the Schedule card for full editing.
+- Never calls the cloud directly; unknown/missing fields degrade (dashes, hidden actions).
+
+### 8.2 Side panel (`danfoss-ally-panel`)
+
+A building / fleet overview, **read-first**. Registered as a `panel_custom` from the integration
+(`frontend.py`, once per instance, best-effort — a registration failure never blocks setup), with a
+sidebar entry; `require_admin` is false (read-only view). Reads `overview` (§3.6) and `info`.
+
+- **Shows**, per home: a holiday badge; the gateways and their online state; a room grid with each
+  room's health (heads, offline, low battery, calling for heat, open window, inconsistent, faults)
+  linking to that room; the boiler relays (on/off, online, number of rooms calling for heat). A
+  totals header gives building-wide health at a glance.
+- Read-only: it surfaces state and links out; any change is made from the room card or the entities.
