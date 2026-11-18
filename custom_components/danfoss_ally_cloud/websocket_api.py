@@ -356,12 +356,15 @@ async def _ws_room_write(hass, connection, msg, func, *args) -> None:
         vol.Required("type"): "danfoss_ally_cloud/room/create",
         vol.Required("name"): str,
         vol.Required("devices"): [str],
+        vol.Optional("home"): str,
         vol.Optional("entry_id"): str,
     }
 )
 @websocket_api.async_response
 async def ws_room_create(hass: HomeAssistant, connection, msg: dict) -> None:
-    await _ws_room_write(hass, connection, msg, ops.create_room, msg["name"], msg["devices"])
+    await _ws_room_write(
+        hass, connection, msg, ops.create_room, msg["name"], msg["devices"], msg.get("home")
+    )
 
 
 @websocket_api.require_admin

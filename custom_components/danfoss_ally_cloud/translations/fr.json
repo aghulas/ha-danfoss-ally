@@ -289,6 +289,10 @@
     "config_entry_id": {
      "name": "Compte",
      "description": "Si plusieurs comptes sont configurés."
+    },
+    "home": {
+     "name": "Maison",
+     "description": "gid de la maison où créer la pièce (optionnel). Sinon déduit des têtes (toutes dans une même maison)."
     }
    }
   },

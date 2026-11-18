@@ -106,8 +106,8 @@ class FakeCloudClient:
         return [{"gid": 1, "name": "Maison"}]
 
     async def async_device_homes(self, dev_ids):
-        # Single-home fixture: every device is in home "1" (str, like the real client).
-        return {d: "1" for d in dev_ids}
+        # Single-home fixture: every device is in home "1" (list, like the real client).
+        return {d: ["1"] for d in dev_ids}
 
     async def async_list_groups(self, gid):
         if self._topology_exc is not None:

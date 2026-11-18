@@ -149,5 +149,5 @@ async def test_device_homes_maps_each_device_to_its_home():
     )
     with patch(_HTTP, return_value=fake):
         res = await _client().async_device_homes(["a", "c", "z"])
-    # gids as strings; a device in no home maps to None
-    assert res == {"a": "1", "c": "2", "z": None}
+    # gids as strings; each device -> the list of homes it appears in ([] if none)
+    assert res == {"a": ["1"], "c": ["2"], "z": []}

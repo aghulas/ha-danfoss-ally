@@ -49,7 +49,7 @@ class _FakeClient:
         self._room_id = room_id
         # Room map (type-4 rooms); default: one room named "Salle" (matches _FakeCoord's group).
         self._rooms = room_map if room_map is not None else [{"room_id": room_id, "name": "Salle"}]
-        # Per-device home gid; default: every device in "home-1".
+        # Per-device list of home gids; default: every device in ["home-1"].
         self._device_homes = device_homes
 
     async def async_get_homes(self):
@@ -57,8 +57,8 @@ class _FakeClient:
 
     async def async_device_homes(self, dev_ids):
         if self._device_homes is not None:
-            return {d: self._device_homes.get(d) for d in dev_ids}
-        return {d: "home-1" for d in dev_ids}
+            return {d: list(self._device_homes.get(d, [])) for d in dev_ids}
+        return {d: ["home-1"] for d in dev_ids}
 
     async def async_list_rooms(self, home):
         self.calls.append(("list_rooms", home))
@@ -136,17 +136,45 @@ async def test_create_room_rejects_unverified_product():
     assert e.value.code == "unverified_product"
 
 
-async def test_create_room_infers_home_from_devices():
-    # Multi-home account: the room is created in the home the heads belong to (here home-2).
-    client = _FakeClient(device_homes={"a": "home-2", "b": "home-2"})
+async def test_create_room_infers_second_home_and_groups_the_heads():
+    # Multi-home account, device.list filters by gid: both heads resolve to home-2 only. The room
+    # is created THERE and the heads are grouped into it (set_devices with both) -> not empty.
+    client = _FakeClient(
+        homes=[{"gid": "home-1"}, {"gid": "home-2"}],
+        device_homes={"a": ["home-2"], "b": ["home-2"]},
+    )
     coord = _FakeCoord(client, members=("a", "b"))
     res = await ops.create_room(None, _store(coord), "Classroom", ["a", "b"])
     assert res == {"room_id": "new-room"}
-    assert ("add", "home-2", "Classroom") in client.calls
+    # room created in home-2, then the two heads attached to it (the fix for the empty-room bug)
+    assert client.calls == [
+        ("add", "home-2", "Classroom"),
+        ("set", "new-room", ["a", "b"]),
+    ]
 
 
-async def test_create_room_ambiguous_home():
-    client = _FakeClient(device_homes={"a": "home-1", "b": "home-2"})
+async def test_create_room_explicit_home_overrides_inference():
+    client = _FakeClient(homes=[{"gid": "home-1"}, {"gid": "home-2"}])
+    coord = _FakeCoord(client, members=("a", "b"))
+    res = await ops.create_room(None, _store(coord), "Classroom", ["a", "b"], home="home-2")
+    assert res == {"room_id": "new-room"}
+    assert client.calls[0] == ("add", "home-2", "Classroom")  # explicit gid used, no inference
+
+
+async def test_create_room_explicit_home_unknown():
+    client = _FakeClient(homes=[{"gid": "home-1"}, {"gid": "home-2"}])
+    coord = _FakeCoord(client, members=("a", "b"))
+    with pytest.raises(ops.OperationError) as e:
+        await ops.create_room(None, _store(coord), "X", ["a", "b"], home="nope")
+    assert e.value.code == "unknown_home"
+    assert not any(c[0] == "add" for c in client.calls)
+
+
+async def test_create_room_ambiguous_when_heads_span_homes():
+    client = _FakeClient(
+        homes=[{"gid": "home-1"}, {"gid": "home-2"}],
+        device_homes={"a": ["home-1"], "b": ["home-2"]},
+    )
     coord = _FakeCoord(client, members=("a", "b"))
     with pytest.raises(ops.OperationError) as e:
         await ops.create_room(None, _store(coord), "X", ["a", "b"])
@@ -154,9 +182,23 @@ async def test_create_room_ambiguous_home():
     assert not any(c[0] == "add" for c in client.calls)  # nothing created
 
 
+async def test_create_room_ambiguous_when_device_list_does_not_filter():
+    # If the backend does not filter by gid, each head appears in BOTH homes -> we refuse rather
+    # than silently pick the first home (which created an empty room in situ). The user passes home.
+    client = _FakeClient(
+        homes=[{"gid": "home-1"}, {"gid": "home-2"}],
+        device_homes={"a": ["home-1", "home-2"], "b": ["home-1", "home-2"]},
+    )
+    coord = _FakeCoord(client, members=("a", "b"))
+    with pytest.raises(ops.OperationError) as e:
+        await ops.create_room(None, _store(coord), "X", ["a", "b"])
+    assert e.value.code == "ambiguous_home"
+    assert not any(c[0] == "add" for c in client.calls)
+
+
 async def test_create_room_unknown_home():
     # A known head that the cloud does not place in any home (stale) -> clean refusal, no write.
-    client = _FakeClient(device_homes={"a": None})
+    client = _FakeClient(device_homes={"a": []})
     coord = _FakeCoord(client, members=("a",))
     with pytest.raises(ops.OperationError) as e:
         await ops.create_room(None, _store(coord), "X", ["a"])

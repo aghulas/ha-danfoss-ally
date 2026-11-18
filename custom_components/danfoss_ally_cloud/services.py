@@ -76,6 +76,7 @@ _CREATE_ROOM = vol.Schema(
     {
         vol.Required("name"): cv.string,
         vol.Required("devices"): [cv.string],
+        vol.Optional("home"): cv.string,
         vol.Optional("config_entry_id"): cv.string,
     }
 )
@@ -244,7 +245,9 @@ def async_register_services(hass: HomeAssistant) -> None:
         store = _store(hass, call)
         try:
             await ops.ensure_admin(hass, call.context.user_id)
-            return await ops.create_room(hass, store, call.data["name"], call.data["devices"])
+            return await ops.create_room(
+                hass, store, call.data["name"], call.data["devices"], call.data.get("home")
+            )
         except ops.OperationError as err:
             _raise(err)
 

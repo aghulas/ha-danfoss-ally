@@ -376,35 +376,58 @@ async def _resolve_room_id(coordinator, group_id: str) -> str:
     raise OperationError("unknown_room", f"no Tuya room matching {rs.name!r}")
 
 
-async def create_room(hass: HomeAssistant, store: dict, name: str, devices: list[str]) -> dict:
+async def create_room(
+    hass: HomeAssistant,
+    store: dict,
+    name: str,
+    devices: list[str],
+    home: str | None = None,
+) -> dict:
     """Create a room and attach the given heads (contract §4.7). Verified products only.
 
-    The home is **inferred from the devices** (the account can have several homes, and a config
-    entry does not disambiguate them): all given heads must share one home, which is where the room
-    is created. Fails cleanly if they span homes (``ambiguous_home``) or none can be resolved
-    (``unknown_home``).
+    The room MUST be created in the home the heads belong to, otherwise the heads cannot join it and
+    the room is left empty. ``home`` (a gid) selects it explicitly (the reliable path on a
+    multi-home account, mirroring the app, which creates in the current home); when omitted the home
+    is **inferred from the devices** and a single shared home must resolve, else ``ambiguous_home``
+    (pass ``home``) or ``unknown_home``.
     """
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     _validate_heads(coordinator, devices, require_verified=True)
-    home = await _resolve_devices_home(coordinator, list(devices))
-    room_id = await _run_cloud_write(coordinator.client.async_room_add, home, name)
+    gid = await _resolve_devices_home(coordinator, list(devices), home)
+    room_id = await _run_cloud_write(coordinator.client.async_room_add, gid, name)
     await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, list(devices))
     await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id)}
 
 
-async def _resolve_devices_home(coordinator, devices: list[str]) -> str:
-    """The single home gid shared by all ``devices``; raises a stable error otherwise."""
-    homes = await _run_cloud_write(coordinator.client.async_device_homes, devices)
-    missing = [d for d, gid in homes.items() if not gid]
+async def _resolve_devices_home(
+    coordinator, devices: list[str], explicit_home: str | None = None
+) -> str:
+    """The home gid to create the room in: explicit if given (validated), else inferred.
+
+    Inference: the single home that contains ALL the devices. Raises ``unknown_home`` if a device is
+    in no home (or the explicit gid is unknown) and ``ambiguous_home`` if no single home holds them
+    all (heads span homes, or the backend did not filter the device list by gid) — never a silent
+    guess, which would create the room in the wrong home.
+    """
+    homes = await _run_cloud_write(coordinator.client.async_get_homes)
+    valid = {str(h["gid"]) for h in homes}
+    if explicit_home is not None:
+        gid = str(explicit_home)
+        if gid not in valid:
+            raise OperationError("unknown_home", f"home {explicit_home!r} not found in the account")
+        return gid
+    homes_of = await _run_cloud_write(coordinator.client.async_device_homes, devices)
+    missing = [d for d, gids in homes_of.items() if not gids]
     if missing:
         raise OperationError("unknown_home", f"devices not found in any home: {missing}")
-    gids = set(homes.values())
-    if len(gids) != 1:
-        raise OperationError(
-            "ambiguous_home", "the heads are in different homes: create one room per home"
-        )
-    return next(iter(gids))
+    common = set.intersection(*(set(gids) for gids in homes_of.values()))
+    if len(common) == 1:
+        return next(iter(common))
+    raise OperationError(
+        "ambiguous_home",
+        "cannot determine a single home for these heads; pass 'home' (the gid) explicitly",
+    )
 
 
 async def rename_room(hass: HomeAssistant, store: dict, target: dict, name: str) -> dict:

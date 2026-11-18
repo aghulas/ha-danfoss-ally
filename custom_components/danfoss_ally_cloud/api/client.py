@@ -217,14 +217,17 @@ class CloudClient:
                     out.append(d)
         return out
 
-    async def async_device_homes(self, dev_ids: list[str]) -> dict[str, str | None]:
-        """Map each devId to the home gid it belongs to (``None`` if not found in any home).
+    async def async_device_homes(self, dev_ids: list[str]) -> dict[str, list[str]]:
+        """Map each devId to the home gid(s) whose device list contains it (``[]`` if none).
 
-        Path 1a: one device-list read per home. Used to resolve the home a new room must be created
-        in (the account can have several homes, and a config entry does not disambiguate them).
+        Path 1a: one device-list read per home. A device normally appears in exactly one home; it
+        appears in several only if the backend does not filter the list by ``gid`` — the caller then
+        treats the home as un-resolvable rather than guessing the first one (which would create the
+        room in the wrong home and leave it empty). Used to pick the home a new room is created in
+        (the account may have several homes; a config entry does not disambiguate them).
         """
         wanted = set(dev_ids)
-        found: dict[str, str] = {}
+        homes_of: dict[str, list[str]] = {d: [] for d in dev_ids}
         for home in await self.async_get_homes():
             gid = str(home["gid"])
             raw = await self._request(
@@ -232,9 +235,9 @@ class CloudClient:
             )
             for d in raw if isinstance(raw, list) else []:
                 dev_id = d.get("devId") if isinstance(d, dict) else None
-                if dev_id in wanted and dev_id not in found:
-                    found[dev_id] = gid
-        return {d: found.get(d) for d in dev_ids}
+                if dev_id in wanted and gid not in homes_of[dev_id]:
+                    homes_of[dev_id].append(gid)
+        return homes_of
 
     async def async_device_meta(self, dev_id: str) -> dict:
         """Gateway meta (smartlife.m.device.get v4.0 -> meta): lan_ip, Zigbee channel."""

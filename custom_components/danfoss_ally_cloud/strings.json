@@ -289,6 +289,10 @@
         "config_entry_id": {
           "name": "Account",
           "description": "If several accounts are configured."
+        },
+        "home": {
+          "name": "Home",
+          "description": "Optional home gid to create the room in. If omitted, inferred from the devices (all must share one home)."
         }
       }
     },

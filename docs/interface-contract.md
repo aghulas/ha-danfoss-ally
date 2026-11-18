@@ -458,7 +458,7 @@ take `config_entry_id` when several accounts are configured.
 | `get_relays` | — | `{"relays": [Relay]}` | read |
 | `get_overview` | — | `FleetOverview` (§3.6) | read |
 | `get_room` | `target` (room) | `{"room": Room, "schedule": Schedule}` | read |
-| `create_room` | `name`, `devices` (list of devId) | `{"room_id": "…"}` | create a room + attach heads; the home is inferred from the devices (all must share one home — the account may have several) |
+| `create_room` | `name`, `devices` (list of devId), `home` (optional gid) | `{"room_id": "…"}` | create a room + attach heads. The room must be created in the heads' home (else it stays empty): `home` selects it, otherwise it is inferred from the devices (a single shared home must resolve, else `ambiguous_home` → pass `home`) |
 | `rename_room` | `target` (room), `name` | `{"room_id": "…"}` | rename |
 | `delete_room` | `target` (room) | `{"room_id": "…"}` | delete (heads ungrouped) |
 | `attach_heads` | `target` (room), `devices` | `{"room_id": "…", "heads": […]}` | add heads (replaces list) |

@@ -31,6 +31,11 @@ create_room:
       example: '["<devId1>", "<devId2>"]'
       selector:
         object:
+    home:
+      required: false
+      example: "256784132"
+      selector:
+        text:
     config_entry_id:
       required: false
       selector:

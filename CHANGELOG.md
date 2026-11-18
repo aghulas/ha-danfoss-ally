@@ -34,9 +34,13 @@ bundle is rebuilt deterministically.
 
 ### Fixed
 
-- **`create_room` on multi-home accounts** — the home is now inferred from the devices (all heads
-  must share one home); clean errors `ambiguous_home` / `unknown_home` otherwise. Previously the
-  service refused on any account with more than one home.
+- **`create_room` on multi-home accounts** — the room must be created in the heads' home, otherwise
+  the heads cannot join it and it is left empty. A new optional `home` (gid) selects it explicitly;
+  when omitted it is inferred from the devices (the single home that contains them all). When a
+  single home cannot be determined — heads span homes, or the backend does not filter the device
+  list by gid — it now fails with `ambiguous_home` (pass `home`) instead of silently picking the
+  first home, and `unknown_home` when a head is in no home. Previously it refused on any multi-home
+  account, then (0.5.1-rc) could create the room in the wrong home, empty.
 - **Room changes are visible immediately** — every structural write (create / rename / delete /
   attach / detach, and relay link) now invalidates the room-topology cache before refreshing, so
   the new or changed room shows up in `get_rooms` and is targetable at once instead of only at the
