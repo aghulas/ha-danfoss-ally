@@ -84,12 +84,27 @@ CONF_ENABLE_VACATION_WRITE = "enable_vacation_write"
 # integration yet, so it is OFF by default: the disconnect_head service refuses (`unbind_disabled`)
 # until it is deliberately enabled for a supervised validation session. See docs/roadmap.md.
 CONF_ENABLE_HEAD_UNBIND = "enable_head_unbind"
+# Post-command refresh (R-3). The bulk ``device.list`` poll lags for minutes after a command, so a
+# just-changed head (valve, pi_heating_demand, work_state, active setpoint) and especially a write
+# round-trip stay frozen on the old state in HA / MQTT. When ON, a head commanded in the last
+# POST_COMMAND_REFRESH_TTL seconds is refreshed through the per-device route (fresher) on each poll,
+# bounded by POST_COMMAND_REFRESH_MAX_HEADS reads per poll, then falls back to the bulk route. OFF
+# by default: it adds a per-device read pattern on the user's real account, and that this route is
+# fresher than the bulk list for a head is pending a real-hardware validation (see
+# docs/roadmap.md) — enable it for that validation session.
+CONF_POST_COMMAND_REFRESH = "post_command_refresh"
 
 # Conservative defaults: the account's quota and security come first.
 DEFAULT_SCAN_INTERVAL = 90  # seconds
 DEFAULT_DISTINCT_DEVICE_ID = True
 DEFAULT_ENABLE_VACATION_WRITE = False
 DEFAULT_ENABLE_HEAD_UNBIND = False
+DEFAULT_POST_COMMAND_REFRESH = False
+# How long a commanded head stays "hot" (refreshed via the per-device route) after a write, and the
+# cap on per-device reads per poll (so commanding a large room cannot burst the API). A hot head
+# costs one extra read per poll for at most this window, then returns to the bulk route.
+POST_COMMAND_REFRESH_TTL = 300  # seconds
+POST_COMMAND_REFRESH_MAX_HEADS = 12
 DEFAULT_MQTT_MODE = "off"
 DEFAULT_MQTT_SOURCE = "cloud"
 DEFAULT_MQTT_BASE_TOPIC = "danfoss_ally_cloud"

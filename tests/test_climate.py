@@ -36,9 +36,13 @@ class _FakeCoord:
         self.last_update_success = True
         self.refreshed = False
         self._group_of: dict[str, str] = {}
+        self.commanded: list[str] = []
 
     def group_of(self, head_id):
         return self._group_of.get(head_id)
+
+    def note_commanded(self, head_ids):
+        self.commanded.extend(head_ids)
 
     async def async_request_refresh(self):
         self.refreshed = True
@@ -107,6 +111,20 @@ async def test_room_writes_setpoint_per_mode(mode, dps):
     await cl.async_set_temperature(**{ATTR_TEMPERATURE: 6.0})
     assert client.calls == [("77", "03wvrwpv", dps, True)]  # 6,0 °C -> 60
     assert coord.refreshed is True
+
+
+async def test_room_setpoint_notes_group_heads_commanded():
+    # R-3: after a setpoint write the room's member heads are marked for the per-device refresh.
+    client = _FakeClient()
+    cl, coord = _room_climate(_room(), client)
+    coord.data = {
+        "h1": head("h1"),
+        "h2": head("h2"),
+        "other": head("other"),
+    }
+    coord._group_of = {"h1": "77", "h2": "77", "other": "99"}
+    await cl.async_set_temperature(**{ATTR_TEMPERATURE: 6.0})
+    assert sorted(coord.commanded) == ["h1", "h2"]  # only this room's heads
 
 
 @pytest.mark.parametrize("mode", ["pause", "holiday", "manual", None])

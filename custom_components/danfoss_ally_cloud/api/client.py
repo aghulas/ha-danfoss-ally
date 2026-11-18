@@ -271,6 +271,27 @@ class CloudClient:
                     homes_of[dev_id].append(gid)
         return homes_of
 
+    async def async_get_device_dps(self, dev_id: str) -> dict | None:
+        """Fresh DPs of ONE device via the per-device route (``smartlife.m.device.get`` v4.0).
+
+        R-3 (freshness): the bulk ``tuya.m.my.group.device.list`` route lags for minutes after a
+        command (stale valve / ``pi_heating_demand`` / ``work_state`` / active setpoint), while the
+        per-device route reflects it quickly. This returns that device's ``dps`` map (string keys),
+        or ``None`` when the route carries no ``dps`` — the caller then keeps the bulk value, so an
+        unavailable/sparse response degrades safely to today's behaviour.
+
+        ⚠ This per-device DP read is the single seam of the post-command refresh (coordinator
+        ``_overlay_commanded``); that the ``device.get`` route is fresher than the bulk list for a
+        HEAD is the R-3 hypothesis to confirm on real hardware (pending a validation session). If it
+        proves not fresher, only this method's backing route changes (e.g. the official Danfoss REST
+        per-device route), not the mechanism.
+        """
+        r = await self._request("smartlife.m.device.get", "4.0", {"devId": dev_id})
+        dps = r.get("dps") if isinstance(r, dict) else None
+        if not isinstance(dps, dict) or not dps:
+            return None
+        return {str(k): v for k, v in dps.items()}
+
     async def async_device_meta(self, dev_id: str) -> dict:
         """Gateway meta (smartlife.m.device.get v4.0 -> meta): lan_ip, Zigbee channel."""
         r = await self._request("smartlife.m.device.get", "4.0", {"devId": dev_id})

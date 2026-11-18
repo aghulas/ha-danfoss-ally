@@ -239,20 +239,12 @@ def _online(device: dict[str, Any]) -> bool:
     return bool(device.get("isOnline", device.get("online", False)))
 
 
-def decode_device(device: dict[str, Any]) -> DanfossDevice:
-    """Raw device (``tuya.m.my.group.device.list``) -> normalised DanfossDevice."""
-    dps: dict[str, Any] = {str(k): v for k, v in (device.get("dps") or {}).items()}
-    dev_id: str = device.get("devId") or ""
-    d = DanfossDevice(
-        id=dev_id,
-        name=(device.get("name") or "").strip(),
-        category=category_of(device.get("category")),
-        product_id=device.get("productId"),
-        node_id=device.get("nodeId"),
-        mesh_id=device.get("meshId"),
-        online=_online(device),
-        dps=dps,
-    )
+def _apply_dps(d: DanfossDevice, dps: dict[str, Any]) -> None:
+    """Fill a device's DP-derived fields from its ``dps`` map (identity/topology untouched).
+
+    Split out of ``decode_device`` so the same decoding is reused to re-derive the fast-changing
+    state when fresher DPs are overlaid onto an already-known device (``apply_dps_overlay``).
+    """
     d.temperature = _num(dps.get("24"), 10)
     d.setpoint = _num(dps.get("16"), 10)
     for dp, key in _SETPOINT_DPS.items():
@@ -279,4 +271,46 @@ def decode_device(device: dict[str, Any]) -> DanfossDevice:
         v = dps.get(dp)
         if v not in (None, "", 0, "0", [], "none"):
             d.faults.extend(decode_fault(v))
+
+
+def decode_device(device: dict[str, Any]) -> DanfossDevice:
+    """Raw device (``tuya.m.my.group.device.list``) -> normalised DanfossDevice."""
+    dps: dict[str, Any] = {str(k): v for k, v in (device.get("dps") or {}).items()}
+    dev_id: str = device.get("devId") or ""
+    d = DanfossDevice(
+        id=dev_id,
+        name=(device.get("name") or "").strip(),
+        category=category_of(device.get("category")),
+        product_id=device.get("productId"),
+        node_id=device.get("nodeId"),
+        mesh_id=device.get("meshId"),
+        online=_online(device),
+        dps=dps,
+    )
+    _apply_dps(d, dps)
+    return d
+
+
+def apply_dps_overlay(base: DanfossDevice, fresh_dps: dict[str, Any]) -> DanfossDevice:
+    """A copy of ``base`` with ``fresh_dps`` merged over its DPs and the DP fields re-derived.
+
+    R-3 (freshness): the bulk ``device.list`` route lags for minutes after a command, while the
+    per-device route already reflects it. This overlays the fresh per-device DPs (valve, active
+    setpoint, work_state, mode...) onto the device the bulk poll produced, keeping its stable
+    identity/topology and online flag. ``fresh_dps`` wins over the bulk DPs key by key; DPs absent
+    from ``fresh_dps`` keep their bulk value. Returns a NEW device (the caller swaps it into the
+    poll result), never mutating ``base``.
+    """
+    merged = {**base.dps, **{str(k): v for k, v in (fresh_dps or {}).items()}}
+    d = DanfossDevice(
+        id=base.id,
+        name=base.name,
+        category=base.category,
+        product_id=base.product_id,
+        node_id=base.node_id,
+        mesh_id=base.mesh_id,
+        online=base.online,
+        dps=merged,
+    )
+    _apply_dps(d, merged)
     return d

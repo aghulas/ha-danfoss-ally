@@ -1077,7 +1077,9 @@ async def set_schedule(hass: HomeAssistant, store: dict, target: dict, days: dic
         raise OperationError(errors[0]["code"], errors[0]["message"], errors, errors[0].get("day"))
     await _run_write(store[DATA_COORDINATOR].client.async_set_schedule_days, target, days)
     _invalidate(store, target)
-    job = jobs.create("set_schedule", target, _head_ids(store, target))
+    head_ids = _head_ids(store, target)
+    store[DATA_COORDINATOR].note_commanded(head_ids)  # R-3: freshen these heads post-command
+    job = jobs.create("set_schedule", target, head_ids)
     _defer_verification(hass, store, job)
     return job.to_dict()
 
@@ -1087,7 +1089,9 @@ async def restore_schedule(hass: HomeAssistant, store: dict, target: dict) -> di
     _check_not_grouped(store, target)
     await _run_write(store[DATA_COORDINATOR].client.async_restore_schedule, target)
     _invalidate(store, target)
-    job = jobs.create("restore", target, _head_ids(store, target))
+    head_ids = _head_ids(store, target)
+    store[DATA_COORDINATOR].note_commanded(head_ids)  # R-3: freshen these heads post-command
+    job = jobs.create("restore", target, head_ids)
     _defer_verification(hass, store, job)
     return job.to_dict()
 

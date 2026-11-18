@@ -28,6 +28,7 @@ from .const import (
     CONF_MQTT_MODE,
     CONF_MQTT_SOURCE,
     CONF_PASSWORD,
+    CONF_POST_COMMAND_REFRESH,
     CONF_REGION,
     CONF_SCAN_INTERVAL,
     CONF_SIGN_KEY,
@@ -46,6 +47,7 @@ from .const import (
     DEFAULT_MQTT_BASE_TOPIC,
     DEFAULT_MQTT_MODE,
     DEFAULT_MQTT_SOURCE,
+    DEFAULT_POST_COMMAND_REFRESH,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     PLATFORMS,
@@ -91,7 +93,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up an entry (one Danfoss Ally account)."""
     client = _client_from_entry(entry)
     scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-    coordinator = DanfossCoordinator(hass, client, scan_interval)
+    coordinator = DanfossCoordinator(
+        hass,
+        client,
+        scan_interval,
+        post_command_refresh=entry.options.get(
+            CONF_POST_COMMAND_REFRESH, DEFAULT_POST_COMMAND_REFRESH
+        ),
+    )
     await coordinator.async_config_entry_first_refresh()
 
     # Local fallback (optional): best-effort, must never prevent the cloud from starting.

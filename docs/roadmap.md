@@ -43,6 +43,43 @@ make the DP assumptions more reliable.
   again MQTT-driven. Covering it would need the gateway MQTT channel (and, to observe the Zigbee
   `leave`/join frames, a radio sniffer with the network key) — a separate track, not path 1a.
 
+## Post-command freshness (R-3): per-device refresh after a write — shipped, GATED
+
+Real-hardware validation (2026-11-18, Salle ASH) found that the bulk list route
+`tuya.m.my.group.device.list` — the coordinator's only path-1a source of DP state — **lags for
+several minutes after a command**, even with a forced refresh: it keeps returning the previous
+schedule's valve (`pi_heating_demand`, DP 170), `work_state` (DP 3), active setpoint and mode while
+the head is already physically updated. So a write round-trip (the user sets a setpoint/mode and
+expects to see it in HA and MQTT in good time) stays frozen on the old state. The bulk endpoint lags
+*itself*, so polling it faster does not help.
+
+**Mechanism (coordinator, `note_commanded` + `_overlay_commanded`).** A head commanded through a
+write (room setpoint, schedule set/restore) is marked "hot" for `POST_COMMAND_REFRESH_TTL` (300 s).
+While hot, each poll reads it through the **per-device route** (`CloudClient.async_get_device_dps`,
+`smartlife.m.device.get` v4.0) and **overlays** its fresh DPs onto the device the bulk poll produced
+(`decode.apply_dps_overlay`): fresh DPs win key by key, the stable identity/topology and every DP the
+per-device route does not carry keep their bulk value. After the window the head returns to the bulk
+route. Bounded on purpose (the user's real Tuya account): only hot heads are individually read, at
+most `POST_COMMAND_REFRESH_MAX_HEADS` (12) per poll, one read each; a read failure or an empty
+response keeps the bulk value (never raises).
+
+**GATED, off by default (`enable_post_command_refresh`, `CONF_POST_COMMAND_REFRESH`).** Two reasons:
+it adds a per-device read pattern on the real account, and **that `smartlife.m.device.get` is fresher
+than the bulk list for a HEAD is the R-3 hypothesis still to confirm on real hardware** — the
+freshness observed in validation came from the MCP connector's *individual route*, which is the
+**official Danfoss REST API** (`GET /ally/devices/{id}`), a different backend this integration does
+not use. `async_get_device_dps` is the single seam: if validation shows `device.get` is not fresher
+for a head, only that method's backing route changes (e.g. the official Danfoss per-device route, or
+the local Zigbee tunnel), not the mechanism, the gating or the tests.
+
+**Residual latency.** With the option **off** (default): unchanged — a write round-trip surfaces only
+on the bulk route's own schedule, i.e. up to several minutes. With it **on** and the hypothesis
+confirmed: a commanded head refreshes on the next poll after the write (the write path arms the
+window before its own `async_request_refresh`, so even that immediate refresh overlays the fresh
+state), and stays fresh for 5 minutes; uncommanded heads are unaffected. The TTL is a floor on how
+long the overlay is trusted, not a guarantee the per-device route itself is instantaneous — to
+measure on real hardware in the validation session.
+
 ## Per-room schedules and embedded frontend
 
 Work described by `docs/interface-requirements.md`, framed by the contract

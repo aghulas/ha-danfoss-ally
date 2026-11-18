@@ -79,9 +79,15 @@ class FakeCloudClient:
         holidays_exc=None,
         relay_rooms=None,
         saturday_groups=None,
+        device_get_dps=None,
         **kwargs,
     ) -> None:
         self._devices = [head()] if devices is None else devices
+        # Per-device "fresh" DPs for the R-3 post-command refresh: {dev_id: {dp: value} | None}.
+        # ``async_get_device_dps`` returns the mapped DPs (None = route carries nothing). Every call
+        # is logged in ``device_get_calls`` so tests can assert the per-device reads are bounded.
+        self._device_get_dps = device_get_dps or {}
+        self.device_get_calls: list[str] = []
         self._validate_exc = validate_exc
         self._list_exc = list_exc
         self._groups = groups or []
@@ -235,6 +241,10 @@ class FakeCloudClient:
     async def async_restore_schedule(self, target):
         self.writes.append(("restore", target))
         return {}
+
+    async def async_get_device_dps(self, dev_id):
+        self.device_get_calls.append(dev_id)
+        return self._device_get_dps.get(dev_id)
 
     async def async_close(self):
         self.closed = True
