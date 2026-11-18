@@ -68,42 +68,6 @@ delete_room:
         config_entry:
           integration: danfoss_ally_cloud
 
-attach_heads:
-  fields:
-    target:
-      required: true
-      example: '{"type": "room", "id": "<group_id>"}'
-      selector:
-        object:
-    devices:
-      required: true
-      example: '["<devId>"]'
-      selector:
-        object:
-    config_entry_id:
-      required: false
-      selector:
-        config_entry:
-          integration: danfoss_ally_cloud
-
-detach_heads:
-  fields:
-    target:
-      required: true
-      example: '{"type": "room", "id": "<group_id>"}'
-      selector:
-        object:
-    devices:
-      required: true
-      example: '["<devId>"]'
-      selector:
-        object:
-    config_entry_id:
-      required: false
-      selector:
-        config_entry:
-          integration: danfoss_ally_cloud
-
 get_local_survey:
   fields:
     config_entry_id:

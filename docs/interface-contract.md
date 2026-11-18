@@ -342,9 +342,14 @@ by the MCP connector (`smartlife.m.*` family; the APK also exposes the `thing.m.
   `"<old name> Group"` label until Tuya re-derives it; the integration's room device name follows the
   group name, so it can lag a rename. No schedule-group rename API is known.
 - These writes mutate the live account structure (regrouping/ungrouping heads changes shared
-  schedules) → **real-hardware validation required** before use. **Attach / detach specifically were
-  not exercised end-to-end as of 0.5.0** (the room-vs-group duality above surfaced during the
-  2026-11-18 validation): the replace-list effect on the implicit group must be confirmed on hardware.
+  schedules) → **real-hardware validation required** before use. **create / rename / delete are
+  validated on real hardware (2026-11-18).**
+- **Attach / detach are DEFERRED to 0.5.1** (not shipped in 0.5.0): the cloud replace-list on a
+  group-backed room (the room-vs-group duality above) cannot be faithfully validated with the
+  current tooling (the MCP connector reads type-4 room membership, which is empty for a group-backed
+  room) — it needs the integration's own code running in situ on the Pi, i.e. post-release. The
+  `async_room_set_devices` primitive and `_resolve_room_id` remain (create_room uses them); only the
+  standalone add/remove-a-head operations/services/WS are withheld until that validation.
 
 ## 5. What the integration exposes
 
@@ -387,8 +392,8 @@ take `config_entry_id` when several accounts are configured.
 | `create_room` | `name`, `devices` (list of devId) | `{"room_id": "…"}` | create a room + attach heads |
 | `rename_room` | `target` (room), `name` | `{"room_id": "…"}` | rename |
 | `delete_room` | `target` (room) | `{"room_id": "…"}` | delete (heads ungrouped) |
-| `attach_heads` | `target` (room), `devices` | `{"room_id": "…", "heads": […]}` | add heads (replaces list) |
-| `detach_heads` | `target` (room), `devices` | `{"room_id": "…", "heads": […]}` | remove heads |
+| `attach_heads` | *(deferred to 0.5.1)* | — | add heads — not shipped in 0.5.0 |
+| `detach_heads` | *(deferred to 0.5.1)* | — | remove heads — not shipped in 0.5.0 |
 | `set_relay_room` | `relay` (devId), `target` (room), `linked` (bool) | `{"relay": "…", "room_id": "…", "linked": bool}` | link/unlink a room to the boiler relay |
 
 `set_schedule` touches only the given days; the others stay as they are in the cloud. The room
@@ -412,8 +417,8 @@ real-hardware validation (they mutate the live account / the boiler's heat deman
 | `danfoss_ally_cloud/room/create` | `name`, `devices` | `{"room_id": "…"}` | administrator |
 | `danfoss_ally_cloud/room/rename` | `target`, `name` | `{"room_id": "…"}` | administrator |
 | `danfoss_ally_cloud/room/delete` | `target` | `{"room_id": "…"}` | administrator |
-| `danfoss_ally_cloud/room/attach` | `target`, `devices` | `{"room_id": "…", "heads": […]}` | administrator |
-| `danfoss_ally_cloud/room/detach` | `target`, `devices` | `{"room_id": "…", "heads": […]}` | administrator |
+| `danfoss_ally_cloud/room/attach` | *(deferred to 0.5.1)* | — | not shipped in 0.5.0 |
+| `danfoss_ally_cloud/room/detach` | *(deferred to 0.5.1)* | — | not shipped in 0.5.0 |
 | `danfoss_ally_cloud/relay/set_room` | `relay`, `target`, `linked` | `{…}` | administrator |
 
 The WebSocket commands and the actions share the same implementation: one function per operation.
@@ -438,7 +443,7 @@ stable.
 | `unknown_relay` | relay devId not found |
 | `unknown_head` | head devId not found when attaching/detaching |
 | `empty_devices` | a room create/attach was given no head |
-| `no_members_left` | detaching would leave the room with no head (use `delete_room`) |
+| `no_members_left` | *(deferred to 0.5.1 with detach)* |
 
 ## 6. Embedded frontend
 

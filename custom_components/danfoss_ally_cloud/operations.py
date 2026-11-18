@@ -137,14 +137,6 @@ def _validate_heads(coordinator, devices: list[str], *, require_verified: bool) 
             raise OperationError("unverified_product", f"write not verified for {dev_id}")
 
 
-def _current_members(coordinator, group_id: str) -> list[str]:
-    return [
-        dev.id
-        for dev in coordinator.data.values()
-        if dev.is_head and coordinator.group_of(dev.id) == group_id
-    ]
-
-
 def _room_name_candidates(group_name: str) -> list[str]:
     """Room (type-4) name candidates for a schedule-group (type-5) name.
 
@@ -212,34 +204,11 @@ async def delete_room(hass: HomeAssistant, store: dict, target: dict) -> dict:
     return {"room_id": str(room_id)}
 
 
-async def attach_heads(hass: HomeAssistant, store: dict, target: dict, devices: list[str]) -> dict:
-    """Add heads to a room (contract §4.7). REPLACES the member list with current ∪ given."""
-    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
-    group_id = _room_target(target)
-    _validate_heads(coordinator, devices, require_verified=True)
-    room_id = await _resolve_room_id(coordinator, group_id)
-    members = _current_members(coordinator, group_id)
-    final = list(dict.fromkeys(members + list(devices)))
-    await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, final)
-    await coordinator.async_request_refresh()
-    return {"room_id": str(room_id), "heads": final, "previous_heads": members}
-
-
-async def detach_heads(hass: HomeAssistant, store: dict, target: dict, devices: list[str]) -> dict:
-    """Remove heads from a room (contract §4.7). Refuses to empty a room (use delete_room)."""
-    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
-    group_id = _room_target(target)
-    _validate_heads(coordinator, devices, require_verified=False)  # removal: any known head
-    room_id = await _resolve_room_id(coordinator, group_id)
-    members = _current_members(coordinator, group_id)
-    if not any(d in members for d in devices):
-        raise OperationError("unknown_head", "none of these heads are in the room")
-    final = [d for d in members if d not in devices]
-    if not final:
-        raise OperationError("no_members_left", "detaching every head: use delete_room instead")
-    await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, final)
-    await coordinator.async_request_refresh()
-    return {"room_id": str(room_id), "heads": final, "previous_heads": members}
+# NOTE: attach_heads / detach_heads (add/remove a head in an existing room) are DEFERRED to 0.5.1.
+# The cloud replace-list on a group-backed room (type-4 room vs implicit type-5 schedule-group,
+# §4.7) cannot be faithfully validated with the current tooling and needs the integration running
+# in situ on the Pi. create_room / rename_room / delete_room above are validated on real hardware
+# (2026-11-18). `_resolve_room_id` and the " Group"-label tolerance stay (used by rename/delete).
 
 
 async def local_survey(hass: HomeAssistant, store: dict) -> dict:

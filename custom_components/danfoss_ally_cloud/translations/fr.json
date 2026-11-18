@@ -323,42 +323,6 @@
      "description": "Si plusieurs comptes sont configurés."
     }
    }
-  },
-  "attach_heads": {
-   "name": "Rattacher des têtes",
-   "description": "Ajoute des têtes à une pièce (remplace la liste). Administrateur ; validation en réel requise.",
-   "fields": {
-    "target": {
-     "name": "Cible",
-     "description": "Cible : type « room » et son identifiant (group_id)."
-    },
-    "devices": {
-     "name": "Têtes",
-     "description": "devId de têtes à ajouter."
-    },
-    "config_entry_id": {
-     "name": "Compte",
-     "description": "Si plusieurs comptes sont configurés."
-    }
-   }
-  },
-  "detach_heads": {
-   "name": "Détacher des têtes",
-   "description": "Retire des têtes d'une pièce (sans la vider). Administrateur ; validation en réel requise.",
-   "fields": {
-    "target": {
-     "name": "Cible",
-     "description": "Cible : type « room » et son identifiant (group_id)."
-    },
-    "devices": {
-     "name": "Têtes",
-     "description": "devId de têtes à retirer."
-    },
-    "config_entry_id": {
-     "name": "Compte",
-     "description": "Si plusieurs comptes sont configurés."
-    }
-   }
   }
  },
  "exceptions": {
@@ -421,9 +385,6 @@
   },
   "empty_devices": {
    "message": "Indiquez au moins une tête."
-  },
-  "no_members_left": {
-   "message": "Détacher toutes les têtes viderait la pièce : utilisez delete_room."
   }
  }
 }
