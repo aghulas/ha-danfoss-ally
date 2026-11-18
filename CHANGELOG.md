@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.6.0 — Full UI: room card and side panel (axis D)
+
+The user-facing UI layer. A **presentation layer over the existing read commands and
+already-validated writes** — it adds **no new cloud/local write primitive** (contract §8). Its only
+writes reuse validated paths (`climate.set_temperature`, `schedule/set`, `schedule/restore`), so
+nothing here needs fresh real-hardware validation. English base + i18n (fr kept); the frontend
+bundle is rebuilt deterministically.
+
+### Added
+
+- **Room card (`danfoss-ally-room-card`)** — a per-room Lovelace card: current temperature, mode and
+  setpoint; comfort/setback setpoints; a weekly schedule strip; per-head status (online, battery
+  with low-battery emphasis, valve, window, child lock, mounting, inconsistent, fault). Admin
+  actions reuse existing validated services only: setpoint ± via `climate.set_temperature` (shown
+  only when the room is writable, its climate entity is known and the mode is comfort/setback),
+  back-to-schedule (R4), and an "edit schedule" toggle that embeds the existing schedule card.
+- **Side panel (`danfoss-ally-panel`, `panel_custom`)** — a read-first building/fleet overview: a
+  totals header and, per home, a holiday badge, gateways online, a room health grid (offline, low
+  battery, calling for heat, open window, faults) and the boiler relays. Registered from the
+  integration (sidebar, `require_admin` false), best-effort.
+- **Read plumbing** — `HeadState` now carries battery / valve / heat-request / window /
+  window-detection / child-lock / faults; `Room` carries the live climate (temperature, setpoint,
+  mode, heating, online) plus `writable` and `climate_entity_id`; new `get_overview` service and
+  `overview` WebSocket command return a `FleetOverview` (§3.6), all aggregated from the coordinator
+  cache with no extra cloud call.
+
+### Notes
+
+- No new write path: the UI reuses the setpoint/schedule writes validated in 0.2.0 / 0.4.0 / 0.5.0.
+- Still out of contract (uncaptured, §7): holiday set/exit, direct relay on/off (DP 1); room head
+  attach/detach remains deferred (0.5.1).
+
 ## 0.5.0 — Holiday, boiler relay and room management (axis B)
 
 Brings holiday, boiler relay and room management into the contract
