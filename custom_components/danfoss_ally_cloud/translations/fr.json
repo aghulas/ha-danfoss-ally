@@ -289,6 +289,10 @@
     "config_entry_id": {
      "name": "Compte",
      "description": "Si plusieurs comptes sont configurés."
+    },
+    "home": {
+     "name": "Maison",
+     "description": "gid de la maison où créer la pièce (optionnel). Sinon déduit des têtes (toutes dans une même maison)."
     }
    }
   },
@@ -375,6 +379,42 @@
      "description": "Si plusieurs comptes sont configurés."
     }
    }
+  },
+  "attach_heads": {
+   "name": "Rattacher des têtes",
+   "description": "Ajoute des têtes à une pièce (remplace la liste). Administrateur.",
+   "fields": {
+    "target": {
+     "name": "Cible",
+     "description": "Cible : type « room » et son identifiant (group_id)."
+    },
+    "devices": {
+     "name": "Têtes",
+     "description": "devId de têtes à ajouter."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
+  },
+  "detach_heads": {
+   "name": "Détacher des têtes",
+   "description": "Retire des têtes d'une pièce (sans la vider). Administrateur.",
+   "fields": {
+    "target": {
+     "name": "Cible",
+     "description": "Cible : type « room » et son identifiant (group_id)."
+    },
+    "devices": {
+     "name": "Têtes",
+     "description": "devId de têtes à retirer."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
   }
  },
  "exceptions": {
@@ -440,6 +480,15 @@
   },
   "unknown_relay": {
    "message": "Relais chaudière introuvable."
+  },
+  "no_members_left": {
+   "message": "Détacher toutes les têtes viderait la pièce : utilisez delete_room."
+  },
+  "unknown_home": {
+   "message": "Aucune des têtes indiquées n'a été trouvée dans une maison."
+  },
+  "ambiguous_home": {
+   "message": "Les têtes indiquées sont dans des maisons différentes ; créez une pièce par maison."
   }
  }
 }

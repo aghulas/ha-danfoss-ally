@@ -55,6 +55,8 @@ def async_register(hass: HomeAssistant) -> None:
     reg(hass, ws_room_create)
     reg(hass, ws_room_rename)
     reg(hass, ws_room_delete)
+    reg(hass, ws_room_attach)
+    reg(hass, ws_room_detach)
     reg(hass, ws_relay_set_room)
 
 
@@ -354,12 +356,15 @@ async def _ws_room_write(hass, connection, msg, func, *args) -> None:
         vol.Required("type"): "danfoss_ally_cloud/room/create",
         vol.Required("name"): str,
         vol.Required("devices"): [str],
+        vol.Optional("home"): str,
         vol.Optional("entry_id"): str,
     }
 )
 @websocket_api.async_response
 async def ws_room_create(hass: HomeAssistant, connection, msg: dict) -> None:
-    await _ws_room_write(hass, connection, msg, ops.create_room, msg["name"], msg["devices"])
+    await _ws_room_write(
+        hass, connection, msg, ops.create_room, msg["name"], msg["devices"], msg.get("home")
+    )
 
 
 @websocket_api.require_admin
@@ -389,8 +394,32 @@ async def ws_room_delete(hass: HomeAssistant, connection, msg: dict) -> None:
     await _ws_room_write(hass, connection, msg, ops.delete_room, msg["target"])
 
 
-# room/attach and room/detach are deferred to 0.5.1 (contract §4.7): the cloud replace-list on a
-# group-backed room needs in-situ hardware validation on the running install.
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/room/attach",
+        vol.Required("target"): dict,
+        vol.Required("devices"): [str],
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_room_attach(hass: HomeAssistant, connection, msg: dict) -> None:
+    await _ws_room_write(hass, connection, msg, ops.attach_heads, msg["target"], msg["devices"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/room/detach",
+        vol.Required("target"): dict,
+        vol.Required("devices"): [str],
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_room_detach(hass: HomeAssistant, connection, msg: dict) -> None:
+    await _ws_room_write(hass, connection, msg, ops.detach_heads, msg["target"], msg["devices"])
 
 
 @websocket_api.require_admin

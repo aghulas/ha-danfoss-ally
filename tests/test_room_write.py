@@ -43,15 +43,22 @@ async def test_room_set_devices_replaces_list():
 
 
 class _FakeClient:
-    def __init__(self, homes=None, room_id="r1", room_map=None):
+    def __init__(self, homes=None, room_id="r1", room_map=None, device_homes=None):
         self.calls: list = []
         self._homes = homes or [{"gid": "home-1", "name": "H"}]
         self._room_id = room_id
         # Room map (type-4 rooms); default: one room named "Salle" (matches _FakeCoord's group).
         self._rooms = room_map if room_map is not None else [{"room_id": room_id, "name": "Salle"}]
+        # Per-device list of home gids; default: every device in ["home-1"].
+        self._device_homes = device_homes
 
     async def async_get_homes(self):
         return list(self._homes)
+
+    async def async_device_homes(self, dev_ids):
+        if self._device_homes is not None:
+            return {d: list(self._device_homes.get(d, [])) for d in dev_ids}
+        return {d: ["home-1"] for d in dev_ids}
 
     async def async_list_rooms(self, home):
         self.calls.append(("list_rooms", home))
@@ -78,12 +85,16 @@ class _FakeCoord:
         self.rooms = {"g1": RoomState(group_id="g1", name="Salle", pid="03wvrwpv", head_count=2)}
         self._members = {m: "g1" for m in members}
         self.refreshed = 0
+        self.invalidated = 0
 
     def group_of(self, dev_id):
         return self._members.get(dev_id)
 
     def home_of(self, group_id):
         return "home-1" if group_id == "g1" else None
+
+    def invalidate_topology(self):
+        self.invalidated += 1
 
     async def async_request_refresh(self):
         self.refreshed += 1
@@ -102,7 +113,8 @@ async def test_create_room_adds_then_sets_devices():
         ("add", "home-1", "Classroom"),
         ("set", "new-room", ["a", "b"]),
     ]
-    assert coord.refreshed == 1
+    # the new room must be made visible immediately: topology invalidated, then a refresh
+    assert coord.invalidated == 1 and coord.refreshed == 1
 
 
 async def test_create_room_rejects_empty_and_unknown():
@@ -124,6 +136,89 @@ async def test_create_room_rejects_unverified_product():
     assert e.value.code == "unverified_product"
 
 
+async def test_create_room_infers_second_home_and_groups_the_heads():
+    # Multi-home account, device.list filters by gid: both heads resolve to home-2 only. The room
+    # is created THERE and the heads are grouped into it (set_devices with both) -> not empty.
+    client = _FakeClient(
+        homes=[{"gid": "home-1"}, {"gid": "home-2"}],
+        device_homes={"a": ["home-2"], "b": ["home-2"]},
+    )
+    coord = _FakeCoord(client, members=("a", "b"))
+    res = await ops.create_room(None, _store(coord), "Classroom", ["a", "b"])
+    assert res == {"room_id": "new-room"}
+    # room created in home-2, then the two heads attached to it (the fix for the empty-room bug)
+    assert client.calls == [
+        ("add", "home-2", "Classroom"),
+        ("set", "new-room", ["a", "b"]),
+    ]
+
+
+async def test_create_room_explicit_home_overrides_inference():
+    client = _FakeClient(homes=[{"gid": "home-1"}, {"gid": "home-2"}])
+    coord = _FakeCoord(client, members=("a", "b"))
+    res = await ops.create_room(None, _store(coord), "Classroom", ["a", "b"], home="home-2")
+    assert res == {"room_id": "new-room"}
+    assert client.calls[0] == ("add", "home-2", "Classroom")  # explicit gid used, no inference
+
+
+async def test_create_room_explicit_home_unknown():
+    client = _FakeClient(homes=[{"gid": "home-1"}, {"gid": "home-2"}])
+    coord = _FakeCoord(client, members=("a", "b"))
+    with pytest.raises(ops.OperationError) as e:
+        await ops.create_room(None, _store(coord), "X", ["a", "b"], home="nope")
+    assert e.value.code == "unknown_home"
+    assert not any(c[0] == "add" for c in client.calls)
+
+
+async def test_create_room_ambiguous_when_heads_span_homes():
+    client = _FakeClient(
+        homes=[{"gid": "home-1"}, {"gid": "home-2"}],
+        device_homes={"a": ["home-1"], "b": ["home-2"]},
+    )
+    coord = _FakeCoord(client, members=("a", "b"))
+    with pytest.raises(ops.OperationError) as e:
+        await ops.create_room(None, _store(coord), "X", ["a", "b"])
+    assert e.value.code == "ambiguous_home"
+    assert not any(c[0] == "add" for c in client.calls)  # nothing created
+
+
+async def test_create_room_ambiguous_when_device_list_does_not_filter():
+    # If the backend does not filter by gid, each head appears in BOTH homes -> we refuse rather
+    # than silently pick the first home (which created an empty room in situ). The user passes home.
+    client = _FakeClient(
+        homes=[{"gid": "home-1"}, {"gid": "home-2"}],
+        device_homes={"a": ["home-1", "home-2"], "b": ["home-1", "home-2"]},
+    )
+    coord = _FakeCoord(client, members=("a", "b"))
+    with pytest.raises(ops.OperationError) as e:
+        await ops.create_room(None, _store(coord), "X", ["a", "b"])
+    assert e.value.code == "ambiguous_home"
+    assert not any(c[0] == "add" for c in client.calls)
+
+
+async def test_create_room_unknown_home():
+    # A known head that the cloud does not place in any home (stale) -> clean refusal, no write.
+    client = _FakeClient(device_homes={"a": []})
+    coord = _FakeCoord(client, members=("a",))
+    with pytest.raises(ops.OperationError) as e:
+        await ops.create_room(None, _store(coord), "X", ["a"])
+    assert e.value.code == "unknown_home"
+    assert not any(c[0] == "add" for c in client.calls)
+
+
+async def test_structural_writes_invalidate_topology_then_refresh():
+    # Every structural write must force the topology to be re-read so the change is visible now.
+    for action in (
+        lambda c: ops.rename_room(None, _store(c), _ROOM, "N"),
+        lambda c: ops.delete_room(None, _store(c), _ROOM),
+        lambda c: ops.attach_heads(None, _store(c), _ROOM, ["a"]),
+        lambda c: ops.detach_heads(None, _store(c), _ROOM, ["a"]),
+    ):
+        coord = _FakeCoord(_FakeClient(), members=("a", "b"))
+        await action(coord)
+        assert coord.invalidated == 1 and coord.refreshed == 1
+
+
 async def test_rename_and_delete_resolve_room_id():
     client = _FakeClient(room_id="r9")
     coord = _FakeCoord(client)
@@ -133,7 +228,34 @@ async def test_rename_and_delete_resolve_room_id():
     assert ("dismiss", "r9") in client.calls
 
 
-# attach_heads / detach_heads are deferred to 0.5.1 (not shipped in 0.5.0) — see contract §4.7.
+async def test_attach_unions_current_and_new():
+    client = _FakeClient(room_id="r1")
+    coord = _FakeCoord(client, members=("a", "b"))
+    coord.data["c"] = head("c", "C")  # a known head not yet in the room
+    coord._members.pop("c", None)
+    res = await ops.attach_heads(None, _store(coord), _ROOM, ["c"])
+    assert ("set", "r1", ["a", "b", "c"]) in client.calls
+    assert res["previous_heads"] == ["a", "b"] and res["heads"] == ["a", "b", "c"]
+
+
+async def test_detach_removes_and_refuses_emptying():
+    client = _FakeClient(room_id="r1")
+    coord = _FakeCoord(client, members=("a", "b"))
+    res = await ops.detach_heads(None, _store(coord), _ROOM, ["b"])
+    assert ("set", "r1", ["a"]) in client.calls and res["heads"] == ["a"]
+    # removing every member is refused: delete_room instead
+    with pytest.raises(ops.OperationError) as e:
+        await ops.detach_heads(None, _store(coord), _ROOM, ["a", "b"])
+    assert e.value.code == "no_members_left"
+
+
+async def test_detach_unknown_head_in_room():
+    coord = _FakeCoord(_FakeClient(), members=("a", "b"))
+    coord.data["z"] = head("z", "Z")
+    coord._members.pop("z", None)
+    with pytest.raises(ops.OperationError) as e:
+        await ops.detach_heads(None, _store(coord), _ROOM, ["z"])
+    assert e.value.code == "unknown_head"
 
 
 async def test_room_action_refuses_non_room_target():

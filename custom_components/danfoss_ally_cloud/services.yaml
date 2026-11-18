@@ -31,6 +31,11 @@ create_room:
       example: '["<devId1>", "<devId2>"]'
       selector:
         object:
+    home:
+      required: false
+      example: "256784132"
+      selector:
+        text:
     config_entry_id:
       required: false
       selector:
@@ -60,6 +65,42 @@ delete_room:
     target:
       required: true
       example: '{"type": "room", "id": "<group_id>"}'
+      selector:
+        object:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+attach_heads:
+  fields:
+    target:
+      required: true
+      example: '{"type": "room", "id": "<group_id>"}'
+      selector:
+        object:
+    devices:
+      required: true
+      example: '["<devId>"]'
+      selector:
+        object:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+detach_heads:
+  fields:
+    target:
+      required: true
+      example: '{"type": "room", "id": "<group_id>"}'
+      selector:
+        object:
+    devices:
+      required: true
+      example: '["<devId>"]'
       selector:
         object:
     config_entry_id:

@@ -326,7 +326,7 @@ async def test_service_create_room(setup):
         return_response=True,
     )
     assert res["room_id"] == "new-7"
-    assert ("room_add", 1, "Classroom") in fake.writes
+    assert ("room_add", "1", "Classroom") in fake.writes  # home inferred from the devices
     assert ("room_set", "new-7", ["a", "b"]) in fake.writes
 
 
@@ -357,6 +357,19 @@ async def test_ws_room_rename_and_delete(setup):
     ws.ws_room_delete(hass, conn, {"id": 31, "target": _ROOM_TARGET})
     await hass.async_block_till_done()
     assert ("room_dismiss", "room-5") in fake.writes
+
+
+async def test_ws_room_attach_detach(setup):
+    hass, _, fake = setup
+    conn = _FakeConn(is_admin=True)
+    ws.ws_room_attach(hass, conn, {"id": 32, "target": _ROOM_TARGET, "devices": ["a"]})
+    await hass.async_block_till_done()
+    # a (already a member) + b (member): the member list stays {a, b}
+    assert conn.results[32]["heads"] == ["a", "b"]
+    ws.ws_room_detach(hass, conn, {"id": 33, "target": _ROOM_TARGET, "devices": ["b"]})
+    await hass.async_block_till_done()
+    assert conn.results[33]["heads"] == ["a"]
+    assert ("room_set", "room-5", ["a"]) in fake.writes
 
 
 async def test_ws_room_create(setup):

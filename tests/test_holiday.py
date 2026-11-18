@@ -1,6 +1,7 @@
 """Axis B — holiday read: decode helper + home-level entities. Synthetic data only."""
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from homeassistant.core import HomeAssistant
 
@@ -12,7 +13,7 @@ from custom_components.danfoss_ally_cloud.const import DATA_COORDINATOR, DOMAIN
 from custom_components.danfoss_ally_cloud.coordinator import DanfossCoordinator
 from custom_components.danfoss_ally_cloud.sensor import DanfossHolidaySetpoint
 
-from .common import FakeCloudClient
+from .common import FakeCloudClient, head
 
 
 def test_holiday_temperature_scales_and_misses():
@@ -98,3 +99,32 @@ async def test_coordinator_keeps_holidays_on_read_failure(hass: HomeAssistant):
     await coord._async_update_data()
     # a holiday read failure must not wipe the previous value nor break the poll
     assert coord.holidays == {"1": {"gid": "1", "active": True}}
+
+
+async def test_invalidate_topology_forces_room_refetch(hass: HomeAssistant):
+    # A structural write cache-busts the topology; without it the hourly cache hides the change.
+    # monotonic() is pinned to a small value < TTL to model a freshly booted host (as on CI): then
+    # invalidate_topology must STILL force the refetch, which it only does if it doesn't rely on
+    # `now - 0 >= TTL` (it uses -inf). Without that fix this test fails here (and did, in CI).
+    fake = FakeCloudClient(
+        devices=[head("a", "A")],
+        groups=[{"group_id": "g1", "name": "R1", "pid": "03wvrwpv", "head_count": 1}],
+        members={"g1": ["a"]},
+    )
+    with patch("custom_components.danfoss_ally_cloud.coordinator.time.monotonic", return_value=5.0):
+        coord = DanfossCoordinator(hass, fake, 90)
+        await coord._async_update_data()
+        assert "g1" in coord.rooms
+
+        # the cloud topology changes (room g1 -> g2)
+        fake._groups = [{"group_id": "g2", "name": "R2", "pid": "03wvrwpv", "head_count": 1}]
+        fake._members = {"g2": ["a"]}
+
+        # a plain refresh keeps the cached topology (the bug behind create_room invisibility)
+        await coord._async_update_data()
+        assert "g1" in coord.rooms and "g2" not in coord.rooms
+
+        # invalidating the topology makes the next refresh re-read it, even on a low-uptime host
+        coord.invalidate_topology()
+        await coord._async_update_data()
+        assert "g2" in coord.rooms and "g1" not in coord.rooms

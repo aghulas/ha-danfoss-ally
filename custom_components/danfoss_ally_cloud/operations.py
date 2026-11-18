@@ -302,6 +302,17 @@ async def _run_cloud_write(func, *args) -> Any:
         raise OperationError("cloud_refused", str(err)) from err
 
 
+async def _refresh_after_structural_write(coordinator) -> None:
+    """Make a structural change visible now: drop the topology cache, then refresh.
+
+    ``async_request_refresh`` alone re-reads device state but keeps the hourly-cached room topology,
+    so a new/changed/removed room would stay invisible to ``get_rooms`` and the resolver until the
+    next poll. Invalidating the topology first forces it to be re-read on this refresh.
+    """
+    coordinator.invalidate_topology()
+    await coordinator.async_request_refresh()
+
+
 def _room_target(target: dict) -> str:
     if target.get("type") != "room":
         raise OperationError("unknown_room", "this action targets a room")
@@ -317,6 +328,14 @@ def _validate_heads(coordinator, devices: list[str], *, require_verified: bool) 
             raise OperationError("unknown_head", f"head not found: {dev_id}")
         if require_verified and not write_allowed(dev):
             raise OperationError("unverified_product", f"write not verified for {dev_id}")
+
+
+def _current_members(coordinator, group_id: str) -> list[str]:
+    return [
+        dev.id
+        for dev in coordinator.data.values()
+        if dev.is_head and coordinator.group_of(dev.id) == group_id
+    ]
 
 
 def _room_name_candidates(group_name: str) -> list[str]:
@@ -357,24 +376,65 @@ async def _resolve_room_id(coordinator, group_id: str) -> str:
     raise OperationError("unknown_room", f"no Tuya room matching {rs.name!r}")
 
 
-async def create_room(hass: HomeAssistant, store: dict, name: str, devices: list[str]) -> dict:
-    """Create a room and attach the given heads (contract §4.7). Verified products only."""
+async def create_room(
+    hass: HomeAssistant,
+    store: dict,
+    name: str,
+    devices: list[str],
+    home: str | None = None,
+) -> dict:
+    """Create a room and attach the given heads (contract §4.7). Verified products only.
+
+    The room MUST be created in the home the heads belong to, otherwise the heads cannot join it and
+    the room is left empty. ``home`` (a gid) selects it explicitly (the reliable path on a
+    multi-home account, mirroring the app, which creates in the current home); when omitted the home
+    is **inferred from the devices** and a single shared home must resolve, else ``ambiguous_home``
+    (pass ``home``) or ``unknown_home``.
+    """
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     _validate_heads(coordinator, devices, require_verified=True)
-    homes = await _run_cloud_write(coordinator.client.async_get_homes)
-    if len(homes) != 1:
-        raise OperationError("unknown_room", "several homes configured: create the room in the app")
-    room_id = await _run_cloud_write(coordinator.client.async_room_add, homes[0]["gid"], name)
+    gid = await _resolve_devices_home(coordinator, list(devices), home)
+    room_id = await _run_cloud_write(coordinator.client.async_room_add, gid, name)
     await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, list(devices))
-    await coordinator.async_request_refresh()
+    await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id)}
+
+
+async def _resolve_devices_home(
+    coordinator, devices: list[str], explicit_home: str | None = None
+) -> str:
+    """The home gid to create the room in: explicit if given (validated), else inferred.
+
+    Inference: the single home that contains ALL the devices. Raises ``unknown_home`` if a device is
+    in no home (or the explicit gid is unknown) and ``ambiguous_home`` if no single home holds them
+    all (heads span homes, or the backend did not filter the device list by gid) — never a silent
+    guess, which would create the room in the wrong home.
+    """
+    homes = await _run_cloud_write(coordinator.client.async_get_homes)
+    valid = {str(h["gid"]) for h in homes}
+    if explicit_home is not None:
+        gid = str(explicit_home)
+        if gid not in valid:
+            raise OperationError("unknown_home", f"home {explicit_home!r} not found in the account")
+        return gid
+    homes_of = await _run_cloud_write(coordinator.client.async_device_homes, devices)
+    missing = [d for d, gids in homes_of.items() if not gids]
+    if missing:
+        raise OperationError("unknown_home", f"devices not found in any home: {missing}")
+    common = set.intersection(*(set(gids) for gids in homes_of.values()))
+    if len(common) == 1:
+        return next(iter(common))
+    raise OperationError(
+        "ambiguous_home",
+        "cannot determine a single home for these heads; pass 'home' (the gid) explicitly",
+    )
 
 
 async def rename_room(hass: HomeAssistant, store: dict, target: dict, name: str) -> dict:
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     room_id = await _resolve_room_id(coordinator, _room_target(target))
     await _run_cloud_write(coordinator.client.async_room_update, room_id, name)
-    await coordinator.async_request_refresh()
+    await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id)}
 
 
@@ -382,15 +442,38 @@ async def delete_room(hass: HomeAssistant, store: dict, target: dict) -> dict:
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     room_id = await _resolve_room_id(coordinator, _room_target(target))
     await _run_cloud_write(coordinator.client.async_room_dismiss, room_id)
-    await coordinator.async_request_refresh()
+    await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id)}
 
 
-# NOTE: attach_heads / detach_heads (add/remove a head in an existing room) are DEFERRED to 0.5.1.
-# The cloud replace-list on a group-backed room (type-4 room vs implicit type-5 schedule-group,
-# §4.7) cannot be faithfully validated with the current tooling and needs the integration running
-# in situ on the Pi. create_room / rename_room / delete_room above are validated on real hardware
-# (2026-11-18). `_resolve_room_id` and the " Group"-label tolerance stay (used by rename/delete).
+async def attach_heads(hass: HomeAssistant, store: dict, target: dict, devices: list[str]) -> dict:
+    """Add heads to a room (contract §4.7). REPLACES the member list with current ∪ given."""
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    group_id = _room_target(target)
+    _validate_heads(coordinator, devices, require_verified=True)
+    room_id = await _resolve_room_id(coordinator, group_id)
+    members = _current_members(coordinator, group_id)
+    final = list(dict.fromkeys(members + list(devices)))
+    await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, final)
+    await _refresh_after_structural_write(coordinator)
+    return {"room_id": str(room_id), "heads": final, "previous_heads": members}
+
+
+async def detach_heads(hass: HomeAssistant, store: dict, target: dict, devices: list[str]) -> dict:
+    """Remove heads from a room (contract §4.7). Refuses to empty a room (use delete_room)."""
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    group_id = _room_target(target)
+    _validate_heads(coordinator, devices, require_verified=False)  # removal: any known head
+    room_id = await _resolve_room_id(coordinator, group_id)
+    members = _current_members(coordinator, group_id)
+    if not any(d in members for d in devices):
+        raise OperationError("unknown_head", "none of these heads are in the room")
+    final = [d for d in members if d not in devices]
+    if not final:
+        raise OperationError("no_members_left", "detaching every head: use delete_room instead")
+    await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, final)
+    await _refresh_after_structural_write(coordinator)
+    return {"room_id": str(room_id), "heads": final, "previous_heads": members}
 
 
 async def set_relay_room(
@@ -423,7 +506,7 @@ async def set_relay_room(
     await _run_cloud_write(
         coordinator.client.async_relay_bind, relay, match["room_id"], bool(linked)
     )
-    await coordinator.async_request_refresh()
+    await _refresh_after_structural_write(coordinator)
     return {"relay": relay, "room_id": str(match["room_id"]), "linked": bool(linked)}
 
 

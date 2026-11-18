@@ -52,6 +52,10 @@ class _FakeCoord:
         self.rooms = {"g1": RoomState(group_id="g1", name="Salle", pid="03wvrwpv", head_count=1)}
         self.relay_rooms = relay_rooms
         self.refreshed = 0
+        self.invalidated = 0
+
+    def invalidate_topology(self):
+        self.invalidated += 1
 
     async def async_request_refresh(self):
         self.refreshed += 1

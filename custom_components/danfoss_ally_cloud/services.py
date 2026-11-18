@@ -76,6 +76,7 @@ _CREATE_ROOM = vol.Schema(
     {
         vol.Required("name"): cv.string,
         vol.Required("devices"): [cv.string],
+        vol.Optional("home"): cv.string,
         vol.Optional("config_entry_id"): cv.string,
     }
 )
@@ -94,6 +95,13 @@ _SET_RELAY_ROOM = vol.Schema(
         vol.Optional("config_entry_id"): cv.string,
     }
 )
+_ATTACH = vol.Schema(
+    {
+        vol.Required("target"): _TARGET,
+        vol.Required("devices"): [cv.string],
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
 
 
 def _store(hass: HomeAssistant, call: ServiceCall) -> dict:
@@ -109,8 +117,12 @@ def _store(hass: HomeAssistant, call: ServiceCall) -> dict:
         if store is None:
             raise ServiceValidationError(f"unknown entry: {entry_id}")
         return store
-    if len(entries) != 1:
-        raise ServiceValidationError("several accounts configured: specify config_entry_id")
+    # One account = one config entry (several homes live under it). config_entry_id is only needed
+    # to disambiguate several CONFIG ENTRIES, not several homes.
+    if not entries:
+        raise ServiceValidationError("no danfoss_ally_cloud account configured")
+    if len(entries) > 1:
+        raise ServiceValidationError("several config entries configured: specify config_entry_id")
     return next(iter(entries.values()))
 
 
@@ -233,7 +245,9 @@ def async_register_services(hass: HomeAssistant) -> None:
         store = _store(hass, call)
         try:
             await ops.ensure_admin(hass, call.context.user_id)
-            return await ops.create_room(hass, store, call.data["name"], call.data["devices"])
+            return await ops.create_room(
+                hass, store, call.data["name"], call.data["devices"], call.data.get("home")
+            )
         except ops.OperationError as err:
             _raise(err)
 
@@ -263,6 +277,22 @@ def async_register_services(hass: HomeAssistant) -> None:
         except ops.OperationError as err:
             _raise(err)
 
+    async def attach_heads(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.attach_heads(hass, store, call.data["target"], call.data["devices"])
+        except ops.OperationError as err:
+            _raise(err)
+
+    async def detach_heads(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.detach_heads(hass, store, call.data["target"], call.data["devices"])
+        except ops.OperationError as err:
+            _raise(err)
+
     reg = hass.services.async_register
     reg(DOMAIN, "get_rooms", get_rooms, _GET_ROOMS, SupportsResponse.ONLY)
     reg(DOMAIN, "get_room", get_room, _RESTORE, SupportsResponse.ONLY)
@@ -285,3 +315,5 @@ def async_register_services(hass: HomeAssistant) -> None:
     reg(DOMAIN, "rename_room", rename_room, _RENAME_ROOM, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "delete_room", delete_room, _RESTORE, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "set_relay_room", set_relay_room, _SET_RELAY_ROOM, SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "attach_heads", attach_heads, _ATTACH, SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "detach_heads", detach_heads, _ATTACH, SupportsResponse.OPTIONAL)
