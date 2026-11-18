@@ -1,9 +1,9 @@
 # Changelog
 
-## Unreleased — Coexistence + hardening (axis A, toward 1.0)
+## 1.0.0 — Coexistence, hardening and vacation writes (axis A)
 
 Path-1a coexistence with the Danfoss app / MCP connector, plus 1.0 hardening, plus the new **gated**
-vacation write. The version bump and tag are left to the integrator.
+vacation write. Validated in situ on the running install (2026-11-18): coexistence (the integration and the MCP connector keep independent Tuya sessions) and the four vacation writes (away / at-home / cancel / end-now), at-home requiring a Saturday program.
 
 ### Added
 
