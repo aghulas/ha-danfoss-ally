@@ -117,3 +117,16 @@ async def test_list_rooms_empty_on_unexpected_shape():
     fake = FakeHttp({"m.life.group.room.map.get": []})
     with patch(_HTTP, return_value=fake):
         assert await _client().async_list_rooms(1) == []
+
+
+async def test_room_id_resolves_by_name_case_insensitive():
+    fake = FakeHttp(
+        {
+            "m.life.group.room.map.get": {
+                "rooms": [{"id": 10, "name": "Salle 1"}, {"id": 11, "name": "WC"}]
+            }
+        }
+    )
+    with patch(_HTTP, return_value=fake):
+        assert await _client().async_room_id(1, " salle 1 ") == "10"
+        assert await _client().async_room_id(1, "unknown") is None

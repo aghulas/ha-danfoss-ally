@@ -327,6 +327,19 @@ class CloudClient:
                 out.append({"room_id": str(x.get("id")), "name": x.get("name")})
         return out
 
+    async def async_room_id(self, home_gid: str | int, name: str) -> str | None:
+        """Tuya room id (type 4) of a room by its name, in a home (``room.map.get``). Read-only.
+
+        A schedule-group (type 5) and a Tuya room (type 4) share the same display name; the room
+        management writes (create/attach/detach/rename/delete) address the room id, resolved here.
+        Case/space-insensitive match. ``None`` if no room has that name.
+        """
+        target = (name or "").strip().lower()
+        for room in await self.async_list_rooms(home_gid):
+            if (room.get("name") or "").strip().lower() == target:
+                return room["room_id"]
+        return None
+
     async def async_write_setting(
         self, dev_id: str, pid: str, dps: dict, *, gw_id: str | int | None = None
     ) -> object:

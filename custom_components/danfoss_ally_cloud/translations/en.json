@@ -259,6 +259,20 @@
           "description": "If several accounts are configured."
         }
       }
+    },
+    "get_room": {
+      "name": "Get room",
+      "description": "One room's detail and its weekly schedule.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "Target: type 'room' and its id (group_id)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
     }
   },
   "exceptions": {
@@ -312,6 +326,9 @@
     },
     "no_schedule": {
       "message": "No schedule to return to; the override lapses at the next scheduled change."
+    },
+    "unknown_room": {
+      "message": "Unknown room."
     }
   }
 }
