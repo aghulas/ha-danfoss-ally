@@ -230,9 +230,12 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
     @property
     def hvac_action(self) -> HVACAction | None:
         dev = self.device
-        if dev is None or not dev.online or dev.valve_opening is None:
+        if dev is None or not dev.online:
             return None
-        return HVACAction.HEATING if dev.valve_opening > 0 else HVACAction.IDLE
+        heating = dev.heating  # work_state (DP 3), valve opening as fallback
+        if heating is None:
+            return None
+        return HVACAction.HEATING if heating else HVACAction.IDLE
 
     @property
     def extra_state_attributes(self) -> dict:

@@ -77,6 +77,18 @@ _SETPOINT_DPS = {
     "121": "holiday",  # holiday_setting
 }
 
+# Current mode (DP 2) -> which per-mode setting is the ACTIVE setpoint. Fallback only, used when the
+# payload lacks DP 171 (OccupiedSetpoint): DP 2 and the per-mode settings are always in the bulk
+# device.list payload, so the active setpoint stays correct without the comfort/active confusion.
+_MODE_ACTIVE_KEY = {
+    "at_home": "comfort",
+    "leaving_home": "setback",
+    "manual": "manual",
+    "pause": "pause",
+    "holiday": "holiday",
+    "holiday_sat": "holiday",
+}
+
 
 def _num(v: Any, divisor: float = 1) -> float | None:
     if v is None or v == "":
@@ -185,6 +197,25 @@ class DanfossDevice:
         """Mode shows comfort/setback while the schedule is inactive in the head (R6)."""
         return self.mode in ("at_home", "leaving_home") and self.schedule_active is False
 
+    @property
+    def heating(self) -> bool | None:
+        """Real heating state from ``work_state`` (DP 3): ``Heat`` -> True, ``NoHeat`` -> False.
+
+        The head's own ``work_state`` is authoritative over a local temperature-vs-setpoint guess
+        or a cracked-valve reading (real hardware R-1, 2026-11-18: ``NoHeat`` with the valve at 1 %
+        while the room sat above its active setpoint). Falls back to the valve opening when DP 3 is
+        absent (older firmware), and is ``None`` when neither is known.
+        """
+        if isinstance(self.state, str):
+            s = self.state.strip().lower()
+            if s in ("heat", "heating"):
+                return True
+            if s in ("noheat", "no_heat", "idle", "off"):
+                return False
+        if self.valve_opening is not None:
+            return self.valve_opening > 0
+        return None
+
 
 def _int(v: Any) -> int | None:
     if v is None or v == "":
@@ -254,12 +285,21 @@ def decode_device(device: dict[str, Any]) -> DanfossDevice:
         dps=dps,
     )
     d.temperature = _num(dps.get("24"), 10)
-    d.setpoint = _num(dps.get("16"), 10)
     for dp, key in _SETPOINT_DPS.items():
         x = _num(dps.get(dp), 10)
         if x is not None:
             d.setpoints[key] = x
     d.mode = dps.get("2")
+    # Active setpoint = the one of the current schedule slot. DP 171 (OccupiedSetpoint) tracks it,
+    # in centi-°C (confirmed on real hardware and in the bulk device.list capture: raw 1400 = 14.0,
+    # 2100 = 21.0), despite the official schema nominally listing it unscaled. When absent, derive
+    # it from the current mode (DP 2) + the per-mode settings; DP 16 (temp_set) is the last resort
+    # (it reports the comfort setpoint regardless of the slot, the R-1 bug).
+    d.setpoint = _num(dps.get("171"), 100)
+    if d.setpoint is None:
+        d.setpoint = d.setpoints.get(_MODE_ACTIVE_KEY.get(d.mode or "", ""))
+    if d.setpoint is None:
+        d.setpoint = _num(dps.get("16"), 10)
     d.state = dps.get("3")
     d.battery = _num(dps.get("34"))
     d.valve_opening = _num(dps.get("170"))

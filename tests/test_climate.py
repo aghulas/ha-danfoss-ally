@@ -154,3 +154,11 @@ def test_head_climate_lecture_seule():
     assert cl.target_temperature == 6.0
     assert cl.hvac_action == HVACAction.HEATING
     assert cl.unique_id == dev.id
+
+
+def test_head_climate_hvac_action_follows_work_state():
+    # Real-hardware R-1: work_state NoHeat with a cracked valve (1 %) -> idle, not heating.
+    dev = head(temperature=18.7, setpoint=14.0, valve_opening=1, state="NoHeat")
+    coord = _FakeCoord(data={dev.id: dev})
+    cl = DanfossHeadClimate(coord, dev.id)
+    assert cl.hvac_action == HVACAction.IDLE

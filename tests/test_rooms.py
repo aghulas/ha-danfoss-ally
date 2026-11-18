@@ -26,6 +26,16 @@ def test_aggregate_chauffe_false_si_aucune_vanne():
     assert aggregate_room(_room(["a"]), [m]).heating is False
 
 
+def test_aggregate_heating_follows_work_state():
+    # Real-hardware R-1: the valve is cracked (1 %) but work_state says NoHeat -> the room is idle,
+    # and the aggregated setpoint is the active (setback) one, not comfort.
+    m = head("a", "A", valve_opening=1, state="NoHeat", setpoint=14.0, mode="leaving_home")
+    r = aggregate_room(_room(["a"]), [m])
+    assert r.heating is False
+    assert r.setpoint == 14.0
+    assert r.mode == "leaving_home"
+
+
 def test_aggregate_ignores_offline_for_the_mean():
     m1 = head("a", "A", temperature=10.0, online=False)
     m2 = head("b", "B", temperature=20.0, online=True)

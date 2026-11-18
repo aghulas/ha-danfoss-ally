@@ -129,7 +129,9 @@ def state_z2m(dev: DanfossDevice) -> dict[str, Any]:
         out["occupied_heating_setpoint"] = dev.setpoint
     if dev.valve_opening is not None:
         out["pi_heating_demand"] = dev.valve_opening
-        out["running_state"] = "heat" if dev.valve_opening > 0 else "idle"
+    heating = dev.heating  # work_state (DP 3), not the valve, per R-1
+    if heating is not None:
+        out["running_state"] = "heat" if heating else "idle"
     if dev.battery is not None:
         out["battery"] = dev.battery
     if dev.window_open is not None:
