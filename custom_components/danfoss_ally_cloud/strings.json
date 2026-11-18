@@ -619,6 +619,9 @@
     },
     "empty_rooms": {
       "message": "This home has no room for a vacation."
+    },
+    "at_home_no_saturday": {
+      "message": "The \"at home\" option makes heads follow the Saturday schedule, but no targeted room has a Saturday slot. Add a Saturday slot, or use a fixed setpoint (away)."
     }
   }
 }

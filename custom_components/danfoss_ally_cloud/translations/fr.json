@@ -619,6 +619,9 @@
   },
   "empty_rooms": {
    "message": "Cette maison n'a aucune pièce pour des vacances."
+  },
+  "at_home_no_saturday": {
+   "message": "L'option « à la maison » fait suivre le programme du samedi, or aucune pièce ciblée n'a de créneau le samedi. Ajoute un créneau samedi, ou utilise une consigne fixe (absence)."
   }
  }
 }

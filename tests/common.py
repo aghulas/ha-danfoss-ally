@@ -78,6 +78,7 @@ class FakeCloudClient:
         holidays=None,
         holidays_exc=None,
         relay_rooms=None,
+        saturday_groups=None,
         **kwargs,
     ) -> None:
         self._devices = [head()] if devices is None else devices
@@ -89,6 +90,7 @@ class FakeCloudClient:
         self._holidays = holidays
         self._holidays_exc = holidays_exc
         self._relay_rooms = relay_rooms
+        self._saturday_groups = set(saturday_groups or ())
         self.closed = False
         self.writes: list = []
 
@@ -207,12 +209,16 @@ class FakeCloudClient:
 
     # Schedule editing (schedule-editing layer): stub + write log.
     async def async_get_schedule(self, target):
+        days = {d: [] for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")}
+        # Groups configured with a Saturday program get a Saturday slot (at-home vacation guard).
+        if str(target.get("id")) in self._saturday_groups:
+            days["sat"] = [{"start": "08:00", "end": "18:00"}]
         return {
             "target": target,
             "name": "Salle 1",
             "comfort": 21.0,
             "setback": 14.0,
-            "days": {d: [] for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")},
+            "days": days,
             "max_transitions_per_day": 6,
             "source": "cloud",
             "read_at": "t",

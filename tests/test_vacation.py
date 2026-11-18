@@ -100,7 +100,7 @@ def _no_timer(monkeypatch):
     monkeypatch.setattr(ops, "_defer_verification", lambda *a, **k: None)
 
 
-async def _setup(hass: HomeAssistant, *, vacation_write: bool):
+async def _setup(hass: HomeAssistant, *, vacation_write: bool, saturday_groups=None):
     entry = MockConfigEntry(
         domain=DOMAIN,
         data=ENTRY_DATA,
@@ -112,6 +112,7 @@ async def _setup(hass: HomeAssistant, *, vacation_write: bool):
         devices=[head("a", "Salle 1 #2"), head("b", "Salle 1 #3")],
         groups=_GROUPS,
         members=_MEMBERS,
+        saturday_groups=saturday_groups,
     )
     with patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=fake):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -236,7 +237,7 @@ async def test_set_vacation_unknown_home(hass: HomeAssistant):
 
 
 async def test_vacation_at_home_and_cancel_and_end(hass: HomeAssistant):
-    _, fake = await _setup(hass, vacation_write=True)
+    _, fake = await _setup(hass, vacation_write=True, saturday_groups={"13000000"})
     await _call(
         hass,
         "set_vacation_at_home",
@@ -248,6 +249,30 @@ async def test_vacation_at_home_and_cancel_and_end(hass: HomeAssistant):
     await _call(hass, "end_vacation", {"home": "1", "temperature": 20.0})
     end = next(w for w in fake.writes if w[0] == "vac_leave_now")
     assert end[1] == "1" and end[3] == 200  # tenths int
+
+
+async def test_at_home_refused_without_saturday_program(hass: HomeAssistant):
+    """No targeted room has a Saturday slot -> refuse BEFORE any network call."""
+    _, fake = await _setup(hass, vacation_write=True, saturday_groups=set())
+    with pytest.raises(ServiceValidationError) as exc:
+        await _call(
+            hass,
+            "set_vacation_at_home",
+            {"home": "1", "start_date": "20261220", "end_date": "20270105"},
+        )
+    assert exc.value.translation_key == "at_home_no_saturday"
+    assert not any(w[0] == "vac_athome" for w in fake.writes)  # no send
+
+
+async def test_at_home_allowed_with_saturday_program(hass: HomeAssistant):
+    """At least one targeted room has a Saturday slot -> the call goes through."""
+    _, fake = await _setup(hass, vacation_write=True, saturday_groups={"13000000"})
+    await _call(
+        hass,
+        "set_vacation_at_home",
+        {"home": "1", "start_date": "20261220", "end_date": "20270105", "rooms": [_ROOM_TARGET]},
+    )
+    assert any(w[0] == "vac_athome" for w in fake.writes)
 
 
 async def test_set_vacation_explicit_rooms_resolved(hass: HomeAssistant):

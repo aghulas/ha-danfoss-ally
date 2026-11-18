@@ -586,6 +586,45 @@ async def _resolve_home(coordinator, home: str) -> str:
     return gid
 
 
+def _at_home_target_groups(coordinator, gid: str, rooms: list[dict] | None) -> list[str]:
+    """Schedule-group ids the at-home Saturday pre-check must inspect.
+
+    Explicit ``rooms`` (group targets) are validated against the home; omitted = every room the
+    integration tracks in that home. These are the ids whose *weekly schedule* is read (an at-home
+    vacation makes a head follow its Saturday program), distinct from the Tuya room ids sent in the
+    request body (``_resolve_vacation_rooms``).
+    """
+    if rooms:
+        groups: list[str] = []
+        for target in rooms:
+            group_id = _room_target(target)
+            if group_id not in coordinator.rooms or coordinator.home_of(group_id) != gid:
+                raise OperationError("unknown_room", f"room {group_id} is not in home {gid}")
+            groups.append(group_id)
+        return groups
+    return [g for g in coordinator.rooms if coordinator.home_of(g) == gid]
+
+
+async def _ensure_saturday_program(store: dict, group_ids: list[str]) -> None:
+    """Reproduce the app's client-side guard for at-home vacations (field-confirmed 2026-11).
+
+    An at-home vacation makes each head follow its **Saturday** schedule; when NO targeted room has
+    a Saturday slot the cloud answers a bare, cryptic ``REMOTE_API_RUN_UNKNOW_FAILED`` ("the server
+    is busy"). We pre-read each target room's weekly schedule (``tuya.m.custom.wkf.week.timer.list``
+    via ``get_schedule``) and refuse with a clear error BEFORE any send if none has a Saturday
+    window.
+    """
+    for group_id in group_ids:
+        schedule = await get_schedule(store, {"type": "room", "id": group_id})
+        if schedule.get("days", {}).get("sat"):
+            return
+    raise OperationError(
+        "at_home_no_saturday",
+        "the at-home option makes heads follow the Saturday schedule, but no targeted room has a "
+        "Saturday slot; add a Saturday slot or use a fixed setpoint (away)",
+    )
+
+
 async def set_vacation(
     hass: HomeAssistant,
     store: dict,
@@ -643,8 +682,9 @@ async def set_vacation_at_home(
 ) -> dict:
     """Set / edit an *at-home* vacation (contract §4.5, ``vacation.plan.athome``). GATED.
 
-    No temperature: each head follows its Saturday schedule. The cloud refuses it when a room has
-    no Saturday program (surfaced as ``cloud_refused``).
+    No temperature: each head follows its Saturday schedule. A client-side pre-check refuses with
+    ``at_home_no_saturday`` when no targeted room has a Saturday slot (the cloud otherwise answers a
+    cryptic ``REMOTE_API_RUN_UNKNOW_FAILED``), mirroring the app's own guard.
     """
     _require_vacation_write(store)
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
@@ -653,6 +693,7 @@ async def set_vacation_at_home(
     _check_date(end_date, "end_date")
     if end_date < start_date:
         raise OperationError("invalid_vacation_period", "the end must not be before the start")
+    await _ensure_saturday_program(store, _at_home_target_groups(coordinator, gid, rooms))
     room_ids = await _resolve_vacation_rooms(coordinator, gid, rooms)
     await _run_cloud_write(
         coordinator.client.async_vacation_athome, gid, start_date, end_date, room_ids, time_zone
