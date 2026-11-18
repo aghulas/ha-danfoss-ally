@@ -458,7 +458,7 @@ take `config_entry_id` when several accounts are configured.
 | `get_relays` | — | `{"relays": [Relay]}` | read |
 | `get_overview` | — | `FleetOverview` (§3.6) | read |
 | `get_room` | `target` (room) | `{"room": Room, "schedule": Schedule}` | read |
-| `create_room` | `name`, `devices` (list of devId) | `{"room_id": "…"}` | create a room + attach heads |
+| `create_room` | `name`, `devices` (list of devId) | `{"room_id": "…"}` | create a room + attach heads; the home is inferred from the devices (all must share one home — the account may have several) |
 | `rename_room` | `target` (room), `name` | `{"room_id": "…"}` | rename |
 | `delete_room` | `target` (room) | `{"room_id": "…"}` | delete (heads ungrouped) |
 | `attach_heads` | `target` (room), `devices` | `{"room_id": "…", "heads": […]}` | add heads (replaces list) |
@@ -511,6 +511,8 @@ stable.
 | `session_expired` | session to renew (re-authentication in progress) |
 | `unknown_room` | named room not found in the account |
 | `unknown_relay` | relay devId not found |
+| `unknown_home` | `create_room`: none of the given heads found in any home |
+| `ambiguous_home` | `create_room`: the given heads span several homes |
 | `unknown_head` | head devId not found when attaching/detaching |
 | `empty_devices` | a room create/attach was given no head |
 | `no_members_left` | detaching would leave the room with no head (use `delete_room`) |

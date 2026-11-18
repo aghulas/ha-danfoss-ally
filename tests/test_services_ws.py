@@ -326,7 +326,7 @@ async def test_service_create_room(setup):
         return_response=True,
     )
     assert res["room_id"] == "new-7"
-    assert ("room_add", 1, "Classroom") in fake.writes
+    assert ("room_add", "1", "Classroom") in fake.writes  # home inferred from the devices
     assert ("room_set", "new-7", ["a", "b"]) in fake.writes
 
 

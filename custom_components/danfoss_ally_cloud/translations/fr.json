@@ -479,6 +479,12 @@
   },
   "no_members_left": {
    "message": "Détacher toutes les têtes viderait la pièce : utilisez delete_room."
+  },
+  "unknown_home": {
+   "message": "Aucune des têtes indiquées n'a été trouvée dans une maison."
+  },
+  "ambiguous_home": {
+   "message": "Les têtes indiquées sont dans des maisons différentes ; créez une pièce par maison."
   }
  }
 }

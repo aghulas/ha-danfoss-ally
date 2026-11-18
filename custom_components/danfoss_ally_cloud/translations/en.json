@@ -479,6 +479,12 @@
     },
     "no_members_left": {
       "message": "Detaching every head would empty the room: use delete_room."
+    },
+    "unknown_home": {
+      "message": "None of the given heads were found in any home."
+    },
+    "ambiguous_home": {
+      "message": "The given heads are in different homes; create one room per home."
     }
   }
 }

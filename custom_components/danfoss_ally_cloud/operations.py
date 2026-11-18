@@ -366,16 +366,34 @@ async def _resolve_room_id(coordinator, group_id: str) -> str:
 
 
 async def create_room(hass: HomeAssistant, store: dict, name: str, devices: list[str]) -> dict:
-    """Create a room and attach the given heads (contract §4.7). Verified products only."""
+    """Create a room and attach the given heads (contract §4.7). Verified products only.
+
+    The home is **inferred from the devices** (the account can have several homes, and a config
+    entry does not disambiguate them): all given heads must share one home, which is where the room
+    is created. Fails cleanly if they span homes (``ambiguous_home``) or none can be resolved
+    (``unknown_home``).
+    """
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     _validate_heads(coordinator, devices, require_verified=True)
-    homes = await _run_cloud_write(coordinator.client.async_get_homes)
-    if len(homes) != 1:
-        raise OperationError("unknown_room", "several homes configured: create the room in the app")
-    room_id = await _run_cloud_write(coordinator.client.async_room_add, homes[0]["gid"], name)
+    home = await _resolve_devices_home(coordinator, list(devices))
+    room_id = await _run_cloud_write(coordinator.client.async_room_add, home, name)
     await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, list(devices))
     await coordinator.async_request_refresh()
     return {"room_id": str(room_id)}
+
+
+async def _resolve_devices_home(coordinator, devices: list[str]) -> str:
+    """The single home gid shared by all ``devices``; raises a stable error otherwise."""
+    homes = await _run_cloud_write(coordinator.client.async_device_homes, devices)
+    missing = [d for d, gid in homes.items() if not gid]
+    if missing:
+        raise OperationError("unknown_home", f"devices not found in any home: {missing}")
+    gids = set(homes.values())
+    if len(gids) != 1:
+        raise OperationError(
+            "ambiguous_home", "the heads are in different homes: create one room per home"
+        )
+    return next(iter(gids))
 
 
 async def rename_room(hass: HomeAssistant, store: dict, target: dict, name: str) -> dict:

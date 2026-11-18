@@ -217,6 +217,25 @@ class CloudClient:
                     out.append(d)
         return out
 
+    async def async_device_homes(self, dev_ids: list[str]) -> dict[str, str | None]:
+        """Map each devId to the home gid it belongs to (``None`` if not found in any home).
+
+        Path 1a: one device-list read per home. Used to resolve the home a new room must be created
+        in (the account can have several homes, and a config entry does not disambiguate them).
+        """
+        wanted = set(dev_ids)
+        found: dict[str, str] = {}
+        for home in await self.async_get_homes():
+            gid = str(home["gid"])
+            raw = await self._request(
+                "tuya.m.my.group.device.list", "1.0", None, extra_params={"gid": home["gid"]}
+            )
+            for d in raw if isinstance(raw, list) else []:
+                dev_id = d.get("devId") if isinstance(d, dict) else None
+                if dev_id in wanted and dev_id not in found:
+                    found[dev_id] = gid
+        return {d: found.get(d) for d in dev_ids}
+
     async def async_device_meta(self, dev_id: str) -> dict:
         """Gateway meta (smartlife.m.device.get v4.0 -> meta): lan_ip, Zigbee channel."""
         r = await self._request("smartlife.m.device.get", "4.0", {"devId": dev_id})

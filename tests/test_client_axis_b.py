@@ -130,3 +130,24 @@ async def test_room_id_resolves_by_name_case_insensitive():
     with patch(_HTTP, return_value=fake):
         assert await _client().async_room_id(1, " salle 1 ") == "10"
         assert await _client().async_room_id(1, "unknown") is None
+
+
+async def test_device_homes_maps_each_device_to_its_home():
+    def devlist(body, extra):
+        gid = extra["gid"]
+        if gid == 1:
+            return [{"devId": "a"}, {"devId": "b"}]
+        if gid == 2:
+            return [{"devId": "c"}]
+        return []
+
+    fake = FakeHttp(
+        {
+            "tuya.m.location.list": [{"groupId": 1}, {"groupId": 2}],
+            "tuya.m.my.group.device.list": devlist,
+        }
+    )
+    with patch(_HTTP, return_value=fake):
+        res = await _client().async_device_homes(["a", "c", "z"])
+    # gids as strings; a device in no home maps to None
+    assert res == {"a": "1", "c": "2", "z": None}
