@@ -97,6 +97,40 @@ def rooms_payload(store: dict) -> dict:
     return {"rooms": [_room_entry(coordinator, gid) for gid in coordinator.rooms]}
 
 
+def holidays_payload(store: dict) -> dict:
+    """Per-home holiday state (contract §3.4b/§5.2 ``get_holiday``). Read-only."""
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    return {
+        "holidays": [
+            {
+                "home": h.get("name"),
+                "gid": gid,
+                "active": bool(h.get("active")),
+                "detail": h.get("detail"),
+            }
+            for gid, h in coordinator.holidays.items()
+        ]
+    }
+
+
+def relays_payload(store: dict) -> dict:
+    """Boiler relays + their room linkage (contract §3.4c/§5.2 ``get_relays``). Read-only."""
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    return {
+        "relays": [
+            {
+                "device_id": dev.id,
+                "name": dev.name,
+                "on": dev.relay_on,
+                "online": dev.online,
+                "rooms": coordinator.relay_rooms.get(dev.id, []),
+            }
+            for dev in coordinator.data.values()
+            if dev.is_relay
+        ]
+    }
+
+
 async def get_room(store: dict, target: dict) -> dict:
     """One room's detail + its weekly schedule (contract §5.2 ``get_room``). Read-only."""
     if target.get("type") != "room":

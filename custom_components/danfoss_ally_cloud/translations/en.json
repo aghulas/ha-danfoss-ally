@@ -345,6 +345,26 @@
           "description": "If several accounts are configured."
         }
       }
+    },
+    "get_holiday": {
+      "name": "Get holiday",
+      "description": "Per-home holiday state (read only).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
+    "get_relays": {
+      "name": "Get boiler relays",
+      "description": "Boiler relays and the rooms driving them (read only).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
     }
   },
   "exceptions": {

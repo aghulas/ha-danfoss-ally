@@ -90,6 +90,22 @@ set_relay_room:
         config_entry:
           integration: danfoss_ally_cloud
 
+get_holiday:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+get_relays:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
 get_local_survey:
   fields:
     config_entry_id:
