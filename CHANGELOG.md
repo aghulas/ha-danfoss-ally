@@ -3,8 +3,10 @@
 ## 0.6.1 — Room head attach/detach + multi-home room create
 
 Completes room management on top of 0.6.0. Room head **attach/detach** (deferred from 0.5.0) is
-restored, and `create_room` is fixed for **multi-home** accounts. Pending in-situ validation on the
-running install (issue #51).
+restored, and `create_room` is fixed for **multi-home** accounts. **Validated in situ on the running
+install (2026-11-18):** multi-home `create_room` (explicit `home`) creates the room with its heads
+grouped, then `attach_heads`, `detach_heads`, detach-to-one (group dissolves) and `delete_room` all
+behave, on an isolated verified test room (issue #51).
 
 ### Added
 
