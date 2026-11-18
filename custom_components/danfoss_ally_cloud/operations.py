@@ -213,6 +213,20 @@ async def clear_override(hass: HomeAssistant, store: dict, target: dict) -> dict
     return {"target": target, "restored_setpoint": setpoint, "published_raw": raw}
 
 
+async def set_window_detection(
+    hass: HomeAssistant, store: dict, target: dict, enabled: bool
+) -> dict:
+    """C3 — write a head's open-window detection (DP 116) through the local tunnel.
+
+    The cloud switch already reads/sets DP 116 via the cloud; this is the LOCAL write path (the
+    authoritative read is attribute 0x4051, via the local survey).
+    """
+    local = _require_local(store)
+    head = _tunnel_head(store[DATA_COORDINATOR], local, target)
+    published = await _run_tunnel(hass, local.manager.write_window_detection, head, bool(enabled))
+    return {"target": target, "window_detection": bool(enabled), "published": published}
+
+
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 

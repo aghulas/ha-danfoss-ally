@@ -111,6 +111,30 @@ def test_set_override_unknown_gateway():
         mgr.set_override(Head("x", "y", "gw-inconnue"), 20.0)
 
 
+def test_write_window_detection_ok(monkeypatch):
+    monkeypatch.setattr(
+        tunnel, "write_setting_dp", lambda link, d, n, setting, value: (setting, value)
+    )
+    state = {}
+
+    class _L:
+        def close(self):
+            state["closed"] = True
+
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: _L())
+    assert mgr.write_window_detection(Head("dev1", "node1", "gw1"), True) == (
+        "window_detection",
+        True,
+    )
+    assert state["closed"] is True
+
+
+def test_write_window_detection_unknown_gateway():
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: None)
+    with pytest.raises(tunnel.LocalUnavailable):
+        mgr.write_window_detection(Head("x", "y", "gw-inconnue"), False)
+
+
 def test_survey_heads_summarizes(monkeypatch):
     """survey_heads runs the tunnel survey and summarizes each head (read-only)."""
     raw = {

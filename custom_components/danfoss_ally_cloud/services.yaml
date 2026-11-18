@@ -73,6 +73,24 @@ clear_override:
         config_entry:
           integration: danfoss_ally_cloud
 
+set_window_detection:
+  fields:
+    target:
+      required: true
+      example: '{"type": "device", "id": "<devId>"}'
+      selector:
+        object:
+    enabled:
+      required: true
+      example: true
+      selector:
+        boolean:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
 get_schedule:
   fields:
     target:

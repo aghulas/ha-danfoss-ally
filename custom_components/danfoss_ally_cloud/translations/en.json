@@ -144,6 +144,24 @@
         }
       }
     },
+    "set_window_detection": {
+      "name": "Set window detection (local)",
+      "description": "Write a head's open-window detection over the local Zigbee tunnel (isolated heads of a verified product).",
+      "fields": {
+        "target": {
+          "name": "Head",
+          "description": "Target head: type device and its device id (see the service example)."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Turn open-window detection on or off."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
     "get_schedule": {
       "name": "Get schedule",
       "description": "Weekly schedule of a room or an isolated head.",
