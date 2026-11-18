@@ -1310,7 +1310,7 @@ function validateDay(ranges, day = null) {
     errors
   };
 }
-const CARD_VERSION = "1.0.0";
+const CARD_VERSION = "1.0.1";
 function needsReload(cardVersion, serverVersion) {
   if (!serverVersion) {
     return false;
