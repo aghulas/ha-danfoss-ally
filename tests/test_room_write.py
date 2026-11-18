@@ -133,7 +133,34 @@ async def test_rename_and_delete_resolve_room_id():
     assert ("dismiss", "r9") in client.calls
 
 
-# attach_heads / detach_heads are deferred to 0.5.1 (not shipped in 0.5.0) — see contract §4.7.
+async def test_attach_unions_current_and_new():
+    client = _FakeClient(room_id="r1")
+    coord = _FakeCoord(client, members=("a", "b"))
+    coord.data["c"] = head("c", "C")  # a known head not yet in the room
+    coord._members.pop("c", None)
+    res = await ops.attach_heads(None, _store(coord), _ROOM, ["c"])
+    assert ("set", "r1", ["a", "b", "c"]) in client.calls
+    assert res["previous_heads"] == ["a", "b"] and res["heads"] == ["a", "b", "c"]
+
+
+async def test_detach_removes_and_refuses_emptying():
+    client = _FakeClient(room_id="r1")
+    coord = _FakeCoord(client, members=("a", "b"))
+    res = await ops.detach_heads(None, _store(coord), _ROOM, ["b"])
+    assert ("set", "r1", ["a"]) in client.calls and res["heads"] == ["a"]
+    # removing every member is refused: delete_room instead
+    with pytest.raises(ops.OperationError) as e:
+        await ops.detach_heads(None, _store(coord), _ROOM, ["a", "b"])
+    assert e.value.code == "no_members_left"
+
+
+async def test_detach_unknown_head_in_room():
+    coord = _FakeCoord(_FakeClient(), members=("a", "b"))
+    coord.data["z"] = head("z", "Z")
+    coord._members.pop("z", None)
+    with pytest.raises(ops.OperationError) as e:
+        await ops.detach_heads(None, _store(coord), _ROOM, ["z"])
+    assert e.value.code == "unknown_head"
 
 
 async def test_room_action_refuses_non_room_target():

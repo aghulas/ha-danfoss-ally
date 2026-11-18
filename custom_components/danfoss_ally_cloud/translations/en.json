@@ -375,6 +375,42 @@
           "description": "If several accounts are configured."
         }
       }
+    },
+    "attach_heads": {
+      "name": "Attach heads",
+      "description": "Add heads to a room (replaces the member list). Admin.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "Target: type 'room' and its id (group_id)."
+        },
+        "devices": {
+          "name": "Heads",
+          "description": "Head devIds to add."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
+    "detach_heads": {
+      "name": "Detach heads",
+      "description": "Remove heads from a room (cannot empty it). Admin.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "Target: type 'room' and its id (group_id)."
+        },
+        "devices": {
+          "name": "Heads",
+          "description": "Head devIds to remove."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
     }
   },
   "exceptions": {
@@ -440,6 +476,9 @@
     },
     "unknown_relay": {
       "message": "Boiler relay not found."
+    },
+    "no_members_left": {
+      "message": "Detaching every head would empty the room: use delete_room."
     }
   }
 }
