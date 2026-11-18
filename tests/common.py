@@ -78,6 +78,7 @@ class FakeCloudClient:
         holidays=None,
         holidays_exc=None,
         relay_rooms=None,
+        saturday_groups=None,
         **kwargs,
     ) -> None:
         self._devices = [head()] if devices is None else devices
@@ -89,6 +90,7 @@ class FakeCloudClient:
         self._holidays = holidays
         self._holidays_exc = holidays_exc
         self._relay_rooms = relay_rooms
+        self._saturday_groups = set(saturday_groups or ())
         self.closed = False
         self.writes: list = []
 
@@ -154,14 +156,69 @@ class FakeCloudClient:
         self.writes.append(("relay_bind", dev_id, room_id, bool(linked)))
         return {"ok": True}
 
+    # Vacation writes (axis A): record calls in ``writes`` (no network).
+    @staticmethod
+    def _csv(room_ids):
+        return room_ids if isinstance(room_ids, str) else ",".join(str(r) for r in room_ids)
+
+    async def async_vacation_leave(
+        self,
+        home_id,
+        start_date,
+        start_time,
+        end_date,
+        end_time,
+        temperature_tenths,
+        room_ids,
+        time_zone="Europe/Paris",
+    ):
+        self.writes.append(
+            (
+                "vac_leave",
+                str(home_id),
+                start_date,
+                start_time,
+                end_date,
+                end_time,
+                int(temperature_tenths),
+                self._csv(room_ids),
+                time_zone,
+            )
+        )
+        return {"ok": True}
+
+    async def async_vacation_athome(
+        self, home_id, start_date, end_date, room_ids, time_zone="Europe/Paris"
+    ):
+        self.writes.append(
+            ("vac_athome", str(home_id), start_date, end_date, self._csv(room_ids), time_zone)
+        )
+        return {"ok": True}
+
+    async def async_vacation_cancel(self, home_id, time_zone="Europe/Paris"):
+        self.writes.append(("vac_cancel", str(home_id), time_zone))
+        return {"ok": True}
+
+    async def async_vacation_leave_now(
+        self, home_id, room_ids, temperature_tenths, time_zone="Europe/Paris"
+    ):
+        self.writes.append(
+            ("vac_leave_now", str(home_id), self._csv(room_ids), int(temperature_tenths), time_zone)
+        )
+        return {"ok": True}
+
     # Schedule editing (schedule-editing layer): stub + write log.
     async def async_get_schedule(self, target):
+        days = {d: [] for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")}
+        # Groups configured with a Saturday program get a Saturday slot (at-home vacation guard).
+        if str(target.get("id")) in self._saturday_groups:
+            days["sat"] = [{"start": "08:00", "end": "18:00"}]
         return {
             "target": target,
             "name": "Salle 1",
             "comfort": 21.0,
             "setback": 14.0,
-            "days": {d: [] for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")},
+            "days": days,
             "max_transitions_per_day": 6,
             "source": "cloud",
             "read_at": "t",

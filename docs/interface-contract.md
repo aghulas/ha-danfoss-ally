@@ -345,15 +345,16 @@ reference, over the published product schema.
 > head as `7`, idle — whereas a `10⁰` reading of `700` would have clamped to the upper bound and
 > requested heat). Do not "correct" the code to the schema.
 
-### 4.5 Holiday (read only)
+### 4.5 Holiday (read + gated write)
 
-The app's **holiday set / exit** routes are **not** in the APK (loaded as a runtime mini-program):
-they are **uncaptured**, so the integration **cannot write** a holiday period. R5 already states that
-`holiday` published via DP 2 is only a **label**. Holiday is therefore **read only** in the
-integration; the write stays out of contract (§7) until a capture is done (Rémi + the app).
+The holiday **read** and the holiday **set / exit** routes both run through the app's runtime
+mini-program (`miniAppId=tygzekxso4ca8h1e0q`); the plaintext bodies were captured on 2026-11-18 and
+replay on the bare path-1a channel (the MiniApp envelope fields — `channelType`, `miniAppId`,
+`miniAppVersion` — are unsigned extras, confirmed for the reads and **to confirm on real hardware for
+the writes**). R5 still holds: `holiday` published via DP 2 is only a **label**; these
+`solution.wkf.vacation.*` routes are the real lever.
 
-The read routes observed on the APK (`danfoss-app-capture/ROUTES.md`), replayed read-only by the MCP
-connector (`vacances`):
+Read routes (replayed read-only by the MCP connector `vacances`):
 
 | Operation | API | Version | Body | Returns |
 |---|---|---|---|---|
@@ -363,6 +364,22 @@ connector (`vacances`):
 A non-empty `vacation.detail` means a holiday is active; its fields (start/end, setpoint) are passed
 through as read by the cloud (no re-interpretation). DP 121 (`holiday_setting`) is the per-head
 holiday setpoint, decoded already (§4.3, `setpoints.holiday`).
+
+Write routes (captured 2026-11-18; **GATED** — see §5.2, `enable_vacation_write`, off by default —
+and pending a real-hardware validation). Two modes (DP 2 `holiday` vs `holiday_sat`):
+
+| Operation | API | Version | Body |
+|---|---|---|---|
+| Away (fixed temp) | `tuya.m.solution.wkf.vacation.plan.leave` | 1.0 | `{"startDate":"YYYYMMDD","startTime":"HH:MM","endDate":"YYYYMMDD","endTime":"HH:MM","temperature":"<tenths, string>","homeId":"<gid>","roomIds":"<csv roomId>","timeZoneId":"Europe/Paris"}` |
+| At home (follows Saturday) | `tuya.m.solution.wkf.vacation.plan.athome` | 1.0 | `{"startDate","endDate","homeId","roomIds","timeZoneId"}` — no temperature/times |
+| Cancel a planned holiday | `tuya.m.solution.wkf.vacation.cancel` | 1.0 | `{"homeId","timeZoneId"}` |
+| End an in-progress holiday | `tuya.m.solution.wkf.vacation.leave.now` | 1.0 | `{"homeId","roomIds","temperature":<tenths, int>,"timeZoneId"}` |
+
+- `temperature` is tenths of °C: a **string** in `plan.leave`, an **integer** in `leave.now`.
+- A vacation is set per **home** (`homeId` = gid), scoped to a **`roomIds`** csv (the app sends all
+  the home's rooms; the integration does the same unless given a room list).
+- **Edit = re-post** `plan.leave`/`plan.athome` (idempotent per home); there is no separate edit
+  route. `plan.athome` needs a Saturday program on the rooms (the app blocks it otherwise).
 
 ### 4.6 Boiler relay
 
@@ -466,10 +483,19 @@ take `config_entry_id` when several accounts are configured.
 | `attach_heads` | `target` (room), `devices` | `{"room_id": "…", "heads": […]}` | add heads (replaces list) |
 | `detach_heads` | `target` (room), `devices` | `{"room_id": "…", "heads": […]}` | remove heads |
 | `set_relay_room` | `relay` (devId), `target` (room), `linked` (bool) | `{"relay": "…", "room_id": "…", "linked": bool}` | link/unlink a room to the boiler relay |
+| `set_vacation` | `home` (gid), `start_date`/`start_time`/`end_date`/`end_time`, `temperature` (°C), `rooms` (optional), `time_zone` (optional) | `{"home", "mode": "away", …}` | **GATED** away holiday (`vacation.plan.leave`) |
+| `set_vacation_at_home` | `home`, `start_date`, `end_date`, `rooms` (optional), `time_zone` (optional) | `{"home", "mode": "at_home", …}` | **GATED** at-home holiday (`vacation.plan.athome`) |
+| `cancel_vacation` | `home`, `time_zone` (optional) | `{"home", "cancelled": true}` | **GATED** cancel a planned holiday (`vacation.cancel`) |
+| `end_vacation` | `home`, `temperature` (°C), `rooms` (optional), `time_zone` (optional) | `{"home", "ended": true, …}` | **GATED** end a running holiday now (`vacation.leave.now`) |
 
 `set_schedule` touches only the given days; the others stay as they are in the cloud. The room
 write actions and `set_relay_room` refuse a non-administrator (`not_admin`); they are gated on
 real-hardware validation (they mutate the live account / the boiler's heat demand).
+
+The four `*_vacation*` actions are **doubly gated**: admin-only, **and** behind the
+`enable_vacation_write` option (off by default) — they raise `vacation_disabled` until it is turned
+on for a supervised real-hardware validation session. Values are validated before any send
+(`YYYYMMDD` / `HH:MM`, chronological period, setpoint bounds).
 
 ### 5.3 WebSocket commands (for the frontend)
 
@@ -492,6 +518,10 @@ real-hardware validation (they mutate the live account / the boiler's heat deman
 | `danfoss_ally_cloud/room/attach` | `target`, `devices` | `{"room_id": "…", "heads": […]}` | administrator |
 | `danfoss_ally_cloud/room/detach` | `target`, `devices` | `{"room_id": "…", "heads": […]}` | administrator |
 | `danfoss_ally_cloud/relay/set_room` | `relay`, `target`, `linked` | `{…}` | administrator |
+| `danfoss_ally_cloud/vacation/set` | `home`, `start_date`/`start_time`/`end_date`/`end_time`, `temperature`, `rooms`?, `time_zone`? | `{…}` | administrator (GATED) |
+| `danfoss_ally_cloud/vacation/set_at_home` | `home`, `start_date`, `end_date`, `rooms`?, `time_zone`? | `{…}` | administrator (GATED) |
+| `danfoss_ally_cloud/vacation/cancel` | `home`, `time_zone`? | `{…}` | administrator (GATED) |
+| `danfoss_ally_cloud/vacation/end` | `home`, `temperature`, `rooms`?, `time_zone`? | `{…}` | administrator (GATED) |
 
 The WebSocket commands and the actions share the same implementation: one function per operation.
 
@@ -538,11 +568,10 @@ stable.
 ## 7. Out of contract for now
 
 Axis B (0.5.0) brought holiday **read** (§4.5), the boiler relay **read** + room↔relay **link**
-(§4.6), and room management (§4.7) into the contract. What stays out:
+(§4.6), and room management (§4.7) into the contract. Axis A (toward 1.0) brought the holiday
+**write** (§4.5) in, **gated** behind `enable_vacation_write` (off by default) and pending a
+real-hardware validation. What stays out:
 
-- **Holiday set / exit (write).** The app's holiday pose/exit routes are **not** in the APK (runtime
-  mini-program): uncaptured. R5: DP 2 `holiday` is a label only, never a real holiday write. Blocked
-  until an app capture (Rémi + the app), like the distinct-`deviceId` capture (`architecture.md`).
 - **Direct boiler-relay on/off (DP `1`, device level).** Confirmed 2026-11-18: the app has **no**
   manual relay on/off — the relay is server-driven from the heat demand of the linked rooms, so there
   is no such app action to mirror (not merely "uncaptured"). Only the relay *state read* and the

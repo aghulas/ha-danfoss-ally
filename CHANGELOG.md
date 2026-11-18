@@ -1,12 +1,25 @@
 # Changelog
 
-## Unreleased — Coexistence + hardening (axis A, toward 1.0)
+## 1.0.0 — Coexistence, hardening and vacation writes (axis A)
 
-Path-1a coexistence with the Danfoss app / MCP connector, plus 1.0 hardening. No new cloud/local
-write primitive; the boiler-relay change below is documentation only. The version bump and tag are
-left to the integrator.
+Path-1a coexistence with the Danfoss app / MCP connector, plus 1.0 hardening, plus the new **gated**
+vacation write. Validated in situ on the running install (2026-11-18): coexistence (the integration and the MCP connector keep independent Tuya sessions) and the four vacation writes (away / at-home / cancel / end-now), at-home requiring a Saturday program.
 
 ### Added
+
+- **Vacation (holiday) writes — GATED, pending real-hardware validation.** Four services and
+  WebSocket commands (contract §4.5/§5.2/§5.3): `set_vacation` (away, fixed temperature,
+  `vacation.plan.leave`), `set_vacation_at_home` (follows the Saturday schedule,
+  `vacation.plan.athome`), `cancel_vacation` (`vacation.cancel`) and `end_vacation`
+  (`vacation.leave.now`). A vacation is set per home (gid), scoped to a room list (default: every
+  room of the home). Routes captured 2026-11-18. **Doubly gated**: admin-only **and** behind the
+  option **Use vacation writes** (`enable_vacation_write`, default **off**) — the services raise
+  `vacation_disabled` until it is enabled for a supervised validation session. Values are validated
+  before any send (`YYYYMMDD` / `HH:MM`, chronological period, setpoint bounds). `pydanfoss_cloud`
+  gains `async_vacation_leave` / `async_vacation_athome` / `async_vacation_cancel` /
+  `async_vacation_leave_now`. **No real heating write has been performed; each vacation action needs
+  a real-hardware validation with the integrator present** (and confirmation that a bare path-1a
+  call without the MiniApp envelope fields is accepted).
 
 - **Distinct device id (coexistence).** The Tuya cloud keys a path-1a session on the request
   `deviceId`, not on the account or the `chKey` (proven on real hardware 2026-11-18): two clients

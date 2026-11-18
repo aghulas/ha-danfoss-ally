@@ -32,6 +32,7 @@
           "scan_interval": "Cloud polling interval (seconds)",
           "distinct_device_id": "Use a dedicated device id (coexist with the Danfoss app / MCP connector without logging each other out)",
           "enable_local": "Enable the local Zigbee tunnel (gateways) for writes the cloud misses",
+          "enable_vacation_write": "Enable vacation writes (holiday set/cancel). Off by default — turn on only for a supervised real-hardware validation",
           "mqtt_mode": "MQTT publishing: off, discovery (auto HA entities), zigbee2mqtt (z2m-compatible topics)",
           "mqtt_source": "Source of published values: cloud or local",
           "mqtt_base_topic": "MQTT topic prefix"
@@ -92,6 +93,122 @@
     "get_rooms": {
       "name": "List rooms",
       "description": "Rooms and the state of their heads."
+    },
+    "set_vacation": {
+      "name": "Set vacation (away)",
+      "description": "Set or edit an away vacation for a home: the rooms hold a fixed temperature for the period. GATED: enable vacation writes in the options first.",
+      "fields": {
+        "home": {
+          "name": "Home",
+          "description": "Home id (gid) the vacation applies to."
+        },
+        "start_date": {
+          "name": "Start date",
+          "description": "Start date, YYYYMMDD."
+        },
+        "start_time": {
+          "name": "Start time",
+          "description": "Start time, HH:MM."
+        },
+        "end_date": {
+          "name": "End date",
+          "description": "End date, YYYYMMDD."
+        },
+        "end_time": {
+          "name": "End time",
+          "description": "End time, HH:MM."
+        },
+        "temperature": {
+          "name": "Temperature",
+          "description": "Hold temperature in degrees C (5 to 35, by 0.5)."
+        },
+        "rooms": {
+          "name": "Rooms",
+          "description": "Optional room targets; default: every room of the home."
+        },
+        "time_zone": {
+          "name": "Time zone",
+          "description": "IANA time zone (default Europe/Paris)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
+    "set_vacation_at_home": {
+      "name": "Set vacation (at home)",
+      "description": "Set or edit an at-home vacation: each head follows its Saturday schedule for the period (no temperature). GATED. Needs a Saturday program on the rooms.",
+      "fields": {
+        "home": {
+          "name": "Home",
+          "description": "Home id (gid) the vacation applies to."
+        },
+        "start_date": {
+          "name": "Start date",
+          "description": "Start date, YYYYMMDD."
+        },
+        "end_date": {
+          "name": "End date",
+          "description": "End date, YYYYMMDD."
+        },
+        "rooms": {
+          "name": "Rooms",
+          "description": "Optional room targets; default: every room of the home."
+        },
+        "time_zone": {
+          "name": "Time zone",
+          "description": "IANA time zone (default Europe/Paris)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
+    "cancel_vacation": {
+      "name": "Cancel vacation",
+      "description": "Cancel a planned vacation before it starts. GATED.",
+      "fields": {
+        "home": {
+          "name": "Home",
+          "description": "Home id (gid) the vacation applies to."
+        },
+        "time_zone": {
+          "name": "Time zone",
+          "description": "IANA time zone (default Europe/Paris)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
+    },
+    "end_vacation": {
+      "name": "End vacation now",
+      "description": "End an in-progress vacation now and re-apply a temperature to the rooms. GATED.",
+      "fields": {
+        "home": {
+          "name": "Home",
+          "description": "Home id (gid) the vacation applies to."
+        },
+        "temperature": {
+          "name": "Temperature",
+          "description": "Temperature to re-apply, in degrees C (5 to 35, by 0.5)."
+        },
+        "rooms": {
+          "name": "Rooms",
+          "description": "Optional room targets; default: every room of the home."
+        },
+        "time_zone": {
+          "name": "Time zone",
+          "description": "IANA time zone (default Europe/Paris)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
     },
     "get_local_survey": {
       "name": "Local survey",
@@ -490,6 +607,21 @@
     },
     "ambiguous_home": {
       "message": "The given heads are in different homes; create one room per home."
+    },
+    "vacation_disabled": {
+      "message": "Vacation writes are disabled; enable them in the integration options (for a real-hardware validation session)."
+    },
+    "invalid_date": {
+      "message": "Invalid date (expected YYYYMMDD)."
+    },
+    "invalid_vacation_period": {
+      "message": "Invalid vacation period: the end must be after the start."
+    },
+    "empty_rooms": {
+      "message": "This home has no room for a vacation."
+    },
+    "at_home_no_saturday": {
+      "message": "The \"at home\" option makes heads follow the Saturday schedule, but no targeted room has a Saturday slot. Add a Saturday slot, or use a fixed setpoint (away)."
     }
   }
 }
