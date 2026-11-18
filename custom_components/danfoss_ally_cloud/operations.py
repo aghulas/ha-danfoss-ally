@@ -211,6 +211,40 @@ async def delete_room(hass: HomeAssistant, store: dict, target: dict) -> dict:
 # (2026-11-18). `_resolve_room_id` and the " Group"-label tolerance stay (used by rename/delete).
 
 
+async def set_relay_room(
+    hass: HomeAssistant, store: dict, relay: str, target: dict, linked: bool
+) -> dict:
+    """Link / unlink a room to a boiler relay (contract §4.6). ⚠ Gated on real-hardware validation.
+
+    The room is matched by name against the relay's eligible rooms (``relay_rooms`` cache), so its
+    cloud ``roomId`` is used for the edit. Admin-gated by the caller.
+    """
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    dev = coordinator.data.get(relay)
+    if dev is None or not dev.is_relay:
+        raise OperationError("unknown_relay", f"relay not found: {relay}")
+    group_id = _room_target(target)
+    rs = coordinator.rooms.get(group_id)
+    if rs is None:
+        raise OperationError("unknown_room", f"room not found: {group_id}")
+    wanted = (rs.name or "").strip().lower()
+    match = next(
+        (
+            r
+            for r in (coordinator.relay_rooms.get(relay) or [])
+            if (r.get("name") or "").strip().lower() == wanted
+        ),
+        None,
+    )
+    if match is None:
+        raise OperationError("unknown_room", f"room {rs.name!r} is not eligible for this relay")
+    await _run_cloud_write(
+        coordinator.client.async_relay_bind, relay, match["room_id"], bool(linked)
+    )
+    await coordinator.async_request_refresh()
+    return {"relay": relay, "room_id": str(match["room_id"]), "linked": bool(linked)}
+
+
 async def local_survey(hass: HomeAssistant, store: dict) -> dict:
     """Read-only multi-gateway survey through the local Zigbee tunnel (contract §4.4, C4).
 

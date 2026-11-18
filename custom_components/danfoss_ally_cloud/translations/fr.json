@@ -323,6 +323,28 @@
      "description": "Si plusieurs comptes sont configurés."
     }
    }
+  },
+  "set_relay_room": {
+   "name": "Lier une pièce au relais",
+   "description": "Lie ou délie une pièce au relais chaudière (sa demande de chauffe pilote le relais). Administrateur ; validation en réel requise.",
+   "fields": {
+    "relay": {
+     "name": "Relais",
+     "description": "devId du relais chaudière."
+    },
+    "target": {
+     "name": "Cible",
+     "description": "Cible : type « room » et son identifiant (group_id)."
+    },
+    "linked": {
+     "name": "Liée",
+     "description": "Activé = la pièce pilote le relais ; désactivé = délier."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
   }
  },
  "exceptions": {
@@ -385,6 +407,9 @@
   },
   "empty_devices": {
    "message": "Indiquez au moins une tête."
+  },
+  "unknown_relay": {
+   "message": "Relais chaudière introuvable."
   }
  }
 }

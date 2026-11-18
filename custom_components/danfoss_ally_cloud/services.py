@@ -86,6 +86,14 @@ _RENAME_ROOM = vol.Schema(
         vol.Optional("config_entry_id"): cv.string,
     }
 )
+_SET_RELAY_ROOM = vol.Schema(
+    {
+        vol.Required("relay"): cv.string,
+        vol.Required("target"): _TARGET,
+        vol.Required("linked"): cv.boolean,
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
 
 
 def _store(hass: HomeAssistant, call: ServiceCall) -> dict:
@@ -236,6 +244,16 @@ def async_register_services(hass: HomeAssistant) -> None:
         except ops.OperationError as err:
             _raise(err)
 
+    async def set_relay_room(call: ServiceCall) -> dict:
+        store = _store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+            return await ops.set_relay_room(
+                hass, store, call.data["relay"], call.data["target"], call.data["linked"]
+            )
+        except ops.OperationError as err:
+            _raise(err)
+
     reg = hass.services.async_register
     reg(DOMAIN, "get_rooms", get_rooms, _GET_ROOMS, SupportsResponse.ONLY)
     reg(DOMAIN, "get_room", get_room, _RESTORE, SupportsResponse.ONLY)
@@ -254,3 +272,4 @@ def async_register_services(hass: HomeAssistant) -> None:
     reg(DOMAIN, "create_room", create_room, _CREATE_ROOM, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "rename_room", rename_room, _RENAME_ROOM, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "delete_room", delete_room, _RESTORE, SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "set_relay_room", set_relay_room, _SET_RELAY_ROOM, SupportsResponse.OPTIONAL)

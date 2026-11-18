@@ -323,6 +323,28 @@
           "description": "If several accounts are configured."
         }
       }
+    },
+    "set_relay_room": {
+      "name": "Set relay room",
+      "description": "Link or unlink a room to the boiler relay (its heat demand drives the relay). Admin; real-hardware validation required.",
+      "fields": {
+        "relay": {
+          "name": "Relay",
+          "description": "The boiler relay's devId."
+        },
+        "target": {
+          "name": "Target",
+          "description": "Target: type 'room' and its id (group_id)."
+        },
+        "linked": {
+          "name": "Linked",
+          "description": "On = the room drives the relay; off = unlink."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several accounts are configured."
+        }
+      }
     }
   },
   "exceptions": {
@@ -385,6 +407,9 @@
     },
     "empty_devices": {
       "message": "Give at least one head."
+    },
+    "unknown_relay": {
+      "message": "Boiler relay not found."
     }
   }
 }

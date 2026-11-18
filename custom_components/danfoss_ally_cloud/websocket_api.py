@@ -52,6 +52,7 @@ def async_register(hass: HomeAssistant) -> None:
     reg(hass, ws_room_create)
     reg(hass, ws_room_rename)
     reg(hass, ws_room_delete)
+    reg(hass, ws_relay_set_room)
 
 
 @websocket_api.websocket_command(
@@ -351,6 +352,29 @@ async def ws_room_delete(hass: HomeAssistant, connection, msg: dict) -> None:
 
 # room/attach and room/detach are deferred to 0.5.1 (contract §4.7): the cloud replace-list on a
 # group-backed room needs in-situ hardware validation on the running install.
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/relay/set_room",
+        vol.Required("relay"): str,
+        vol.Required("target"): dict,
+        vol.Required("linked"): bool,
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_relay_set_room(hass: HomeAssistant, connection, msg: dict) -> None:
+    store = _ws_store_or_error(hass, connection, msg)
+    if store is None:
+        return
+    try:
+        result = await ops.set_relay_room(hass, store, msg["relay"], msg["target"], msg["linked"])
+    except ops.OperationError as err:
+        _send_op_error(connection, msg["id"], err)
+        return
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command(

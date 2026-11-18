@@ -340,6 +340,24 @@ class CloudClient:
                 return room["room_id"]
         return None
 
+    async def async_relay_bind(self, dev_id: str, room_id: str | int, linked: bool) -> object:
+        """Link / unlink a room to a boiler relay (m.life.solution.wkf.reference.edit, §4.6).
+
+        ``gwId == devId`` of the relay. ``linked`` True = ``bind`` (the room drives the relay),
+        False = ``unbind``. One room per call. Captured from the app; to validate on real hardware
+        (it changes the boiler's heat demand).
+        """
+        return await self._request(
+            "m.life.solution.wkf.reference.edit",
+            "1.0",
+            {
+                "devId": dev_id,
+                "gwId": dev_id,
+                "roomId": room_id,
+                "status": "bind" if linked else "unbind",
+            },
+        )
+
     # --- Room management writes (contract §4.7). Validated on real hardware by the MCP connector.
     # These mutate the live account structure (regrouping heads changes shared schedules): a caller
     # must gate them on real-hardware validation and admin rights.
