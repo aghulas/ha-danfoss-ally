@@ -270,3 +270,44 @@ async def test_ws_jobs_subscribe(setup):
     conn = _FakeConn()
     ws.ws_jobs_subscribe(hass, conn, {"id": 8, "type": "danfoss_ally_cloud/jobs/subscribe"})
     assert 8 in conn.subscriptions and 8 in conn.results
+
+
+# --- B4: get_room (read) -----------------------------------------------------------------------
+
+
+async def test_service_get_room(setup):
+    hass, _, _ = setup
+    res = await hass.services.async_call(
+        DOMAIN, "get_room", {"target": _ROOM_TARGET}, blocking=True, return_response=True
+    )
+    assert res["room"]["id"] == "13000000"
+    assert {h["device_id"] for h in res["room"]["heads"]} == {"a", "b"}
+    assert "mon" in res["schedule"]["days"]
+
+
+async def test_service_get_room_unknown(setup):
+    hass, _, _ = setup
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            "get_room",
+            {"target": {"type": "room", "id": "nope"}},
+            blocking=True,
+            return_response=True,
+        )
+
+
+async def test_ws_room_get(setup):
+    hass, _, _ = setup
+    conn = _FakeConn()
+    ws.ws_room_get(hass, conn, {"id": 20, "target": _ROOM_TARGET})
+    await hass.async_block_till_done()
+    assert conn.results[20]["room"]["id"] == "13000000"
+
+
+async def test_ws_room_get_device_refused(setup):
+    hass, _, _ = setup
+    conn = _FakeConn()
+    ws.ws_room_get(hass, conn, {"id": 21, "target": {"type": "device", "id": "a"}})
+    await hass.async_block_till_done()
+    assert conn.errors and conn.errors[-1][0] == "unknown_room"

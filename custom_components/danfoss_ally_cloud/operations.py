@@ -78,21 +78,35 @@ def _heads_of_room(coordinator: DanfossCoordinator, group_id: str) -> list[dict]
     ]
 
 
+def _room_entry(coordinator: DanfossCoordinator, group_id: str) -> dict:
+    """One room payload (contract §3.4) from the aggregated RoomState + member head states."""
+    rs = coordinator.rooms[group_id]
+    return {
+        "id": group_id,
+        "name": rs.name,
+        "product_id": rs.pid,
+        "comfort": rs.setpoints.get("comfort"),
+        "setback": rs.setpoints.get("setback"),
+        "heads": _heads_of_room(coordinator, group_id),
+    }
+
+
 def rooms_payload(store: dict) -> dict:
     """Rooms (contract §3.4): RoomState from #12 + member head states (HeadState §3.3)."""
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
-    rooms = [
-        {
-            "id": gid,
-            "name": rs.name,
-            "product_id": rs.pid,
-            "comfort": rs.setpoints.get("comfort"),
-            "setback": rs.setpoints.get("setback"),
-            "heads": _heads_of_room(coordinator, gid),
-        }
-        for gid, rs in coordinator.rooms.items()
-    ]
-    return {"rooms": rooms}
+    return {"rooms": [_room_entry(coordinator, gid) for gid in coordinator.rooms]}
+
+
+async def get_room(store: dict, target: dict) -> dict:
+    """One room's detail + its weekly schedule (contract §5.2 ``get_room``). Read-only."""
+    if target.get("type") != "room":
+        raise OperationError("unknown_room", "get_room targets a room")
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    group_id = str(target.get("id"))
+    if group_id not in coordinator.rooms:
+        raise OperationError("unknown_room", f"room not found: {group_id}")
+    schedule = await get_schedule(store, target)
+    return {"room": _room_entry(coordinator, group_id), "schedule": schedule}
 
 
 async def local_survey(hass: HomeAssistant, store: dict) -> dict:

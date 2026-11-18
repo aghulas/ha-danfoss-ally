@@ -259,6 +259,20 @@
      "description": "Si plusieurs comptes sont configurés."
     }
    }
+  },
+  "get_room": {
+   "name": "Lire la pièce",
+   "description": "Détail d'une pièce et son programme hebdomadaire.",
+   "fields": {
+    "target": {
+     "name": "Cible",
+     "description": "Cible : type « room » et son identifiant (group_id)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs comptes sont configurés."
+    }
+   }
   }
  },
  "exceptions": {
@@ -312,6 +326,9 @@
   },
   "no_schedule": {
    "message": "Aucun programme où revenir ; la dérogation cesse au prochain changement programmé."
+  },
+  "unknown_room": {
+   "message": "Pièce inconnue."
   }
  }
 }

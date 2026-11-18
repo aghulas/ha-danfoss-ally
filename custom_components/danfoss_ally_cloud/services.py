@@ -106,6 +106,12 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def get_rooms(call: ServiceCall) -> dict:
         return ops.rooms_payload(_store(hass, call))
 
+    async def get_room(call: ServiceCall) -> dict:
+        try:
+            return await ops.get_room(_store(hass, call), call.data["target"])
+        except ops.OperationError as err:
+            _raise(err)
+
     async def get_local_survey(call: ServiceCall) -> dict:
         try:
             return await ops.local_survey(hass, _store(hass, call))
@@ -194,6 +200,7 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     reg = hass.services.async_register
     reg(DOMAIN, "get_rooms", get_rooms, _GET_ROOMS, SupportsResponse.ONLY)
+    reg(DOMAIN, "get_room", get_room, _RESTORE, SupportsResponse.ONLY)
     reg(DOMAIN, "get_local_survey", get_local_survey, _GET_ROOMS, SupportsResponse.ONLY)
     reg(DOMAIN, "set_descaling", set_descaling, _SET_DESCALING, SupportsResponse.OPTIONAL)
     reg(DOMAIN, "set_override", set_override, _SET_OVERRIDE, SupportsResponse.OPTIONAL)
