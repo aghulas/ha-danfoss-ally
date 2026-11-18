@@ -118,6 +118,16 @@ export interface ValidateResponse {
  */
 export interface HassLike {
   callWS<T = unknown>(msg: Record<string, unknown>): Promise<T>;
+  /**
+   * Appel de service HA (p. ex. `climate.set_temperature`). Optionnel : absent de
+   * la démo et des tests. La carte pièce ne l'utilise que pour réutiliser un
+   * service DÉJÀ validé (jamais un nouveau chemin d'écriture, contrat §8.1).
+   */
+  callService?: (
+    domain: string,
+    service: string,
+    data?: Record<string, unknown>,
+  ) => Promise<unknown>;
   // Fonction de localisation du frontend HA (clé -> texte). Optionnelle : repli en dur.
   localize?: (key: string, ...args: unknown[]) => string;
   language?: string;

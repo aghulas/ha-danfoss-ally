@@ -319,6 +319,21 @@ export function language(hass: HassLike | undefined): "en" | "fr" {
   return lang(hass);
 }
 
+const MODE_KEYS: Record<string, StringKey> = {
+  at_home: "mode_at_home",
+  leaving_home: "mode_leaving_home",
+  manual: "mode_manual",
+  pause: "mode_pause",
+  holiday: "mode_holiday",
+  holiday_sat: "mode_holiday",
+};
+
+/** Libellé localisé d'un mode (DP 2). Un mode inconnu retombe sur sa valeur brute. */
+export function modeLabel(hass: HassLike | undefined, mode: string | null | undefined): string {
+  const key = mode ? MODE_KEYS[mode] : undefined;
+  return key ? t(hass, key) : (mode ?? "—");
+}
+
 const ERROR_KEYS = new Set<StringKey>([
   "err_invalid_time",
   "err_empty_or_reversed",
