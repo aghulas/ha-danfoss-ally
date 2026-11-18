@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.6.1 — Room head attach/detach + multi-home room create
+
+Completes room management on top of 0.6.0. Room head **attach/detach** (deferred from 0.5.0) is
+restored, and `create_room` is fixed for **multi-home** accounts. Pending in-situ validation on the
+running install (issue #51).
+
+### Added
+
+- **Room management: attach / detach** — services and WebSocket commands `attach_heads` /
+  `detach_heads` (contract §4.7/§5.2/§5.3). Admin-only, value-validated: the member list is the
+  current schedule-group membership (read by group id, name-independent) unioned/differenced with
+  the given heads, and the write addresses the type-4 room (`async_room_set_devices`, replace-list).
+  Detaching every head is refused (`no_members_left` → use `delete_room`). Reuses the
+  `_resolve_room_id` `" Group"`-label tolerance.
+- **`create_room` home selection** — new optional `home` (gid) field on the service and WS command.
+
+### Fixed
+
+- **`create_room` on multi-home accounts** — the room must be created in the heads' home, otherwise
+  the heads cannot join it and it is left empty. `home` selects it explicitly; when omitted it is
+  inferred from the devices (the single home that contains them all). When a single home cannot be
+  determined — heads span homes, or the backend does not filter the device list by gid — it fails
+  with `ambiguous_home` (pass `home`) instead of silently picking the first home, and `unknown_home`
+  when a head is in no home.
+- **Room changes are visible immediately** — every structural write (create / rename / delete /
+  attach / detach, and relay link) invalidates the room-topology cache before refreshing, so the
+  new or changed room shows up in `get_rooms` and is targetable at once instead of only at the next
+  hourly poll.
+- Clearer `config_entry_id` handling: required only when several *config entries* exist (not several
+  homes); distinct message when no account is configured.
+
 ## 0.6.0 — Full UI: room card and side panel (axis D)
 
 The user-facing UI layer. A **presentation layer over the existing read commands and
@@ -31,22 +62,6 @@ bundle is rebuilt deterministically.
 - No new write path: the UI reuses the setpoint/schedule writes validated in 0.2.0 / 0.4.0 / 0.5.0.
 - Still out of contract (uncaptured, §7): holiday set/exit, direct relay on/off (DP 1); room head
   attach/detach remains deferred (0.5.1).
-
-### Fixed
-
-- **`create_room` on multi-home accounts** — the room must be created in the heads' home, otherwise
-  the heads cannot join it and it is left empty. A new optional `home` (gid) selects it explicitly;
-  when omitted it is inferred from the devices (the single home that contains them all). When a
-  single home cannot be determined — heads span homes, or the backend does not filter the device
-  list by gid — it now fails with `ambiguous_home` (pass `home`) instead of silently picking the
-  first home, and `unknown_home` when a head is in no home. Previously it refused on any multi-home
-  account, then (0.5.1-rc) could create the room in the wrong home, empty.
-- **Room changes are visible immediately** — every structural write (create / rename / delete /
-  attach / detach, and relay link) now invalidates the room-topology cache before refreshing, so
-  the new or changed room shows up in `get_rooms` and is targetable at once instead of only at the
-  next hourly poll.
-- Clearer `config_entry_id` handling: it is only required when several *config entries* exist (not
-  several homes); distinct message when no account is configured.
 
 ## 0.5.0 — Holiday, boiler relay and room management (axis B)
 

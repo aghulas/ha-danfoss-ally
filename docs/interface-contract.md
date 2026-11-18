@@ -415,7 +415,7 @@ by the MCP connector (`smartlife.m.*` family; the APK also exposes the `thing.m.
   group name, so it can lag a rename. No schedule-group rename API is known.
 - These writes mutate the live account structure (regrouping/ungrouping heads changes shared
   schedules) → **real-hardware validation required** before use. create / rename / delete are
-  validated on real hardware (2026-11-18, shipped in 0.5.0). **Attach / detach return in 0.5.1**; the
+  validated on real hardware (2026-11-18, shipped in 0.5.0). **Attach / detach return in 0.6.1**; the
   replace-list effect on the implicit group is validated in situ on the running install (the
   room-vs-group duality above is the reason it could not be validated pre-release).
 
