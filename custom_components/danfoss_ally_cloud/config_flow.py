@@ -20,6 +20,7 @@ from .const import (
     CONF_CH_KEY,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
+    CONF_DISTINCT_DEVICE_ID,
     CONF_ENABLE_LOCAL,
     CONF_MQTT_BASE_TOPIC,
     CONF_MQTT_MODE,
@@ -29,6 +30,7 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SIGN_KEY,
     CONF_USERNAME,
+    DEFAULT_DISTINCT_DEVICE_ID,
     DEFAULT_MQTT_BASE_TOPIC,
     DEFAULT_MQTT_MODE,
     DEFAULT_MQTT_SOURCE,
@@ -59,6 +61,9 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                 device_id=user_input[CONF_DEVICE_ID],
                 ch_key=user_input[CONF_CH_KEY],
                 region=user_input[CONF_REGION],
+                # Validate with the distinct deviceId (the runtime default), so even setup keeps
+                # its own Tuya session rather than briefly stealing the app's / MCP's.
+                distinct_device_id=DEFAULT_DISTINCT_DEVICE_ID,
             )
             try:
                 await client.async_validate()
@@ -105,6 +110,10 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
                     CONF_SCAN_INTERVAL,
                     default=o.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
                 ): int,
+                vol.Optional(
+                    CONF_DISTINCT_DEVICE_ID,
+                    default=o.get(CONF_DISTINCT_DEVICE_ID, DEFAULT_DISTINCT_DEVICE_ID),
+                ): bool,
                 vol.Optional(CONF_ENABLE_LOCAL, default=o.get(CONF_ENABLE_LOCAL, False)): bool,
                 vol.Optional(
                     CONF_MQTT_MODE, default=o.get(CONF_MQTT_MODE, DEFAULT_MQTT_MODE)

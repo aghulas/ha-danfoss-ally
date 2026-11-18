@@ -13,6 +13,7 @@ SECRETS: sign_key, sid, ecode, chKey and the password are NEVER logged.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import datetime
@@ -70,6 +71,32 @@ def _is_session_error(err: TuyaApiError) -> bool:
     return "session" in msg or "sign invalid" in msg or "token is expired" in msg
 
 
+DISTINCT_DEVICE_ID_MARKER = "ha"
+
+
+def derive_distinct_device_id(device_id: str, marker: str = DISTINCT_DEVICE_ID_MARKER) -> str:
+    """Return a stable ``deviceId`` distinct from ``device_id`` (same length, hex tail).
+
+    The Tuya cloud keys the path-1a session on the request ``deviceId`` param, NOT on the account
+    nor the chKey (proven on real hardware 2026-11-18): two clients sharing one ``deviceId`` share a
+    SINGLE session and log each other out. Giving the integration its OWN stable ``deviceId`` — same
+    ``sign_key`` and ``chKey`` — lets it coexist with the Danfoss app and the MCP connector (see
+    docs/architecture.md). The server accepts any well-formed value distinct from the others (the
+    signature is recomputed with the unchanged ``sign_key``); we derive it deterministically from
+    the captured id so it stays STABLE across restarts (never randomise per request) and unique per
+    installation. Only the trailing characters are rewritten, so the result still reads as a sibling
+    device id.
+    """
+    if not device_id:
+        return device_id
+    digest = hashlib.sha256(f"{device_id}:{marker}".encode()).hexdigest()
+    n = min(8, len(device_id))
+    derived = device_id[:-n] + digest[:n]
+    if derived == device_id:  # astronomically unlikely; guarantee it differs
+        derived = device_id[:-n] + digest[n : 2 * n]
+    return derived
+
+
 class CloudClient:
     """Cloud access via the mobile app's API (path 1a)."""
 
@@ -85,12 +112,17 @@ class CloudClient:
         *,
         sid: str | None = None,
         ecode: str | None = None,
+        distinct_device_id: bool = False,
     ) -> None:
         self._username = username
         self._password = password
         self._country_code = country_code
         self._sign_key = sign_key
-        self._device_id = device_id
+        # Coexistence (contract §4 / docs/architecture.md): when ``distinct_device_id`` is set, the
+        # client uses a stable deviceId derived from the captured one (same sign_key/chKey) so its
+        # Tuya session no longer collides with the app's or the MCP connector's. Off = the captured
+        # id verbatim (legacy behaviour, kept for debugging/rollback).
+        self._device_id = derive_distinct_device_id(device_id) if distinct_device_id else device_id
         self._ch_key = ch_key
         self._endpoint = ENDPOINTS.get(region.lower(), ENDPOINTS["eu"])
         self._sid = sid
@@ -287,9 +319,10 @@ class CloudClient:
     async def async_list_relays(self, gid: str | int) -> list[dict]:
         """Boiler relays (Tuya category ``kg``) of a home: [{dev_id, name, on, online, mesh_id}].
 
-        Read-only (contract §4.6): DP ``1`` = on/off. The direct device-level write is uncaptured;
-        only the state read and the room<->relay link (``async_relay_rooms`` + the edit path) are
-        in contract.
+        Read-only (contract §4.6): DP ``1`` = on/off. There is **no** manual relay on/off in the app
+        (confirmed 2026-11-18): the relay is server-driven from the heat demand of the linked rooms,
+        so no DP ``1`` write exists to mirror. Only the state read and the room<->relay link
+        (``async_relay_rooms`` + ``async_relay_bind``) are in contract.
         """
         raw = await self._request(
             "tuya.m.my.group.device.list", "1.0", None, extra_params={"gid": gid}

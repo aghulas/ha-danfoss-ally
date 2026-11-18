@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased — Coexistence + hardening (axis A, toward 1.0)
+
+Path-1a coexistence with the Danfoss app / MCP connector, plus 1.0 hardening. No new cloud/local
+write primitive; the boiler-relay change below is documentation only. The version bump and tag are
+left to the integrator.
+
+### Added
+
+- **Distinct device id (coexistence).** The Tuya cloud keys a path-1a session on the request
+  `deviceId`, not on the account or the `chKey` (proven on real hardware 2026-11-18): two clients
+  sharing one `deviceId` share a single session and log each other out. The integration now derives
+  its **own stable `deviceId`** from the captured one (same `sign_key`/`chKey`) via
+  `api.derive_distinct_device_id`, so it keeps its own session alongside the app and the MCP
+  connector. Controlled by the option **Use a dedicated device id** (`distinct_device_id`, default
+  **on**); off reproduces the legacy shared-session behaviour. `CloudClient(..., distinct_device_id=…)`.
+  Contract/architecture updated (`docs/architecture.md`). **Needs an in-situ confirmation on the
+  school's Pi** (integration keeps its session while the MCP keeps its own).
+
+### Changed
+
+- **Boiler relay is read-only by design (doc alignment, contract §4.6/§7).** Confirmed on real
+  hardware 2026-11-18 that the Danfoss app has **no** manual relay on/off: the relay is server-driven
+  from the heat demand of the linked rooms. The only write lever is the room↔relay link
+  (`set_relay_room`, already shipped). No DP `1` forcing path exists in the integration; the contract
+  wording moves from "uncaptured" to "does not exist as an app action".
+
+### Hardening
+
+- Diagnostics redaction extended to options (defensive) and covered for session material
+  (`sid`/`ecode`); confirmed all secrets (password, `sign_key`, `ch_key`, `device_id`, session,
+  local keys, real device ids) are redacted.
+- Test coverage raised (floor 92 → 93 %); new tests for the device-id derivation, the coexistence
+  wiring, and the service-path write wrappers.
+- mypy and `pip-audit -r requirements.txt` remain green in CI.
+
 ## 0.6.1 — Room head attach/detach + multi-home room create
 
 Completes room management on top of 0.6.0. Room head **attach/detach** (deferred from 0.5.0) is

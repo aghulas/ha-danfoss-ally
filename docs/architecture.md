@@ -35,51 +35,48 @@ the user.
   `local`.
 - `diagnostics.py` — strict secret redaction.
 
-## Tuya session shared with the MCP connector (common deviceId)
+## Tuya session and coexistence with the MCP connector (distinct deviceId)
 
-The `danfoss_ally_cloud` integration and the MCP connector `danfoss-ally-mcp` use the **same
-installation material captured from the app**: `deviceId`, `sign_key` and `chKey` (see README,
-"Installation secrets"). On the Tuya server side, this triplet identifies **a single installation**,
-hence **a single active session**. If both clients run in parallel against the real account, one's
-connection **invalidates the other's session**: they log each other out, each triggering a
-re-authentication in the other, hence a loop of reconnections and intermittent errors
-(`session_expired`, refused calls) on both sides.
+The `danfoss_ally_cloud` integration and the MCP connector `danfoss-ally-mcp` are configured from
+the **same installation material captured from the app**: `deviceId`, `sign_key` and `chKey` (see
+README, "Installation secrets"). The decisive question was what the Tuya server keys a path-1a
+session on.
 
-> The `tuya-mcp` connector (building F radiators) is **not** affected: it goes through the Smart
-> Life sharing SDK with its own `terminal_id`.
+### What keys a session: the `deviceId` request param (proven)
 
-### Operational rule (as long as a single set of secrets exists)
+A session indexes on the **`deviceId` request parameter** (the 44-char value passed to `login()`
+and sent on every call), **not** on the account nor on the `chKey`. Proven on 2026-11-18 (capture
+session): logging in with two deviceIds that differ by a few characters — same `sign_key`, same
+`chKey`, same account — yields **two independent sessions** that coexist, each readable after the
+other logged in. Earlier the two clients shared one deviceId, so Tuya saw a single installation and
+a single session: whichever logged in last **invalidated the other's session**, producing a loop of
+re-authentications and intermittent `session_expired` / refused calls on both sides (observed in
+situ: the integration, active on the Pi with the shared deviceId, forced the app to re-login nine
+times in one capture session).
 
-**Never run both at the same time against the real account.** One session holder at a time:
+> The `tuya-mcp` connector (building F radiators) was never affected: it goes through the Smart Life
+> sharing SDK with its own `terminal_id`.
 
-- as long as the MCP connector is serving (active Claude session on `danfoss-ally-mcp`), the
-  integration stays **disabled** on the Home Assistant side;
-- conversely, to use the integration continuously, stop using the MCP connector on this account.
+### The fix: the integration uses its own derived deviceId
 
-Disabling the integration on the HA side unloads it **and** prevents it from reloading at startup,
-which frees the session; a simple "reload" is not enough. Current state on the school's Pi: the
-integration is `disabled_by: user` (disabled), so the MCP connector keeps control. This is a
-**workaround**, not the target.
+The integration gives itself a **distinct, stable `deviceId`** (same `sign_key`/`chKey`), so it
+keeps its own session and no longer collides with the app or the MCP connector. No second account
+and no reverse-engineering of installation enrolment are needed — any well-formed deviceId distinct
+from the others is accepted, because the signature is recomputed with the unchanged `sign_key`.
 
-### Underlying track: a separate virtual installation for the integration
+- `api.derive_distinct_device_id(device_id)` rewrites the trailing characters of the captured id
+  with a deterministic `sha256`-derived hex tail: **stable** across restarts (never randomised per
+  request — rapid re-logins trip Tuya's `REQUEST_TOO_FREQUENTLY` anti-flood), **unique** per
+  installation, and distinct from the captured value the MCP keeps using.
+- `CloudClient(..., distinct_device_id=True)` applies it; the integration passes the option
+  `distinct_device_id` (default **on**, `CONF_DISTINCT_DEVICE_ID`). Turning it off reproduces the
+  legacy shared-session behaviour, for debugging or rollback.
+- Each path-1a client (integration, MCP, app) therefore ends up with its own deviceId and its own
+  session. The MCP keeps the captured `secrets.json` deviceId; the real app has its own.
 
-True coexistence requires giving the integration **its own set of secrets** (distinct `deviceId` /
-`sign_key` / `chKey`), i.e. a **second virtual "installation"** of the app as far as the Tuya server
-is concerned. Two installations = two independent sessions, which no longer log each other out.
-
-Procedure, conceptually (manual step **to come**, not done here):
-
-1. produce a new installation triplet using the signature repo `~/dev/danfoss-ally-signing-re` and
-   the real app (capture / hook) — the operation needs **Rémi** and the app, it cannot be automated
-   from this repo;
-2. register this installation on the account as an additional mobile device (the server rejects an
-   unknown `chKey`: the triplet must be a real installation ↔ account pair, not a fabricated value);
-3. configure the integration with this distinct triplet, and reserve the original triplet for the
-   MCP connector;
-4. verify on real hardware that the two sessions coexist without logging each other out.
-
-Until this capture is done, the operational rule above is the only guarantee against mutual
-log-outs.
+The old operational workaround — keeping the integration `disabled_by: user` on the Pi so the MCP
+connector could hold the single shared session — is **no longer required** once this is deployed
+and confirmed on real hardware (the integration keeps its session while the MCP keeps its own).
 
 ## Security
 

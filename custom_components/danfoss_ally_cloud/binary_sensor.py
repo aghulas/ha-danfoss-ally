@@ -77,8 +77,10 @@ class DanfossWindow(DanfossEntity, BinarySensorEntity):
 class DanfossRelay(DanfossEntity, BinarySensorEntity):
     """Boiler relay on/off (DP 1, read only — contract §4.6).
 
-    Stays available even when the relay is briefly offline (the last state is still informative);
-    ``is_on`` is ``None`` when the DP is absent.
+    Read only by design: the app has no manual relay on/off (confirmed 2026-11-18); the relay is
+    server-driven from the heat demand of the linked rooms. The control lever is the room↔relay link
+    (``set_relay_room``), not a DP 1 switch. Stays available even when the relay is briefly offline
+    (the last state is still informative); ``is_on`` is ``None`` when the DP is absent.
     """
 
     _require_online = False

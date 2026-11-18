@@ -30,6 +30,7 @@
     "title": "Options",
     "data": {
      "scan_interval": "Intervalle d'interrogation du cloud (secondes)",
+     "distinct_device_id": "Utiliser un identifiant d'appareil dédié (cohabiter avec l'app Danfoss / le connecteur MCP sans se déconnecter mutuellement)",
      "enable_local": "Activer le tunnel Zigbee local (passerelles) pour les écritures que le cloud rate",
      "mqtt_mode": "Publication MQTT : off, discovery (entités HA auto), zigbee2mqtt (topics compatibles z2m)",
      "mqtt_source": "Source des valeurs publiées : cloud ou local",

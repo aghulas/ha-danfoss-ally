@@ -41,11 +41,14 @@ mobile API; the server rejects an unknown `chKey`. The capture method is describ
 hook / network capture). These values, the password and the session material (`sid`/`ecode`) are
 **secrets**: they are never written to the logs or the diagnostics (see `diagnostics.py`).
 
-> **One client per set of secrets.** On the Tuya server side, this triplet identifies a single
-> installation, hence a single active session. If the MCP connector `danfoss-ally-mcp` uses the
-> **same** triplet on the same account, the two log each other out: do not run them in parallel, or
-> capture a distinct triplet for each. Detail in
-> [`docs/architecture.md`](docs/architecture.md) ("Tuya session shared with the MCP connector").
+> **Coexistence with other path-1a clients.** The Tuya server keys a session on the `deviceId`
+> request parameter, not on the account or the `chKey`. The integration therefore gives itself a
+> **distinct, stable `deviceId`** derived from the captured one (same `sign_key`/`chKey`) so it
+> keeps its own session and does not log out the Danfoss app or the MCP connector `danfoss-ally-mcp`
+> (and vice-versa). This is on by default (option *Use a dedicated device id*); turn it off only to
+> reproduce the legacy shared-session behaviour. Detail in
+> [`docs/architecture.md`](docs/architecture.md) ("Tuya session and coexistence with the MCP
+> connector").
 
 ## Embedded frontend (dashboard card)
 
