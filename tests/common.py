@@ -156,6 +156,10 @@ class FakeCloudClient:
         self.writes.append(("relay_bind", dev_id, room_id, bool(linked)))
         return {"ok": True}
 
+    async def async_device_reset(self, dev_id, reset_factory=False):
+        self.writes.append(("device_reset", dev_id, bool(reset_factory)))
+        return {"ok": True}
+
     # Vacation writes (axis A): record calls in ``writes`` (no network).
     @staticmethod
     def _csv(room_ids):

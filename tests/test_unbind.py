@@ -143,3 +143,12 @@ async def test_disconnect_refuses_unverified_product():
         await ops.disconnect_head(None, _store(coord), _DEV, confirm=True)
     assert e.value.code == "unverified_product"
     assert coord.client.reset_calls == []
+
+
+async def test_ensure_admin_refuses_user_less_call_when_internal_disallowed():
+    # disconnect_head passes allow_internal=False: an automation/script with no user is refused.
+    with pytest.raises(ops.OperationError) as e:
+        await ops.ensure_admin(None, None, allow_internal=False)
+    assert e.value.code == "not_admin"
+    # default (shared by other writes) still allows the internal call
+    await ops.ensure_admin(None, None)

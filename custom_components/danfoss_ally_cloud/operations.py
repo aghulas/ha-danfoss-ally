@@ -79,13 +79,44 @@ class OperationError(Exception):
         super().__init__(message or code)
 
 
-async def ensure_admin(hass: HomeAssistant, user_id: str | None) -> None:
-    """Refuse a non-admin user (contract §5.2). None = internal call, allowed."""
+async def ensure_admin(
+    hass: HomeAssistant, user_id: str | None, *, allow_internal: bool = True
+) -> None:
+    """Refuse a non-admin user (contract §5.2). None = internal call, allowed by default.
+
+    ``allow_internal=False`` additionally refuses a user-less call (``user_id is None``): used by
+    ``disconnect_head``, the most destructive write, so that an unattended automation/script cannot
+    unbind a head without a real administrator in context (opt-in + confirm are not enough there).
+    """
     if user_id is None:
-        return
+        if allow_internal:
+            return
+        raise OperationError("not_admin", "this action requires an administrator user")
     user = await hass.auth.async_get_user(user_id)
     if user is None or not user.is_admin:
         raise OperationError("not_admin", "write reserved for administrators")
+
+
+def _require_verified_head(
+    coordinator: DanfossCoordinator, target: dict, *, not_found_code: str = "unknown_head"
+):
+    """Resolve a ``{type:"device", id}`` target to a known, write-verified head, or raise.
+
+    The target-safety sequence shared by writes that address a single head (contract write-safety):
+    the target must be ``type=device``, a known head, of a write-verified product. The
+    ``not_found_code`` arg lets each caller keep its own stable code for an unknown target
+    (``unknown_head`` for the
+    head writes, ``unknown_target`` for the local tunnel) — observable behaviour unchanged. Returns
+    the resolved ``DanfossDevice``.
+    """
+    if target.get("type") != "device":
+        raise OperationError("device_only", "this write targets a head (type=device)")
+    dev = coordinator.data.get(str(target.get("id")))
+    if dev is None or not dev.is_head:
+        raise OperationError(not_found_code, f"head not found: {target.get('id')}")
+    if not write_allowed(dev):
+        raise OperationError("unverified_product", "write not verified for this product")
+    return dev
 
 
 def _heads_of_room(coordinator: DanfossCoordinator, group_id: str) -> list[dict]:
@@ -772,14 +803,8 @@ async def disconnect_head(
     """
     _require_unbind(store)
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
-    if target.get("type") != "device":
-        raise OperationError("device_only", "disconnect_head targets a head (type=device)")
-    dev_id = str(target.get("id"))
-    dev = coordinator.data.get(dev_id)
-    if dev is None or not dev.is_head:
-        raise OperationError("unknown_head", f"head not found: {dev_id}")
-    if not write_allowed(dev):
-        raise OperationError("unverified_product", f"unbind not verified for {dev_id}")
+    dev = _require_verified_head(coordinator, target)
+    dev_id = dev.id
     if not confirm:
         raise OperationError(
             "confirmation_required",
@@ -838,13 +863,7 @@ def _tunnel_head(coordinator: DanfossCoordinator, local, target: dict) -> Head:
     isolated head (type=device), of a write-verified product, with a known Zigbee node and a
     gateway the local manager can reach. Errors are stable contract codes.
     """
-    if target.get("type") != "device":
-        raise OperationError("device_only", "a local tunnel write targets a head (type=device)")
-    dev = coordinator.data.get(str(target.get("id")))
-    if dev is None or not dev.is_head:
-        raise OperationError("unknown_target", f"head not found: {target.get('id')}")
-    if not write_allowed(dev):
-        raise OperationError("unverified_product", "write not verified for this product")
+    dev = _require_verified_head(coordinator, target, not_found_code="unknown_target")
     if not dev.node_id or not dev.mesh_id or dev.mesh_id not in local.manager.gateway_ids:
         raise OperationError("local_unreachable", "head not reachable through the local tunnel")
     return Head(dev.id, dev.node_id, dev.mesh_id)

@@ -108,7 +108,9 @@ _DISCONNECT_HEAD = vol.Schema(
     {
         vol.Required("target"): _TARGET,
         vol.Optional("wipe_data", default=False): cv.boolean,
-        vol.Optional("confirm", default=False): cv.boolean,
+        # Required (no default): a destructive action must carry confirm explicitly, aligned with
+        # services.yaml. The `confirmation_required` op guard stays as a net for confirm=false.
+        vol.Required("confirm"): cv.boolean,
         vol.Optional("config_entry_id"): cv.string,
     }
 )
@@ -347,7 +349,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def disconnect_head(call: ServiceCall) -> dict:
         store = _store(hass, call)
         try:
-            await ops.ensure_admin(hass, call.context.user_id)
+            # Most destructive write: require a real administrator in context, refusing even a
+            # user-less internal/automation call (allow_internal=False).
+            await ops.ensure_admin(hass, call.context.user_id, allow_internal=False)
             return await ops.disconnect_head(
                 hass,
                 store,
