@@ -45,7 +45,7 @@ except ImportError:  # lovelace absent
 try:
     from homeassistant.components import panel_custom
 except ImportError:  # panel_custom absent
-    panel_custom = None
+    panel_custom = None  # type: ignore[assignment]
 
 _LOGGER = logging.getLogger(__name__)
 
