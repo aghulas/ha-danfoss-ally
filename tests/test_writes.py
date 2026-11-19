@@ -76,3 +76,34 @@ async def test_switch_verrou_enfant_tete_isolee_sans_ecriture():
     await ent.async_turn_on()
     # Isolated head (W-3): settings.change is accepted but never applied -> no write at all.
     coord.client.async_write_setting.assert_not_awaited()
+
+
+# --- cloud-MQTT write path: proven DPs, candidates, supervised trial -----------------------------
+
+
+def test_mqtt_dp_open_only_for_proven_or_supervised_candidates():
+    from custom_components.danfoss_ally_cloud.api import writes
+
+    assert writes.MQTT_WRITE_DPS.isdisjoint(writes.MQTT_CANDIDATE_DPS)
+    for dp in writes.MQTT_WRITE_DPS:
+        assert writes.mqtt_dp_open(dp) is True
+    for dp in writes.MQTT_CANDIDATE_DPS:
+        assert writes.mqtt_dp_open(dp) is False  # closed by default
+        assert writes.mqtt_dp_open(dp, frozenset({dp})) is True
+    # Neither proven nor candidate: never open, whatever is listed.
+    assert writes.mqtt_dp_open(2, frozenset({2})) is False
+
+
+def test_mqtt_write_value_messages_and_types():
+    import pytest
+
+    from custom_components.danfoss_ally_cloud.api import CloudWriteError, writes
+
+    assert writes.mqtt_write_value(30, True) is True
+    assert writes.mqtt_write_value(116, False, frozenset({116})) is False
+    with pytest.raises(CloudWriteError, match="supervised first write"):
+        writes.mqtt_write_value(116, True)
+    with pytest.raises(CloudWriteError, match="not enabled"):
+        writes.mqtt_write_value(2, "manual", frozenset({2}))
+    with pytest.raises(CloudWriteError, match="boolean"):
+        writes.mqtt_write_value(116, "true", frozenset({116}))

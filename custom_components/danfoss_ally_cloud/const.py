@@ -49,6 +49,8 @@ DATA_VACATION_WRITE = "vacation_write"  # bool: vacation-write gate (CONF_ENABLE
 DATA_HEAD_UNBIND = "head_unbind"  # bool: head-unbind gate (CONF_ENABLE_HEAD_UNBIND)
 DATA_CLOUD_MQTT = "cloud_mqtt"  # bool: cloud-MQTT isolated-head write gate (CONF_ENABLE_CLOUD_MQTT)
 DATA_MQTT_LINK = "cloud_mqtt_link"  # CloudMqttLink | None: live link, created only on a gated step
+# frozenset[int]: candidate DPs opened on the cloud-MQTT write path for a supervised trial.
+DATA_MQTT_SUPERVISED_DPS = "cloud_mqtt_supervised_dps"
 DATA_MQTT_COVERAGE = "cloud_mqtt_coverage"  # CoverageStats | None: only with cloud_mqtt_probe on
 
 # LOCAL survey (Zigbee tunnel) interval: slow, ~8 s per head. Distinct from the cloud polling.
@@ -120,6 +122,12 @@ DEFAULT_ENABLE_VACATION_WRITE = False
 DEFAULT_ENABLE_HEAD_UNBIND = False
 DEFAULT_POST_COMMAND_REFRESH = False
 DEFAULT_ENABLE_CLOUD_MQTT = False
+# Candidate DPs opened on the cloud-MQTT write path for a SUPERVISED trial (a list of DP numbers as
+# strings; EMPTY by default). A candidate (``api.writes.MQTT_CANDIDATE_DPS``) is implemented but
+# not proven on real hardware: it stays closed, whatever ``enable_cloud_mqtt`` says, until it is
+# listed here for its supervised first write (docs/first-write-procedure.md). Entries that are not
+# candidates (unknown, or since promoted to proven) are ignored.
+CONF_CLOUD_MQTT_SUPERVISED_DPS = "cloud_mqtt_supervised_dps"
 DEFAULT_CLOUD_MQTT_PROBE = False
 CLOUD_MQTT_PROBE_MAX_SECONDS = 48 * 3600  # a listen-only link closes itself after two days
 # How long a commanded head stays "hot" (refreshed via the per-device route) after a write, and the

@@ -16,7 +16,8 @@ optimistic state.
 
 Status of the cloud-MQTT channel: validated on real hardware and on `main`, behind the option
 `enable_cloud_mqtt`, **off by default**. Its write path carries the child lock only
-(`api.writes.MQTT_WRITE_DPS`); a diagnostic entity reports the link state. Wire format:
+(`api.writes.MQTT_WRITE_DPS`); window detection is implemented as a candidate, closed until its
+supervised write; a diagnostic entity reports the link state. Wire format:
 `docs/cloud-mqtt-publish.md`; procedure for a first write of a new DP:
 `docs/first-write-procedure.md`. With the option off, an isolated head's child lock is unavailable.
 
@@ -67,7 +68,7 @@ frames, so neither channel asks anything more of the user.
 | Comfort / setback setpoint | Cloud HTTP: room publish, then rewrite the room schedule (R3) | No path yet; candidate for cloud MQTT |
 | Weekly schedule | Cloud HTTP | Cloud HTTP |
 | Child lock | Cloud HTTP: room publish (applies to **every** head of the room) | Cloud MQTT when enabled and connected; otherwise unavailable |
-| Window detection | Cloud HTTP: room publish (whole room) | Local tunnel; otherwise unavailable |
+| Window detection | Cloud HTTP: room publish (whole room) | Local tunnel when the head answers locally; otherwise unavailable. Cloud MQTT is a **candidate** fallback, closed until its supervised write |
 | Preheat | Local tunnel (0x0025) | Local tunnel (0x0025) |
 | Setpoint override until the next schedule change | Local tunnel (DP 171) | Local tunnel (DP 171) |
 | Valve exercise day and time | Local tunnel | Local tunnel |
@@ -77,12 +78,21 @@ frames, so neither channel asks anything more of the user.
 A setting switch states its route in its attributes (`write_path`, `write_scope`,
 `room_head_count`), so the user sees when a write will touch the whole room.
 
+Order for an isolated head's setting: (1) a DP under **supervised trial** on cloud MQTT goes through
+cloud MQTT, so the trial exercises the channel it is meant to prove and the tunnel stays free to
+read the result back; (2) the **local tunnel** when it has a proven write for that setting and the
+head answers locally — it reaches the head directly, with no cloud in between; (3) **cloud MQTT**
+for a DP proven on it; (4) otherwise unavailable.
+
 ### Rules for adding a route
 
 - A channel is "proven" for an operation only after a supervised write on real hardware, read back
   from a source that does not depend on the channel written (the local tunnel when it exposes the
   value, otherwise the app and the head itself).
 - One DP at a time. A new DP on the cloud-MQTT channel does not inherit the proof of another DP.
+  In code: a DP is first a **candidate** (`api.writes.MQTT_CANDIDATE_DPS`), closed unless listed in
+  the option `cloud_mqtt_supervised_dps` for its supervised write; it becomes **proven**
+  (`MQTT_WRITE_DPS`) in a change of its own (`docs/first-write-procedure.md`).
 - Preheat is the known trap: cloud DP 1 over HTTP only changed the gateway cache. A DP 1 publish
   over cloud MQTT must be read back as attribute 0x0025 before it is trusted.
 - After a successful write, the entity shows what the channel returns (echo or re-read), with a
@@ -113,6 +123,8 @@ A setting switch states its route in its attributes (`write_path`, `write_scope`
   head and per DP, served by the diagnostics).
 - `switch.py` — picks the path of a setting write (`room`, `cloud_mqtt`, `local`, `none`) per head
   and setting.
+- `mqtt_write.py` — the one cloud-MQTT write routine shared by the entities: validate, publish,
+  confirm (echo, else per-device read), clear error otherwise.
 - `coordinator.py` — conservative cloud polling, per-device overlay for recently commanded heads,
   overlay of the local truths.
 - Platforms: `climate` (setpoint, presets), `sensor` (battery, valve, heat request, fault code),

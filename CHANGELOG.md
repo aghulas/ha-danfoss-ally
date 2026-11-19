@@ -32,6 +32,14 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   itself after 48 h. Tooling for roadmap stage 3; the 24 h run on a real install is still to do
   (docs/cloud-mqtt-coverage.md).
 
+- **Window detection (DP 116) as a cloud-MQTT candidate, closed by default.** A DP now ships first
+  as a candidate (`MQTT_CANDIDATE_DPS`) that only the new option `cloud_mqtt_supervised_dps` (empty
+  by default) opens, for its supervised first write; the switch then shows `write_trial: true`.
+  Outside a trial, an isolated head's window detection still goes through the local tunnel first.
+  **Not validated on real hardware yet.**
+- The cloud-MQTT write confirmation falls back to one read of the head through the per-device
+  route when the gateway's echo does not come (it used the bulk list, which lags for minutes).
+
 ### Changed (cloud-MQTT link hardening)
 
 - Reconnection backoff widened to 5 s – 5 min (was 2 s – 60 s).

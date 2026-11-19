@@ -16,19 +16,45 @@ def write_allowed(dev: DanfossDevice) -> bool:
     return bool(dev.product_id) and dev.product_id in WRITE_VERIFIED_PRODUCTS
 
 
-# Cloud-MQTT isolated-head write path: start with DP 30 (child lock) only. Extend setting by setting
-# AFTER a real-hardware validation (see docs/first-write-procedure.md / cloud-mqtt-publish.md §6).
-MQTT_WRITE_DPS = frozenset({30})
+# Cloud-MQTT isolated-head write path, one DP at a time (docs/architecture.md, "Rules for adding a
+# route"; procedure: docs/first-write-procedure.md).
+#
+# - MQTT_WRITE_DPS: PROVEN. A supervised write on real hardware was read back from an independent
+#   source. Open as soon as the cloud-MQTT option is on.
+# - MQTT_CANDIDATE_DPS: IMPLEMENTED, NOT PROVEN. Closed by default; a candidate opens only when it
+#   is explicitly listed for a supervised trial (the ``supervised`` argument below, fed by the
+#   integration's ``cloud_mqtt_supervised_dps`` option). After its supervised write succeeds, a DP
+#   moves from the second set to the first in a change of its own.
+MQTT_WRITE_DPS = frozenset({30})  # child lock, validated 2026-11-19
+MQTT_CANDIDATE_DPS = frozenset({116})  # window detection
+
+# Value type of each DP this path knows.
+_MQTT_BOOL_DPS = frozenset({30, 116})
 
 
-def mqtt_write_value(dp: int, value: object) -> bool:
-    """Validate a value destined for the cloud-MQTT write path. Only DP 30 is allowed for now, and
-    it is a boolean. Raises CloudWriteError otherwise (a clear error, never a blind send)."""
-    if dp not in MQTT_WRITE_DPS:
-        raise CloudWriteError(f"DP {dp} is not enabled on the cloud-MQTT write path (DP 30 only)")
-    if not isinstance(value, bool):
-        raise CloudWriteError(f"DP {dp} expects a boolean, got {type(value).__name__}")
-    return value
+def mqtt_dp_open(dp: int, supervised: frozenset[int] = frozenset()) -> bool:
+    """True if ``dp`` may be written over cloud MQTT: proven, or a candidate listed in
+    ``supervised`` (a supervised trial). A DP that is neither proven nor a candidate is never open,
+    whatever ``supervised`` says."""
+    return dp in MQTT_WRITE_DPS or (dp in MQTT_CANDIDATE_DPS and dp in supervised)
+
+
+def mqtt_write_value(dp: int, value: object, supervised: frozenset[int] = frozenset()) -> bool:
+    """Validate a value destined for the cloud-MQTT write path and return it as it must be sent.
+    Raises CloudWriteError when the DP is not open on this path or the value is not of the DP's
+    type (a clear error, never a blind send)."""
+    if not mqtt_dp_open(dp, supervised):
+        if dp in MQTT_CANDIDATE_DPS:
+            raise CloudWriteError(
+                f"DP {dp} is not validated on the cloud-MQTT write path yet (closed until its "
+                "supervised first write)"
+            )
+        raise CloudWriteError(f"DP {dp} is not enabled on the cloud-MQTT write path")
+    if dp in _MQTT_BOOL_DPS:
+        if not isinstance(value, bool):
+            raise CloudWriteError(f"DP {dp} expects a boolean, got {type(value).__name__}")
+        return value
+    raise CloudWriteError(f"DP {dp} has no value rule on the cloud-MQTT write path")
 
 
 def encode_setpoint(celsius, low: float, high: float, step: float = 0.5) -> int:
