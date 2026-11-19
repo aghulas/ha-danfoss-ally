@@ -105,6 +105,12 @@ DEFAULT_POST_COMMAND_REFRESH = False
 # costs one extra read per poll for at most this window, then returns to the bulk route.
 POST_COMMAND_REFRESH_TTL = 300  # seconds
 POST_COMMAND_REFRESH_MAX_HEADS = 12
+# Settle delay after a command. The cloud takes the command into account in about 15 s (observed
+# 2026-11-19: a room setting was on both heads ~15 s after the write); a per-device read before that
+# returns the PRE-command state and left the written entity one write behind until the next poll
+# (rc1 finding). So a commanded head is not overlaid during this delay (the bulk value is kept), and
+# one extra refresh is scheduled when it ends: the result shows up in ~15 s instead of a full poll.
+POST_COMMAND_SETTLE = 15  # seconds
 DEFAULT_MQTT_MODE = "off"
 DEFAULT_MQTT_SOURCE = "cloud"
 DEFAULT_MQTT_BASE_TOPIC = "danfoss_ally_cloud"
