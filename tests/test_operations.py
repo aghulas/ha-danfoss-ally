@@ -92,12 +92,19 @@ class _FakeManager:
     gateway_ids = {"gw1", "gw2"}
 
     def survey_heads(self, heads):
+        assert list(heads) == ["dev1-head", "dev2-head"]  # the heads themselves, iterable
         return {"dev1": {"comfort": 21.0, "setback": 14.0}, "dev2": {"unreachable": True}}
 
 
 class _FakeLocal:
-    heads = ["dev1-head", "dev2-head"]  # opaque to the fake manager
+    """Shaped like DanfossLocalCoordinator: ``heads`` is a METHOD there. A fake exposing it as a
+    plain list hid the service passing the bound method to the manager (get_local_survey failed
+    on a real install with "'method' object is not iterable")."""
+
     manager = _FakeManager()
+
+    def heads(self):
+        return ["dev1-head", "dev2-head"]  # opaque to the fake manager
 
 
 async def test_local_survey_disabled():
