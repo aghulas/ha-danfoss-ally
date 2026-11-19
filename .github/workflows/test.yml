@@ -15,7 +15,10 @@ jobs:
       - run: mypy custom_components/danfoss_ally_cloud
       - run: pytest  # coverage + threshold via pyproject (addopts)
       # Validates the extraction of the pydanfoss-cloud library (installable package, without HA).
-      - run: pip install -e '.[local]'
-      - run: python -c "import pydanfoss_cloud; from pydanfoss_cloud import CloudClient, decode_device; from pydanfoss_cloud.local import tunnel"
+      # Built as a wheel and installed into a clean venv, so a module missing from the package or a
+      # dependency missing from an extra fails here rather than at the consumer's.
+      - run: pip install build && python -m build --wheel
+      - run: python -m venv /tmp/lib && /tmp/lib/bin/pip install "$(ls dist/pydanfoss_cloud-*.whl)[local,mqtt]"
+      - run: cd /tmp && /tmp/lib/bin/python -c "import pydanfoss_cloud; from pydanfoss_cloud import CloudClient, decode_device, mqtt_publish, mqtt_client; from pydanfoss_cloud.local import tunnel; import paho.mqtt.client"
       # Runtime dependency audit.
       - run: pip-audit -r requirements.txt

@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 # Bibliothèque réutilisable extraite de l'intégration (voie 1a Danfoss Ally).
 # Source UNIQUE : le dossier custom_components/danfoss_ally_cloud/api (que l'intégration « vend »
 # pour le runtime HACS). Packagée ici sous le nom pydanfoss_cloud, sans déplacer les fichiers :
-# le connecteur MCP pourra en dépendre (pip install pydanfoss-cloud) une fois publiée sur PyPI,
-# et l'intégration continuera de la vendre tant que la publication n'est pas faite.
+# le connecteur MCP en dépend par PyPI (pip install pydanfoss-cloud), et l'intégration continue de
+# la vendre par import relatif (installation HACS autonome).
 [project]
 name = "pydanfoss-cloud"
-version = "0.2.0"
-description = "Accès à l'API cloud non officielle Danfoss Ally (voie 1a) : client, décodage DP, écritures gardées, clés passerelles, tunnel Zigbee local."
+version = "0.3.0"
+description = "Accès à l'API cloud non officielle Danfoss Ally (voie 1a) : client, décodage DP, écritures gardées, clés passerelles, tunnel Zigbee local, MQTT cloud Tuya (trames 2.3)."
 readme = "custom_components/danfoss_ally_cloud/api/README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -31,6 +31,9 @@ dependencies = ["pycryptodome>=3.20", "requests>=2.31"]
 
 [project.optional-dependencies]
 local = ["tinytuya>=1.15"]
+# Lien MQTT cloud Tuya (mqtt_client) : paho est importé à l'ouverture de la connexion seulement.
+# Même plage que manifest.json (paho 1.6.1 et 2.x). Le codec (mqtt_publish) n'en a pas besoin.
+mqtt = ["paho-mqtt>=1.6.1,<3"]
 
 [project.urls]
 Homepage = "https://github.com/aghulas/ha-danfoss-ally"

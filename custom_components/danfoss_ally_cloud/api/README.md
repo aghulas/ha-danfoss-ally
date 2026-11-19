@@ -7,35 +7,51 @@ no developer app and no shared quota), extracted from the Home Assistant integra
 It provides:
 
 - `CloudClient` — email/password login (+ installation secrets), list of heads, guarded writes
-  (`tuya.m.custom.wkf.settings.change`), robust re-authentication.
+  (`tuya.m.custom.wkf.settings.change`, with the head's gateway as `gw_id`), room writes, schedules,
+  holidays, rooms, robust re-authentication, optional distinct `deviceId`
+  (`derive_distinct_device_id`) so a client does not share its Tuya session with the app.
 - `decode` / `DanfossDevice` — decoding of the Tuya `dps` into a normalised model (product schema
   `03wvrwpv`), decoding of the E1–E15 fault codes.
 - `writes` — value validation before sending and a per-model guard-rail.
 - `keys` — fetching the gateways' `localKey` + LAN IP from the cloud.
 - `local/` — local Zigbee tunnel (DP 198→199, tinytuya): attribute read/write (preheat 0x0025),
   weekly schedule.
+- `mqtt_publish` — Tuya cloud MQTT codec, **no network**: protocol-2.3 frames (AES-GCM with the
+  gateway localKey), topics, DP-publish payload, broker credential derivation.
+- `mqtt_client` — `CloudMqttLink`, the live link built on that codec (paho-mqtt, extra `mqtt`):
+  inbound report decoding, DP publish, confirmation by the gateway's echo. One connection per Tuya
+  session; the write path is validated for DP 30 only (`writes.MQTT_WRITE_DPS`).
 
-## Extraction status (roadmap v0.6)
+Wire format and derivations: `docs/cloud-mqtt-publish.md` in the repository.
+
+## Packaging
 
 **Single** source: this folder (`custom_components/danfoss_ally_cloud/api/`). It is packaged under
 the name `pydanfoss_cloud` by the repo's `pyproject.toml`, **without moving files**:
 
-- the Home Assistant integration keeps "vendoring" this code (relative import `from .api import …`),
-  which keeps the HACS install self-contained;
-- the MCP connector (`danfoss-ally-mcp`) can depend on it via `pip install pydanfoss-cloud` once the
-  library is **published to PyPI**, then the integration will switch to a `requirements` dependency
-  in `manifest.json`.
-
-Development install:
+- the Home Assistant integration "vendors" this code (relative import `from .api import …`), which
+  keeps the HACS install self-contained;
+- other clients (the MCP connector `danfoss-ally-mcp`) depend on the PyPI release.
 
 ```
-pip install -e .            # exposes the pydanfoss_cloud package
-pip install -e '.[local]'   # + tinytuya for the local tunnel
+pip install pydanfoss-cloud            # core: client, decode, writes, keys, MQTT codec
+pip install 'pydanfoss-cloud[local]'   # + tinytuya for the local Zigbee tunnel
+pip install 'pydanfoss-cloud[mqtt]'    # + paho-mqtt for the live cloud-MQTT link
+pip install -e '.[local,mqtt]'         # development install from the repository
 ```
 
 ## Dependencies
 
-`pycryptodome`, `requests` (core); `tinytuya` (extra `local`, Zigbee tunnel). Python ≥ 3.12.
+`pycryptodome`, `requests` (core); `tinytuya` (extra `local`, Zigbee tunnel); `paho-mqtt` 1.6.1 or
+2.x (extra `mqtt`, imported only when a connection is opened). Python ≥ 3.11.
+
+## Changes
+
+- **0.3.0** — `gw_id` on `async_write_setting` (the head's gateway; it defaulted to the head
+  itself); distinct `deviceId` (`derive_distinct_device_id`, `CloudClient(distinct_device_id=…)`);
+  `mqtt_publish` and `mqtt_client` (extra `mqtt`); holiday, room, relay and unbind calls; active
+  setpoint and heating state in `decode`. No rename of the 0.2.0 public names.
+- **0.2.0** — public API renamed to English; first PyPI release.
 
 ## Disclaimer
 
