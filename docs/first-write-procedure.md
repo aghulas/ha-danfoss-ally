@@ -82,6 +82,14 @@ was the independent source.
 - **Restore**: toggle back to `V0`.
 - **What it decides**: if proven, DP 116 moves to `MQTT_WRITE_DPS` and an isolated head without a
   usable tunnel gets a window-detection write. The tunnel stays the first choice when available.
+- **To observe in passing — the confirmation fallback.** When the gateway's echo does not come
+  within 15 s, the write is now confirmed by one read of the head through the **per-device** cloud
+  route; it used the bulk list before. This also changed for DP 30, a path already proven, and the
+  2026-11-19 validation did not exercise it (that write was confirmed by the echo, in under a
+  second). During this trial, note for each write which source confirmed it (debug log line
+  "confirmed by echo" / "confirmed by cloud"). If a write is ever confirmed "by cloud", check that
+  the head really holds the value; if one fails as "not confirmed" while the head did apply it,
+  record how long the per-device route took to show the value.
 
 ## Returning to the released build
 

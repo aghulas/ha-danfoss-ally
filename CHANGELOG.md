@@ -89,6 +89,13 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   scope on purpose**, since the integration does not decode that category yet. The scope is now
   written down in the README. `zigbee2mqtt` mode is unchanged (heads only).
 
+### Library
+
+- **`pydanfoss-cloud` 0.3.1 prepared (not published).** Additive only: the candidate-DP gate of
+  the cloud-MQTT write path (`MQTT_CANDIDATE_DPS`, `mqtt_dp_open`, `supervised` argument of
+  `mqtt_write_value`) and the completeness indicators of the device list
+  (`CloudClient.device_list_complete` / `device_list_homes`).
+
 ### Notes
 
 - Experimental / unofficial path; it rides the app's Tuya auth. Enable only deliberately. The first
