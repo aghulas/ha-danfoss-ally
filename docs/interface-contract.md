@@ -397,8 +397,11 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   | 120 | Pause setpoint | **Candidate** | tenths of °C, 5–35 °C, 0.5 step. For now only sent with DP 27, in the same frame, when the new lower bound is above the pause setpoint (reading of the app capture, to confirm in the trial) |
 
   The bounds are `number` entities of an **isolated** head ("upper setpoint bound", "lower setpoint
-  bound"), present only while their DP is open on this path; a grouped head has no bound entity (no
-  proven path here).
+  bound"), present only while their DP is open on this path for that head — during a supervised
+  trial, on the designated trial head only. When the DP closes again (trial disarmed or moved to
+  another head, `enable_cloud_mqtt` off, head grouped), the entity is no longer provided **and its
+  registry entry is removed**, so nothing lingers as restored and unavailable. If the link merely
+  failed to start, the entry is kept. A grouped head has no bound entity (no proven path here).
 
   A candidate is implemented but not proven; it opens only for a supervised trial
   (docs/first-write-procedure.md), **on the one head designated in `cloud_mqtt_supervised_head`**,

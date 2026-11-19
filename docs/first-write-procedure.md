@@ -99,8 +99,9 @@ was the independent source.
 
 ### DP 18 — upper setpoint bound (candidate)
 
-- **Entity**: the head's "upper setpoint bound" number. It exists only while DP 18 is open (tick
-  `18` in `cloud_mqtt_supervised_dps`).
+- **Entity**: the test head's "upper setpoint bound" number. It exists only while DP 18 is open on
+  that head (the head chosen in `cloud_mqtt_supervised_head`, `18` ticked in
+  `cloud_mqtt_supervised_dps`), and is removed again when the trial is disarmed.
 - **Trial value**: `V0 − 0.5 °C` (or `V0 + 0.5 °C` if that stays within 20–35 °C), keeping it above
   the head's comfort setpoint. The integration refuses a bound that would exclude the comfort or
   setback setpoint. No thermal effect: the bound only limits what can be set.

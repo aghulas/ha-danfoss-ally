@@ -25,6 +25,7 @@ class _FakeClient:
 class _FakeCoord:
     def __init__(self, rooms=None, client=None):
         self.rooms = rooms or {}
+        self.data = {}  # no head: the isolated-head numbers are out of these tests' scope
         self.client = client
         self.last_update_success = True
         self.refreshed = False

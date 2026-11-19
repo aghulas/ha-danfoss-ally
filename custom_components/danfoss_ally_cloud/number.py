@@ -29,6 +29,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -48,7 +49,6 @@ from .const import (
     DATA_CLOUD_MQTT,
     DATA_COORDINATOR,
     DATA_MQTT_LINK,
-    DATA_MQTT_SUPERVISED_DPS,
     DOMAIN,
     DP_LOWER_TEMP,
     DP_PAUSE_SETPOINT,
@@ -61,7 +61,7 @@ from .const import (
 )
 from .coordinator import DanfossCoordinator
 from .entity import DanfossEntity
-from .mqtt_write import async_mqtt_write
+from .mqtt_write import async_mqtt_write, supervised_for
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -98,19 +98,48 @@ async def async_setup_entry(
         if room.pid in WRITE_VERIFIED_PRODUCTS:
             entities += [DanfossRoomSetpoint(coordinator, group_id, desc) for desc in SETPOINTS]
     # Isolated-head settings over cloud MQTT: only with the write option on, a link, and the DP
-    # open on that channel (proven, or under supervised trial).
+    # open on that channel FOR THAT HEAD (proven, or under supervised trial on the designated
+    # trial head). An entity whose DP is closed by configuration is not provided, and its registry
+    # entry is removed so it does not linger "restored, unavailable" after a trial is disarmed.
     link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
-    supervised: frozenset[int] = data.get(DATA_MQTT_SUPERVISED_DPS) or frozenset()
-    if data.get(DATA_CLOUD_MQTT) and link is not None:
-        for dev in coordinator.data.values():
-            if not (dev.is_head and write_allowed(dev)) or coordinator.group_of(dev.id):
-                continue
-            entities += [
-                DanfossHeadBound(coordinator, dev.id, desc, link, supervised)
-                for desc in HEAD_BOUNDS
-                if mqtt_dp_open(desc.dp, supervised)
-            ]
+    cloud_mqtt_on = bool(data.get(DATA_CLOUD_MQTT))
+    closed: list[str] = []
+    for dev in coordinator.data.values():
+        if not (dev.is_head and write_allowed(dev)):
+            continue
+        isolated = coordinator.group_of(dev.id) is None
+        supervised = supervised_for(data, dev.id)
+        for desc in HEAD_BOUNDS:
+            if not (cloud_mqtt_on and isolated and mqtt_dp_open(desc.dp, supervised)):
+                closed.append(f"{dev.id}_{desc.key}")
+            elif link is not None:
+                entities.append(DanfossHeadBound(coordinator, dev.id, desc, link, supervised))
+            # Open but no link (it failed to start): transient, the registry entry is kept.
+    remove_closed_head_numbers(hass, entry, closed)
     async_add_entities(entities)
+
+
+def remove_closed_head_numbers(
+    hass: HomeAssistant, entry: ConfigEntry, unique_ids: list[str]
+) -> None:
+    """Remove the registry entries of isolated-head numbers that the configuration no longer
+    provides: the cloud-MQTT option is off, their DP is not open for that head (a supervised trial
+    was disarmed, or moved to another head), or the head joined a room.
+
+    Exact unique ids of heads of the current fleet only, and only entries of this config entry: a
+    room's numbers (``<group id>_comfort_setpoint``) are never touched. An entity that is merely
+    not created because the link failed to start is not in the list, so a transient failure costs
+    no customisation."""
+    if not unique_ids:
+        return
+    registry = er.async_get(hass)
+    for unique_id in unique_ids:
+        entity_id = registry.async_get_entity_id("number", DOMAIN, unique_id)
+        if entity_id is None:
+            continue
+        registered = registry.async_get(entity_id)
+        if registered is not None and registered.config_entry_id == entry.entry_id:
+            registry.async_remove(entity_id)
 
 
 class DanfossRoomSetpoint(CoordinatorEntity[DanfossCoordinator], NumberEntity):

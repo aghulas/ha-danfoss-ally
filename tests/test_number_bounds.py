@@ -3,6 +3,8 @@
 Fake coordinator and link, synthetic data, no network.
 """
 
+from unittest.mock import patch
+
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
@@ -12,6 +14,7 @@ from custom_components.danfoss_ally_cloud.const import (
     DATA_COORDINATOR,
     DATA_MQTT_LINK,
     DATA_MQTT_SUPERVISED_DPS,
+    DATA_MQTT_SUPERVISED_HEAD,
     DOMAIN,
 )
 from custom_components.danfoss_ally_cloud.number import HEAD_BOUNDS, DanfossHeadBound
@@ -187,7 +190,21 @@ class _SetupCoord(_FakeCloudCoord):
     rooms: dict = {}
 
 
-async def _setup(devices, *, cloud_mqtt=True, link=True, supervised=TRIAL, groups=None):
+REMOVED: list[str] = []  # unique ids the last platform setup flagged as closed
+
+
+async def _setup(
+    devices,
+    *,
+    cloud_mqtt=True,
+    link=True,
+    supervised=TRIAL,
+    groups=None,
+    trial_head="iso",
+    kind=DanfossHeadBound,
+):
+    """Run the platform setup on fakes. ``trial_head``: the head the supervised trial is confined
+    to. The registry cleanup is recorded in ``REMOVED`` instead of touching a registry."""
     coord = _SetupCoord({d.id: d for d in devices}, client=_FakeClient(), groups=groups)
     added = []
     data = {
@@ -195,15 +212,30 @@ async def _setup(devices, *, cloud_mqtt=True, link=True, supervised=TRIAL, group
         DATA_CLOUD_MQTT: cloud_mqtt,
         DATA_MQTT_LINK: _FakeMqttLink() if link else None,
         DATA_MQTT_SUPERVISED_DPS: supervised,
+        DATA_MQTT_SUPERVISED_HEAD: trial_head,
     }
-    await number.async_setup_entry(_Hass(data), _Entry(), added.extend)
-    return [e for e in added if isinstance(e, DanfossHeadBound)]
+    REMOVED.clear()
+    with patch.object(
+        number, "remove_closed_head_numbers", lambda _hass, _entry, uids: REMOVED.extend(uids)
+    ):
+        await number.async_setup_entry(_Hass(data), _Entry(), added.extend)
+    return [e for e in added if isinstance(e, kind)]
 
 
 async def test_no_bound_entity_by_default():
-    assert await _setup([_head()], supervised=frozenset()) == []  # candidates are closed
-    assert await _setup([_head()], cloud_mqtt=False) == []
-    assert await _setup([_head()], link=False) == []
+    assert await _setup([_head(dev_id="iso")], supervised=frozenset()) == []  # candidates closed
+    assert REMOVED == ["iso_upper_bound", "iso_lower_bound"]
+    assert await _setup([_head(dev_id="iso")], cloud_mqtt=False) == []
+    assert REMOVED == ["iso_upper_bound", "iso_lower_bound"]
+    assert await _setup([_head(dev_id="iso")], trial_head=None) == []  # no trial head designated
+    assert REMOVED == ["iso_upper_bound", "iso_lower_bound"]
+
+
+async def test_open_dp_without_a_link_creates_nothing_and_removes_nothing():
+    """The link failed to start: transient. The entities are not created this run, and their
+    registry entries are kept (no customisation lost)."""
+    assert await _setup([_head(dev_id="iso")], link=False) == []
+    assert REMOVED == []
 
 
 async def test_bound_entities_only_for_isolated_verified_heads_and_open_dps():
@@ -212,5 +244,44 @@ async def test_bound_entities_only_for_isolated_verified_heads_and_open_dps():
     other_model = _head(dev_id="other", product_id="unverified")
     ents = await _setup([isolated, grouped, other_model], groups={"grp": "g1"})
     assert sorted(e.unique_id for e in ents) == ["iso_lower_bound", "iso_upper_bound"]
+    # The grouped head's bounds are closed; the unverified model is never considered at all.
+    assert REMOVED == ["grp_upper_bound", "grp_lower_bound"]
     only_upper = await _setup([isolated], supervised=frozenset({18}))
     assert [e.unique_id for e in only_upper] == ["iso_upper_bound"]
+    assert REMOVED == ["iso_lower_bound"]
+
+
+async def test_trial_is_confined_to_the_designated_head():
+    """Two isolated heads, a trial armed on one: only that head gets bound entities; the other
+    head's are not provided (and any leftover registry entry is flagged for removal)."""
+    ents = await _setup([_head(dev_id="iso"), _head(dev_id="iso2")], trial_head="iso")
+    assert sorted(e.unique_id for e in ents) == ["iso_lower_bound", "iso_upper_bound"]
+    assert REMOVED == ["iso2_upper_bound", "iso2_lower_bound"]
+    assert all(e.extra_state_attributes.get("write_trial") is True for e in ents)
+
+
+# --- registry: a disarmed trial leaves no restored, unavailable entity behind ---------------------
+
+
+async def test_disarming_the_trial_removes_the_bound_entities_from_the_registry(hass):
+    from homeassistant.helpers import entity_registry as er
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from .common import ENTRY_DATA
+
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, unique_id="compte@exemple.fr")
+    entry.add_to_hass(hass)
+    other = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, unique_id="autre@exemple.fr")
+    other.add_to_hass(hass)
+    reg = er.async_get(hass)
+    bound = reg.async_get_or_create("number", DOMAIN, "iso_upper_bound", config_entry=entry)
+    room = reg.async_get_or_create("number", DOMAIN, "77_comfort_setpoint", config_entry=entry)
+    foreign = reg.async_get_or_create("number", DOMAIN, "iso_lower_bound", config_entry=other)
+
+    number.remove_closed_head_numbers(
+        hass, entry, ["iso_upper_bound", "iso_lower_bound", "never_registered"]
+    )
+
+    assert reg.async_get(bound.entity_id) is None  # the disarmed trial's entity is gone
+    assert reg.async_get(room.entity_id) is not None  # a room's number is never touched
+    assert reg.async_get(foreign.entity_id) is not None  # nor another config entry's entity
