@@ -224,3 +224,91 @@ def test_read_preheat_unknown_gateway():
     mgr = LocalTunnelManager(_gw(), open_link=lambda g: None)
     with pytest.raises(tunnel.LocalUnavailable):
         mgr.read_preheat(Head("devX", "nodeX", "gw-inconnue"))
+
+
+class _GatedLink(_ReadFakeLink):
+    """A link whose answers are released by the test, head by head (a slow gateway)."""
+
+    def __init__(self, mode_0025: int, gates: dict) -> None:
+        super().__init__("", mode_0025)
+        self._gates = gates
+        self._current = ""
+
+    def send(self, dev_id, node_id, frame):
+        self._current = node_id
+
+    def receive(self):
+        if not self._gates[self._current].wait(0.01):
+            return None
+        return (self._current, {"199": self._resp})
+
+
+def test_survey_preheat_reports_each_head_as_read():
+    import threading
+
+    gates = {"node1": threading.Event(), "node2": threading.Event()}
+    link = _GatedLink(0x03, gates)
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: link)
+    seen: list = []
+    first = threading.Event()
+
+    def on_result(dev_id, value):
+        seen.append((dev_id, value))
+        first.set()
+
+    out: dict = {}
+    heads = [Head("dev1", "node1", "gw1"), Head("dev2", "node2", "gw1")]
+    t = threading.Thread(target=lambda: out.update(mgr.survey_preheat(heads, on_result)))
+    t.start()
+    gates["node1"].set()
+    assert first.wait(3)
+    assert seen == [("dev1", True)] and t.is_alive()  # known before the survey is over
+    gates["node2"].set()
+    t.join(3)
+    assert out == {"dev1": True, "dev2": True}
+    assert seen == [("dev1", True), ("dev2", True)]
+    assert link.closed is True
+
+
+def test_survey_preheat_stops_on_request():
+    import threading
+    import time
+
+    gates = {"node1": threading.Event(), "node2": threading.Event()}
+    link = _GatedLink(0x03, gates)
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: link)
+    stop = threading.Event()
+    seen: list = []
+    out: dict = {}
+    heads = [Head("dev1", "node1", "gw1"), Head("dev2", "node2", "gw1")]
+    t = threading.Thread(target=lambda: out.update(mgr.survey_preheat(heads, seen.append, stop)))
+    t.start()
+    time.sleep(0.05)
+    t0 = time.monotonic()
+    stop.set()
+    t.join(3)
+    assert not t.is_alive() and time.monotonic() - t0 < 2  # returns at once, not after the heads
+    assert out == {} and seen == []
+    gates["node1"].set()  # the worker finishes the head it was on, reports nothing, reads no other
+    deadline = time.monotonic() + 3
+    while not link.closed and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert link.closed is True and out == {} and seen == []
+
+
+def test_survey_preheat_listener_error_does_not_break_the_survey():
+    def boom(dev_id, value):
+        raise RuntimeError("listener ko")
+
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: _ReadFakeLink("node1", 0x03))
+    assert mgr.survey_preheat([Head("dev1", "node1", "gw1")], boom) == {"dev1": True}
+
+
+def test_survey_preheat_unreachable_gateway_reports_none():
+    def boom(g):
+        raise RuntimeError("unreachable")
+
+    seen: list = []
+    mgr = LocalTunnelManager(_gw(), open_link=boom)
+    res = mgr.survey_preheat([Head("dev1", "node1", "gw1")], lambda d, v: seen.append((d, v)))
+    assert res == {"dev1": None} and seen == [("dev1", None)]

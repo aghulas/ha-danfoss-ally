@@ -190,8 +190,13 @@ async def _async_setup_local(
         return None
     manager = LocalTunnelManager(gateways)
     local = DanfossLocalCoordinator(hass, manager, coordinator, DEFAULT_LOCAL_SCAN_INTERVAL)
-    # Non-blocking first survey: an unreachable gateway must not prevent startup.
-    await local.async_refresh()
+    # First survey in the BACKGROUND, tied to the entry (cancelled on unload and on Home Assistant
+    # stop): it reads the heads one by one and can take minutes on a large site, so the entry must
+    # not wait for it. Until a head has been read its preheat switch is unavailable, then each one
+    # becomes available as soon as it is read.
+    entry.async_create_background_task(
+        hass, local.async_refresh(), name=f"{DOMAIN} first local survey"
+    )
     return local
 
 

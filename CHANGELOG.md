@@ -49,6 +49,29 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
 - No secret or real device identifier in logs or diagnostics (the MQTT client id is kept out of the
   log thread names; diagnostics redact ids).
 
+## Unreleased — Local tunnel: non-blocking start
+
+### Fixed
+
+- **The entry no longer waits for the first local survey (`enable_local`).** Setup awaited the
+  first preheat survey, which reads the heads one by one through the gateways; every start or reload
+  of the integration was held for up to 40 s per gateway, and the heads not read by then were
+  written into the result afterwards without the entities being told. The first survey now runs as
+  a background task tied to the entry (cancelled on unload and on Home Assistant stop).
+- **Preheat switches come up head by head.** Until a head has been read locally its preheat switch
+  is unavailable (never a default on/off); it becomes available as soon as *that* head is read,
+  without waiting for the rest of the site and without a restart. The same holds for each periodic
+  survey: a head that stops answering goes unavailable when it is read, not at the end.
+- **A survey is bounded and never doubled.** Only one survey runs at a time (a survey longer than
+  the scan interval no longer overlaps the next one), it is stopped after 40 s + 30 s per head of
+  the busiest gateway, and an unload/reload/stop aborts it after the head being read (a tunnel
+  request cannot be interrupted, 24 s at most) instead of leaving threads on the gateways.
+- **A preheat write made during a survey is not overwritten** by the value the survey had read
+  before the write: the head's own read-back wins until the next survey.
+
+Not validated on real hardware yet (unit tests on synthetic data only): load time before/after and
+the switches coming up progressively are to be measured on a real site.
+
 ## Unreleased — Home Assistant 2026 deprecations
 
 No functional change. Removes the deprecation warnings HA 2026.x logs for this integration, ahead of

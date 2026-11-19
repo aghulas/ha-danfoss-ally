@@ -5,6 +5,7 @@ Couvre les branches de __init__ (local/MQTT), la branche locale de switch.async_
 no real broker.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import homeassistant.components.mqtt as mqtt_mod
@@ -23,7 +24,7 @@ from custom_components.danfoss_ally_cloud.const import (
 )
 
 from .common import ENTRY_DATA, FakeCloudClient, head
-from .test_coordinator_local import FakeManager
+from .test_coordinator_local import FakeManager, GatedManager, _wait
 
 _GW = {"gw-1": GatewayKey("gw-1", "GW", "cle-synth", ip="10.0.0.1")}
 
@@ -36,7 +37,9 @@ def mqtt_double(monkeypatch):
     return publie
 
 
-async def _setup(hass: HomeAssistant, fake: FakeCloudClient, manager: FakeManager):
+async def _setup(
+    hass: HomeAssistant, fake: FakeCloudClient, manager: FakeManager, wait_survey: bool = True
+):
     entry = MockConfigEntry(
         domain=DOMAIN,
         data=ENTRY_DATA,
@@ -53,7 +56,8 @@ async def _setup(hass: HomeAssistant, fake: FakeCloudClient, manager: FakeManage
         patch("custom_components.danfoss_ally_cloud.LocalTunnelManager", return_value=manager),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
+        # The first local survey is a background task: wait for it explicitly.
+        await hass.async_block_till_done(wait_background_tasks=wait_survey)
     return entry
 
 
@@ -198,3 +202,83 @@ async def test_cloud_mqtt_live_link_setup_routes_isolated_switch(hass: HomeAssis
     assert c.loop_stopped and c.disconnected  # link closed on unload
     # loop_stop() joins the paho thread: it must run in the executor, not on the event loop.
     assert c.loop_stop_thread is not None and c.loop_stop_thread is not loop_thread
+
+
+_PREHEAT_1 = "switch.salon_pre_heating"
+_PREHEAT_2 = "switch.bureau_pre_heating"
+
+
+def _two_heads() -> FakeCloudClient:
+    return FakeCloudClient(devices=[head(), head("dev-2", name="Bureau", node_id="node-2")])
+
+
+async def test_setup_does_not_wait_for_the_local_survey(hass: HomeAssistant, mqtt_double):
+    """Regression: setup awaited the first local survey, which reads every head one by one (minutes
+    on a large site). With a survey that never ends on its own, the entry must still load, and the
+    preheat switches must be UNAVAILABLE (neither on nor off) until their head has been read."""
+    manager = GatedManager(survey={"dev-1": True, "dev-2": False})
+    async with asyncio.timeout(3):  # the gated survey would hold a blocking setup much longer
+        entry = await _setup(hass, _two_heads(), manager, wait_survey=False)
+    await _wait(hass, manager.started)
+
+    assert hass.data[DOMAIN][entry.entry_id][DATA_LOCAL] is not None
+    assert not manager.finished.is_set()  # loaded while the survey is still running
+    assert hass.states.get(_PREHEAT_1).state == "unavailable"
+    assert hass.states.get(_PREHEAT_2).state == "unavailable"
+
+    # Each switch becomes available when ITS head is read, without waiting for the others.
+    manager.gate("dev-1").set()
+    await _wait(hass, manager.was_read("dev-1"))
+    assert hass.states.get(_PREHEAT_1).state == "on"
+    assert hass.states.get(_PREHEAT_2).state == "unavailable"
+
+    manager.gate("dev-2").set()
+    await _wait(hass, manager.finished)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(_PREHEAT_1).state == "on"
+    assert hass.states.get(_PREHEAT_2).state == "off"
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_unload_during_the_first_survey(hass: HomeAssistant, mqtt_double, caplog):
+    """Unloading (or reloading) while the first survey runs: the survey is aborted, no task or
+    thread is left behind and nothing is logged as an error."""
+    manager = GatedManager()
+    entry = await _setup(hass, _two_heads(), manager, wait_survey=False)
+    await _wait(hass, manager.started)
+    assert not manager.finished.is_set()
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    await _wait(hass, manager.finished)
+    assert manager.aborted is True and manager.calls == 1
+    assert hass.states.get(_PREHEAT_1).state == "unavailable"
+    assert not [r for r in caplog.records if r.levelname in ("ERROR", "CRITICAL")]
+
+
+async def test_reload_during_the_first_survey_starts_a_fresh_one(hass: HomeAssistant, mqtt_double):
+    first = GatedManager()
+    entry = await _setup(hass, _two_heads(), first, wait_survey=False)
+    await _wait(hass, first.started)
+
+    second = GatedManager(survey={"dev-1": True, "dev-2": True})
+    second.gate("dev-1").set()
+    second.gate("dev-2").set()
+    with (
+        patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=_two_heads()),
+        patch(
+            "custom_components.danfoss_ally_cloud.async_fetch_gateway_keys",
+            AsyncMock(return_value=_GW),
+        ),
+        patch("custom_components.danfoss_ally_cloud.LocalTunnelManager", return_value=second),
+    ):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    await _wait(hass, first.finished)
+    assert first.aborted is True  # the old survey did not survive the reload
+    assert second.calls == 1 and hass.states.get(_PREHEAT_2).state == "on"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
