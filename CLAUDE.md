@@ -16,7 +16,7 @@ gateway-key fetching and MQTT publishing of the devices.
 ## Guiding principle: three channels, one router
 
 A head is reachable through three channels: **cloud HTTP** (path 1a), **Tuya cloud MQTT** (the app's
-broker; validated on real hardware, opt-in, not on `main` yet) and the **local tunnel**. Each
+broker; validated on real hardware, opt-in via `enable_cloud_mqtt`) and the **local tunnel**. Each
 operation goes to the channel **proven for it on real hardware**; with no proven channel up, the
 entity is unavailable. Routing tables and the rules for adding a route: `docs/architecture.md`.
 
@@ -44,8 +44,8 @@ fetched by the integration itself and serve both the local tunnel and the cloud-
 
 - `custom_components/danfoss_ally_cloud/` — the integration.
   - `api/` — Danfoss access: `client.py` (cloud API), `keys.py` (gateway keys), `local/tunnel.py`
-    (Zigbee DP 198→199). To extract eventually into a library shared with the MCP connector
-    (`manifest.json` → requirements).
+    (Zigbee DP 198→199), `mqtt_publish.py` + `mqtt_client.py` (Tuya cloud MQTT). To extract
+    eventually into a library shared with the MCP connector (`manifest.json` → requirements).
   - `coordinator.py` — conservative cloud polling + local overlay.
   - platforms: `climate`, `sensor`, `binary_sensor`, `number`, `switch`.
   - `mqtt_publisher.py` — modes `discovery` / `zigbee2mqtt`, source `cloud` / `local`.

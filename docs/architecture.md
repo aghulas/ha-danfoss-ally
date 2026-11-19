@@ -14,10 +14,11 @@ optimistic state.
 | **Tuya cloud MQTT** | The app's MQTT broker, protocol 2.3 frames keyed by the gateway localKey | DP publish to an **isolated** head, applied in seconds and confirmed by the gateway's echo (child lock, 2026-11-19). Inbound DP reports are pushed and decode. | One connection per session. Proven for one DP so far; every other DP needs its own supervised write. Inbound coverage (which heads, which DPs, how often) not measured yet. |
 | **Local tunnel** | LAN, Zigbee tunnel DP 198→199 through the gateway | The head's own truth: real weekly schedule, preheat (attribute 0x0025), setpoint override (DP 171), window detection, valve exercise | Slow (seconds per head, surveyed on a long period), a head may not answer for a while, needs LAN access to the gateways |
 
-Status of the cloud-MQTT channel: validated on real hardware, **not on `main` yet**. Its write path
-is proposed behind an option that is off by default; the wire format is specified in
-`docs/cloud-mqtt-publish.md` on that branch. Until it lands, an isolated head's child lock is
-unavailable.
+Status of the cloud-MQTT channel: validated on real hardware and on `main`, behind the option
+`enable_cloud_mqtt`, **off by default**. Its write path carries the child lock only
+(`api.writes.MQTT_WRITE_DPS`); a diagnostic entity reports the link state. Wire format:
+`docs/cloud-mqtt-publish.md`; procedure for a first write of a new DP:
+`docs/first-write-procedure.md`. With the option off, an isolated head's child lock is unavailable.
 
 "MQTT" names two unrelated things in this project. **Tuya cloud MQTT** is a channel *to the heads*
 (above). **MQTT publishing** (`mqtt_publisher.py`) sends the integration's state *to the user's own
@@ -63,7 +64,7 @@ frames, so neither channel asks anything more of the user.
 
 | Operation | Grouped head (in a room) | Isolated head |
 |---|---|---|
-| Comfort / setback setpoint | Cloud HTTP: room publish, then rewrite the room schedule (R3) | No path on `main`; candidate for cloud MQTT |
+| Comfort / setback setpoint | Cloud HTTP: room publish, then rewrite the room schedule (R3) | No path yet; candidate for cloud MQTT |
 | Weekly schedule | Cloud HTTP | Cloud HTTP |
 | Child lock | Cloud HTTP: room publish (applies to **every** head of the room) | Cloud MQTT when enabled and connected; otherwise unavailable |
 | Window detection | Cloud HTTP: room publish (whole room) | Local tunnel; otherwise unavailable |
@@ -104,7 +105,10 @@ A setting switch states its route in its attributes (`write_path`, `write_scope`
 - `api/local/tunnel.py` — Zigbee tunnel DP 198→199 (tinytuya): real schedule, attribute 0x0025, real
   attributes.
 - `api/writes.py` — value validation and the verified-model guard-rail before any write.
-- `switch.py` — picks the path of a setting write (`room`, `local`, `none`) per head and setting.
+- `api/mqtt_publish.py`, `api/mqtt_client.py` — Tuya cloud MQTT: frame codec and credential
+  derivation; the link (one connection per entry, own session, reconnect, write confirmation).
+- `switch.py` — picks the path of a setting write (`room`, `cloud_mqtt`, `local`, `none`) per head
+  and setting.
 - `coordinator.py` — conservative cloud polling, per-device overlay for recently commanded heads,
   overlay of the local truths.
 - Platforms: `climate` (setpoint, presets), `sensor` (battery, valve, heat request, fault code),

@@ -99,7 +99,7 @@ off by default (extra reads on the user's account).
 Background and routing: `docs/architecture.md`. The app writes an isolated head's settings with a DP
 publish over Tuya cloud MQTT, the only path found that applies them (contract §4.2).
 
-1. **Write, child lock only.** Option off by default; a link-state diagnostic entity; confirmation
+1. **Write, child lock only — shipped on `main`.** Option off by default; a link-state diagnostic entity; confirmation
    by the gateway's echo or a cloud re-read, never optimistic. Validated on real hardware
    2026-11-19 (session coexists with the phone app; write applied on the head).
 2. **More DPs, one at a time**, each after its own supervised write read back from an independent
