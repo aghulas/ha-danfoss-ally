@@ -1,48 +1,42 @@
 # Changelog
 
-## Unreleased — Active setpoint clarity on climates (follow-up to R-1)
+## 1.1.0 — Real-hardware validation fixes (R-1, R-3, W-3), relays per building, gated unbind
 
-### Changed
+Minor release built from the real-hardware validation of 2026-11-18/19 on the school install (about
+99 heads, two homes): the integration was checked for coherence against the official Danfoss app and
+the MQTT it publishes. It fixes the active setpoint and heating state (R-1), adds an opt-in
+post-command refresh so writes show up in good time (R-3), attaches each boiler relay to its own
+building, and routes head settings only through proven write paths (W-3). Head unbind ships
+**gated** (off by default, not yet validated through HA). One climate attribute is deprecated (see
+below).
 
-- **Isolated-head climate now shows its active setpoint.** `DanfossHeadClimate` (heads outside a
-  Danfoss room) already computed the active setpoint (DP 171 `OccupiedSetpoint`, the value the
-  Danfoss app shows) but declared no features, so Home Assistant never published it as the
-  climate's `temperature`. It now declares `TARGET_TEMPERATURE` so the target is visible, and a
-  setpoint change is **refused** with a clear error (still no proven path-1a write for a head
-  outside a room — the entity stays read-only, it does not pretend to write).
-- **New `active_setpoint` state attribute** on room and head climates: the setpoint in force.
+### Fixed
 
-### Deprecated
-
-- **`setpoints.setpoint` climate attribute.** It carried DP 16 (`temp_set`), which reports the
-  **comfort** setpoint whatever the schedule slot — not the active setpoint, despite its name. The
-  value is now published as `setpoints.temp_set`; `setpoints.setpoint` stays as a deprecated alias
-  (same value) and will be removed in a future release. **Automations** reading
-  `state_attr(..., 'setpoints').setpoint` should switch to `active_setpoint` (the setpoint in force)
-  or `setpoints.comfort` / `setpoints.temp_set` (the comfort setpoint), depending on intent.
-  Internally, `DanfossDevice.setpoints` uses the key `temp_set` (no longer `setpoint`).
-
-## Unreleased — Unbind widened to sub-devices (sensors, relays), GATED
-
-### Changed
-
-- **`disconnect_head` now unbinds any sub-device, not just heads** (mirrors the MCP connector
-  PR #7). The target may be a head, sensor, relay or other sub-device; a **gateway is refused**
-  (`gateway_target`) — unbinding it would drop all its heads at once. Unbind is a Tuya-generic call
-  keyed on the device category, so there is **no verified-product gate** for it (that head-only
-  check still guards the local-tunnel writes). The service **name `disconnect_head` is kept** for
-  backward compatibility (it shipped head-only) and now documents the wider scope. The double-gate
-  is unchanged: opt-in `enable_head_unbind` (OFF), admin (`allow_internal=False`), explicit
-  `confirm`. Response now carries the device `category`. Error codes: target-not-found is now
-  `unknown_target` (was `unknown_head`); a gateway target raises the new `gateway_target`.
-  `category_of` treats any `wg*` Tuya category as a gateway (defensive). Real-hardware validation
-  through HA remains **GATED** and not performed.
-
-
-## Unreleased — Head unbind (disconnect), GATED
+- **Active setpoint and heating state (R-1, #65).** On a schedule slot other than comfort, the
+  integration published the **comfort** setpoint (e.g. 21 °C instead of 14 °C in setback) as the
+  climate target and in the MQTT `setpoint`, and an `hvac_action` of `heating` while the head was
+  not heating. The cloud payload already carried the right values: the active setpoint is now read
+  from **DP 171 `OccupiedSetpoint`** (falling back to the current mode's setpoint, then DP 16), and
+  the heating state from **DP 3 `work_state`** (`Heat` / `NoHeat`, falling back to the valve
+  opening). Used by the room aggregation, the head climate `hvac_action` and the zigbee2mqtt
+  `running_state`. Validated on real hardware after deployment (MQTT `setpoint` = active setpoint,
+  `hvac_action` = `idle` on non-heating heads).
+- **Boiler relays shown under the wrong building (#68).** On a multi-home account every relay was
+  listed under the first home: the relay → room link carries Tuya *room* ids, which the home lookup
+  (schedule *groups*) never matched. A relay now goes to the home holding the majority of its linked
+  rooms, matched by normalised name. An **offline** relay now shows *Offline* instead of a stale
+  *On* and no longer counts in *Relays on*; the per-relay count is relabelled *N linked rooms* (it
+  was shown as "calling for heat"). Validated on real hardware.
 
 ### Added
 
+- **Post-command refresh (R-3, #66) — opt-in, off by default.** The bulk device list lags for
+  several minutes after a command, so a write's result stayed invisible in HA and MQTT. With the new
+  option **Post-command refresh** (`post_command_refresh`), heads just commanded are read through a
+  per-device route (`smartlife.m.device.get`) for 300 s, at most 12 reads per poll, then return to
+  the bulk poll. Validated on real hardware: a setpoint write shows up in HA and MQTT in about
+  2 minutes, the weekly schedule left intact.
+- **New `active_setpoint` state attribute** on room and head climates: the setpoint in force.
 - **Head unbind ("disconnect") — GATED, pending real-hardware validation through HA.** New service
   `danfoss_ally_cloud.disconnect_head` (and `CloudClient.async_device_reset`) unbinds a single head
   from the Zigbee network — the app's "disconnect". Cloud call `thing.m.device.reset` v3.0, sent
@@ -65,6 +59,58 @@
   - **No real unbind has been performed through this integration.** Validating a real disconnect via
     HA needs the integrator present, a real head, and the Danfoss app signed out of path 1a (shared
     `deviceId` session, unless `distinct_device_id` is on).
+
+### Changed
+
+- **Head settings only through proven write paths (W-3, #69).** Validation showed that
+  `tuya.m.custom.wkf.settings.change` is accepted but **not applied** for a head outside a room. The
+  child-lock and window-detection switches no longer use it:
+  - **head in a room** → written on the **room** (`s.m.dev.group.dp.publish`, proven). ⚠ This
+    applies the setting to **every head of the room**; the switch exposes it through its
+    `write_path`, `write_scope` and `room_head_count` attributes;
+  - **isolated head, window detection** → **local tunnel** when `enable_local` is on and the head
+    answered the last local survey (validated, W-4);
+  - **isolated head otherwise, and always for the child lock** → the switch is **unavailable**
+    rather than pretending to write. Attach the head to a room to make it writable.
+  The Danfoss app writes isolated-head settings over Tuya cloud MQTT; that path is not implemented
+  (see `docs/interface-contract.md` §4.2). *Not yet validated on real hardware: the subject of the
+  1.1.0 release candidate.*
+- **Isolated-head climate now shows its active setpoint.** `DanfossHeadClimate` (heads outside a
+  Danfoss room) already computed the active setpoint (DP 171 `OccupiedSetpoint`, the value the
+  Danfoss app shows) but declared no features, so Home Assistant never published it as the
+  climate's `temperature`. It now declares `TARGET_TEMPERATURE` so the target is visible, and a
+  setpoint change is **refused** with a clear error (still no proven path-1a write for a head
+  outside a room — the entity stays read-only, it does not pretend to write).
+- **`disconnect_head` now unbinds any sub-device, not just heads** (mirrors the MCP connector
+  PR #7). The target may be a head, sensor, relay or other sub-device; a **gateway is refused**
+  (`gateway_target`) — unbinding it would drop all its heads at once. Unbind is a Tuya-generic call
+  keyed on the device category, so there is **no verified-product gate** for it (that head-only
+  check still guards the local-tunnel writes). The service **name `disconnect_head` is kept** for
+  backward compatibility (it shipped head-only) and now documents the wider scope. The double-gate
+  is unchanged: opt-in `enable_head_unbind` (OFF), admin (`allow_internal=False`), explicit
+  `confirm`. Response now carries the device `category`. Error codes: target-not-found is now
+  `unknown_target` (was `unknown_head`); a gateway target raises the new `gateway_target`.
+  `category_of` treats any `wg*` Tuya category as a gateway (defensive). Real-hardware validation
+  through HA remains **GATED** and not performed.
+
+### Deprecated
+
+- **`setpoints.setpoint` climate attribute.** It carried DP 16 (`temp_set`), which reports the
+  **comfort** setpoint whatever the schedule slot — not the active setpoint, despite its name. The
+  value is now published as `setpoints.temp_set`; `setpoints.setpoint` stays as a deprecated alias
+  (same value) and will be removed in a future release. **Automations** reading
+  `state_attr(..., 'setpoints').setpoint` should switch to `active_setpoint` (the setpoint in force)
+  or `setpoints.comfort` / `setpoints.temp_set` (the comfort setpoint), depending on intent.
+  Internally, `DanfossDevice.setpoints` uses the key `temp_set` (no longer `setpoint`).
+
+### Validation status
+
+Validated on real hardware (2026-11-18/19): R-1, R-2 (open-window detection), R-3, setpoint writes
+(comfort, setback, override and back to schedule, weekly schedule intact), window detection through
+the local tunnel, MQTT availability following `online`, preheat read on the morning curves, relays
+per building. Still **gated** and not validated through HA: head unbind (`enable_head_unbind`) and
+vacation writes (`enable_vacation_write`). Pending for the final 1.1.0: the W-3 routing above, and
+the preheat **write** trial.
 
 
 ## 1.0.1 — Frontend card bundle version fix
