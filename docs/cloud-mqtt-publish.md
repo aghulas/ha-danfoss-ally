@@ -5,12 +5,13 @@ tests `tests/test_mqtt_publish.py`, synthetic data only). **Nothing is sent**: n
 no write to a head. A real publish needs Rémi's explicit go-ahead (see §6). Draft PR #71.
 
 Progress 2026-11-19 (research, off the 1.1.0 critical path): §6.1 done (branch pushed, draft PR
-#71); **§6.2 DONE — the broker password is reverse-engineered and now derived in pure Python**
-(cmd 2 = `md5hex(md5hex(sign_key) + ecode)`, password = `[8:24]`; see §5.1); §6.3 offline
-frame-check ready; §6.4 read-only connect script prepared with the real password, not run (needs
-Rémi). The scripts that touch secrets live **outside this repo**, in `~/dev/danfoss-ally-signing-re/`
-(`frida/capture_cmd2.js` + `frida/run_cmd2.py`, `tools/verify_mqtt_frame.py`,
-`tools/mqtt_read_only.py`).
+#71); **§6.2 DONE — broker password reverse-engineered, pure Python** (cmd 2 =
+`md5hex(md5hex(sign_key) + ecode)`, password = `[8:24]`; see §5.1); **§6.3 DONE — the decoder is
+validated on 6/6 REAL inbound frames** captured live from the gateways (§6 step 2); §6.4
+read-only connect script ready, not run (still needs a fresh session + partnerIdentity/uid — the
+captured session is expired and the config hook missed them). The scripts that touch secrets live
+**outside this repo**, in `~/dev/danfoss-ally-signing-re/` (`frida/capture_cmd2.js`,
+`frida/capture_mqtt.js` + their runners, `tools/verify_mqtt_frame.py`, `tools/mqtt_read_only.py`).
 
 ## 1. Why
 
@@ -133,16 +134,22 @@ diagnostics or the repo. `mqtt_publish.py` never puts them in a repr or an error
 ## 6. Remaining steps (in order)
 
 1. **Password (cmd 2)** — ✅ DONE (2026-11-19, see §5.1): `md5hex(md5hex(sign_key)+ecode)[8:24]`.
-2. **Frame check against the capture**: the 2026-11-19 publishes were not saved as raw bytes. In
-   the next capture, dump the MQTT payload (base64) and check locally with
-   `~/dev/danfoss-ally-signing-re/tools/verify_mqtt_frame.py` (key read from the secrets file,
-   outside the repo; self-tested on a synthetic frame). Expected:
-   `{"data":{"cid":…,"ctype":0,"dps":{"30":…}},"protocol":5,"t":…}`.
+2. **Frame check against a real capture** — ✅ DONE (2026-11-19). `frida/capture_mqtt.js` hooked the
+   inbound 2.3 decoder (`qbpppdb.bdpdqbp(String, byte[], String)`) and captured **6 real frames** off
+   the live gateway topics (read-only, no head write; sizes 120/123/144 B). Decoded offline with the
+   codec's layout (gateway localKeys from the earlier TSV; the right key is the one whose GCM tag
+   verifies): **6/6 decrypt + authenticate**, each `{"data":{"cid":…,"dps":{…}},"protocol":4,…}`
+   (protocol **4** = inbound DP report; the outbound command path is 5 with an added `ctype`). This
+   proves the whole shared machinery — header-as-AAD, AES-GCM, gateway localKey, nonce‖ct‖tag layout,
+   and the `{cid, dps}` sub-device structure — on real bytes. Frames/keys stayed in the ignored
+   `captures/` dir, never in the repo.
 3. **Connect only** (read): TLS connect with the derived credentials, subscribe
-   `smart/mb/in/<gw>` and the user topic, decode inbound frames (DP reports). No publish. Validates
-   creds + decoder for real without touching a head. Script ready (not run):
-   `~/dev/danfoss-ally-signing-re/tools/mqtt_read_only.py` (0 `publish()` calls by design; needs the
-   §5 password and a distinct deviceId).
+   `smart/mb/in/<gw>` and the user topic, decode inbound frames (DP reports). No publish. Script ready
+   (not run): `~/dev/danfoss-ally-signing-re/tools/mqtt_read_only.py` (0 `publish()` calls by design).
+   Still needs a **fresh session + partnerIdentity + uid**: the captured session is expired, and the
+   `MqttConnectConfig` getter hook fired after connect so it missed them. Lower priority now that the
+   decoder is proven on real frames; mainly validates that the derived credentials are accepted by
+   the live broker.
 4. **First write** (Rémi's go-ahead, on site): one reversible DP (e.g. 30 child lock on a test head),
    check in the app and on the head, then revert. Then extend per DP, only on
    `WRITE_VERIFIED_MODELS`, with value validation before send (CLAUDE.md write safety).
