@@ -13,6 +13,7 @@ from custom_components.danfoss_ally_cloud.number import (
     settings_block,
 )
 
+from . import test_number_bounds as bounds_tests
 from .common import head
 from .test_number_bounds import _setup as _setup_platform
 from .test_switch import _FakeClient, _FakeCloudCoord, _FakeMqttLink
@@ -160,19 +161,44 @@ def test_settings_block_keeps_current_values_and_applies_the_change():
         settings_block(_head(dps={"118": 210, "119": 140, "121": 145}), {118: 200})
 
 
+def _removed_setpoints():
+    return [uid for uid in bounds_tests.REMOVED if uid.endswith("_setpoint")]
+
+
 async def test_setpoint_entities_only_for_open_settings_of_isolated_heads():
     kind = DanfossHeadSetpoint
-    assert await _setup_platform([_head()], supervised=frozenset(), kind=kind) == []  # closed
-    assert await _setup_platform([_head()], supervised=TRIAL, cloud_mqtt=False, kind=kind) == []
-    isolated, grouped = _head(dev_id="iso"), _head(dev_id="grp")
-    ents = await _setup_platform(
-        [isolated, grouped], supervised=TRIAL, groups={"grp": "g1"}, kind=kind
-    )
-    assert sorted(e.unique_id for e in ents) == [
-        "iso_comfort_setpoint",
-        "iso_pause_setpoint",
-        "iso_setback_setpoint",
-    ]
+    all_three = ["iso_comfort_setpoint", "iso_setback_setpoint", "iso_pause_setpoint"]
+    iso = _head(dev_id="iso")
+    assert await _setup_platform([iso], supervised=frozenset(), kind=kind) == []  # closed
+    assert _removed_setpoints() == all_three
+    assert await _setup_platform([iso], supervised=TRIAL, cloud_mqtt=False, kind=kind) == []
+    assert _removed_setpoints() == all_three
+    assert await _setup_platform([iso], supervised=TRIAL, trial_head=None, kind=kind) == []
+    assert _removed_setpoints() == all_three  # no trial head designated: nothing is open
+    # The link failed to start: transient, nothing created and nothing removed.
+    assert await _setup_platform([iso], supervised=TRIAL, link=False, kind=kind) == []
+    assert _removed_setpoints() == []
+
+    grouped = _head(dev_id="grp")
+    ents = await _setup_platform([iso, grouped], supervised=TRIAL, groups={"grp": "g1"}, kind=kind)
+    assert sorted(e.unique_id for e in ents) == sorted(all_three)
+    assert _removed_setpoints() == [u.replace("iso_", "grp_") for u in all_three]
     # Comfort needs 118 AND 16: with 118 alone there is no comfort entity.
-    ents = await _setup_platform([isolated], supervised=frozenset({118, 119}), kind=kind)
+    ents = await _setup_platform([iso], supervised=frozenset({118, 119}), kind=kind)
     assert [e.unique_id for e in ents] == ["iso_setback_setpoint"]
+    assert _removed_setpoints() == ["iso_comfort_setpoint", "iso_pause_setpoint"]
+
+
+async def test_setpoint_trial_is_confined_to_the_designated_head():
+    """Two isolated heads, a trial armed on one: the other head gets no setpoint entity, so nothing
+    of it can be written through the channel under trial."""
+    kind = DanfossHeadSetpoint
+    ents = await _setup_platform(
+        [_head(dev_id="iso"), _head(dev_id="iso2")], supervised=TRIAL, trial_head="iso", kind=kind
+    )
+    assert {e.unique_id.split("_")[0] for e in ents} == {"iso"}
+    assert _removed_setpoints() == [
+        "iso2_comfort_setpoint",
+        "iso2_setback_setpoint",
+        "iso2_pause_setpoint",
+    ]

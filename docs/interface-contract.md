@@ -412,7 +412,9 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   outside a comfort slot. See docs/first-write-procedure.md.
 
   The setpoints are `number` entities of an **isolated** head ("comfort setpoint", "setback
-  setpoint", "pause setpoint"), present only while their DPs are open on this path.
+  setpoint", "pause setpoint"), present only while their DPs are open on this path for that head
+  (during a trial: the designated trial head only), and removed from the registry when they close
+  again, like the bounds below.
 
   The bounds are `number` entities of an **isolated** head ("upper setpoint bound", "lower setpoint
   bound"), present only while their DP is open on this path for that head — during a supervised
