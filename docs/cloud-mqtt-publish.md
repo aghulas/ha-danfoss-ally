@@ -175,6 +175,37 @@ diagnostics or the repo. `mqtt_publish.py` never puts them in a repr or an error
    exactly as PR #69 left them. Remaining: live-link lifecycle (connect on setup when the option is on,
    reconnect on `sid` refresh, close on unload), and moving the codec to pydanfoss-cloud.
 
+### 6.3b Live read-only connect EXECUTED (2026-11-19, Rémi's OK) — broker refuses (rc=5), key finding
+
+Ran `frida/run_conn.py` (read-only, 0 `publish()`): capture the app's exact username/password via
+`capture_conn.js`, then TLS-connect from the Mac and subscribe. Two things were fixed from the first
+attempt — certifi CA (TLS now completes) and the client now actually attaches `on_connect`. Result,
+reproduced **while the app is still running (session valid)**, with the byte-exact app
+username/password and a dedicated-deviceId clientId:
+
+```
+Sending CONNECT ... client_id=...hesto-ro-...   ->   Received CONNACK (0, 5)  ->  rc=5 not authorised
+```
+
+Consistent across retries. So **rc=5 is not a stale-session artefact** (earlier guess): it happens
+with a live session too. Since the credentials are byte-exact and account-level (username/password
+carry no deviceId), the broker ties MQTT authorization to something beyond them — almost certainly
+the **clientId/deviceId**: either it requires a **registered device** of the account (our dedicated,
+server-unregistered deviceId is refused — unlike the HTTP API, which accepts a distinct deviceId
+because it only checks the recomputed signature), or it enforces **one MQTT session per account**.
+Not disambiguated (the remaining test — the app's own *registered* clientId on a live session — would
+kick the app, and still would not match the integration's distinct-deviceId case). No head write, no
+publish; emulator shut down after.
+
+**Implication (important, supersedes the earlier "creds proven → will authorize" expectation):** the
+cloud-MQTT write path has an unresolved **MQTT-auth / device-registration gate**. The codec and
+credential derivations are correct, but connecting with the integration's own HTTP-style distinct
+deviceId is refused by the broker. Before the feature can go live we must learn how the app's
+clientId is authorized — e.g. whether the deviceId must be registered via the Tuya activator/pairing
+flow, or whether a registered deviceId can be reused with care for the single-session constraint.
+This is the new top open question; the gated live-link lifecycle in `mqtt_client.py` stays unwired
+until it is answered.
+
 ### 6a. Preparing the credentials for a live connect (step 3, prepared, NOT executed)
 
 The live read-only connect must use the **integration's own session**, not a borrowed app session
@@ -189,10 +220,10 @@ before any login + connect runs.
 
 ### 6b. Open questions — current best answers (static + the captures)
 
-- **Second connection for the same account?** Supported by design: the app and its panel mini-app
-  connect concurrently with **different clientIds**; our link uses a dedicated-deviceId clientId. The
-  rc=5 we saw was the stale `sid`, not a client-count limit (the app's own registered clientId got
-  rc=5 too). Live confirmation waits on a valid session (6a).
+- **Second connection for the same account?** UNRESOLVED and now doubtful. A live read-only connect
+  with byte-exact app creds + a dedicated-deviceId clientId is **refused (rc=5) even with a valid
+  session** (§6.3b). The broker may allow only one MQTT session per account, or may require a
+  registered deviceId. This is the blocking open question for the write path.
 - **Is `t` freshness enforced?** No evidence of a timestamp window. The inbound decoder's replay guard
   is on **(seq, origin)** ("cloud command repeat", code 12003), not on `t`. So dedup = the per-gateway
   monotonic `SeqOrigin` (kept for the whole session); `t` is epoch seconds, informational. Keep the
