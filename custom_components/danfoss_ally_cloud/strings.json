@@ -98,6 +98,9 @@
       },
       "lower_bound": {
         "name": "Lower setpoint bound"
+      },
+      "pause_setpoint": {
+        "name": "Pause setpoint"
       }
     }
   },

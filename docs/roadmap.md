@@ -110,6 +110,10 @@ publish over Tuya cloud MQTT, the only path found that applies them (contract §
    - Window detection (DP 116): candidate, code shipped, **supervised write pending**.
    - Bounds (DP 18 upper, DP 27 lower with DP 120 when the pause setpoint must follow): candidates,
      code shipped as `number` entities of an isolated head, **supervised writes pending**.
+   - Isolated-head setpoints (DP 118 + 16 comfort, DP 119 setback, DP 120 pause): candidates, code
+     shipped, **supervised writes pending**. The trial must also settle whether a schedule rewrite
+     is needed after the publish, as for rooms (R3).
+   - Preheat (DP 1): not implemented; written proposal in `docs/cloud-mqtt-preheat-proposal.md`.
 3. **Measure inbound coverage**: which heads and DPs the broker pushes, and how often, over a full
    day. **Tooling shipped**: the listen-only option `cloud_mqtt_probe` (off by default) accounts the
    pushed reports per head and per DP and serves the aggregates in the diagnostics. The 24 h run on

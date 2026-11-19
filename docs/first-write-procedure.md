@@ -129,6 +129,49 @@ was the independent source.
   restore the pause setpoint in the Danfoss app (or with the pause-setpoint entity once that DP is
   available), and read it back.
 
+### DP 118 + 16 — comfort setpoint of an isolated head (candidate)
+
+- **Entity**: the head's "comfort setpoint" number (tick `118` **and** `16`).
+- **What is sent**, as the app does (contract §4.2): one MQTT frame `{"118": v, "16": v}`; once
+  DP 118 is confirmed, the whole settings block `{"1", "118", "119", "121"}` through
+  `settings.change` (`gwId` = the head's devId), with the head's current values and the new one.
+  Only DP 118's confirmation is required: DP 16 (`temp_set`) may be overruled by the schedule.
+- **Trial value**: `V0 − 0.5 °C`, **while the head is in a comfort slot**. DP 16 is the head's
+  effective setpoint: sent during a setback slot it may make the head heat to the comfort value
+  until the next transition. In a comfort slot the effect is at most half a degree down.
+- **Independent read-back**, through the **local tunnel**:
+  1. the head's weekly schedule — do the comfort slots carry the new value? **This is the open
+     question of this DP.** For a room, a setpoint publish must be followed by a schedule rewrite
+     (R3), otherwise the heads keep the old value in their transitions. Whether an isolated head
+     needs the same is not established. If the schedule still carries the old value, the trial is
+     **not** passed: a schedule rewrite (HTTP, proven for an isolated head, §4.1) has to be added
+     to the write before the DP is promoted;
+  2. the head's current setpoint (attribute `0x0012`) before and after — what did DP 16 do?
+  3. the real preheat (attribute `0x0025`) — unchanged after the block, which carries DP 1.
+- **Restore**: write `V0` back, then read the schedule again.
+
+### DP 119 — setback setpoint of an isolated head (candidate)
+
+- **Entity**: the head's "setback setpoint" number (tick `119`).
+- **What is sent**: `{"119": v}` alone (no DP 109: the app does not send it for an isolated head),
+  then the settings block as above.
+- **Trial value**: `V0 − 0.5 °C`, **while the head is in a comfort slot**, so the setback value is
+  not the one in force. For a room, the setback publish also applies the value at once as the
+  current setpoint (contract §4.2, DP 109): check with the head's current setpoint (attribute
+  `0x0012`) that DP 119 alone does not.
+- **Independent read-back**: the head's weekly schedule through the local tunnel (setback periods),
+  same open question as for DP 118.
+- **Restore**: write `V0` back.
+
+### DP 120 — pause setpoint of an isolated head (candidate)
+
+- **Entity**: the head's "pause setpoint" number (tick `120`).
+- **What is sent**: `{"120": v}`. No settings block (DP 120 is not part of it).
+- **Trial value**: `V0 + 0.5 °C`, the head **not** in pause mode — no thermal effect.
+- **Independent read-back**: no tunnel attribute is known for the pause setpoint; the app's
+  settings screen is the independent source. Weaker than a tunnel read: say so in the record.
+- **Restore**: write `V0` back.
+
 ## Returning to the released build
 
 Turn the options off (the link closes on reload), then redeploy the released build and restart.

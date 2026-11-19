@@ -26,9 +26,10 @@ def write_allowed(dev: DanfossDevice) -> bool:
 #   integration's ``cloud_mqtt_supervised_dps`` option). After its supervised write succeeds, a DP
 #   moves from the second set to the first in a change of its own.
 MQTT_WRITE_DPS = frozenset({30})  # child lock, validated 2026-11-19
-# 116 window detection; 18 upper bound; 27 lower bound; 120 pause setpoint (written with 27 when
-# the pause setpoint must follow the lower bound, contract §4.2).
-MQTT_CANDIDATE_DPS = frozenset({116, 18, 27, 120})
+# 116 window detection; 18 upper bound; 27 lower bound; 120 pause setpoint (also written with 27
+# when the pause setpoint must follow the lower bound); 118 comfort setpoint, published with 16
+# (temp_set) as the app does; 119 setback setpoint. Contract §4.2.
+MQTT_CANDIDATE_DPS = frozenset({116, 18, 27, 120, 118, 16, 119})
 
 # Value rule of each DP this path knows: booleans, or tenths of °C within the product schema's
 # range for that DP (03wvrwpv), on its 0.5 °C step.
@@ -37,6 +38,9 @@ MQTT_TENTHS_RANGE: dict[int, tuple[int, int]] = {
     18: (200, 350),  # upper_temp: 20-35 °C
     27: (50, 200),  # lower_temp: 5-20 °C
     120: (50, 350),  # pause_setting: 5-35 °C
+    118: (50, 350),  # at_home_setting (comfort)
+    16: (50, 350),  # temp_set, sent with 118
+    119: (50, 350),  # leaving_home_setting (setback)
 }
 _TENTHS_STEP = 5
 

@@ -396,6 +396,24 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   | 27 | Lower setpoint bound | **Candidate** | tenths of °C, 5–20 °C, 0.5 step; not above the upper bound; must not exclude the comfort or setback setpoint |
   | 120 | Pause setpoint | **Candidate** | tenths of °C, 5–35 °C, 0.5 step. For now only sent with DP 27, in the same frame, when the new lower bound is above the pause setpoint (reading of the app capture, to confirm in the trial) |
 
+  | 118 + 16 | Comfort setpoint | **Candidate** | tenths of °C within the head's own bounds, 0.5 step. `{"118": v, "16": v}` in one frame; only DP 118's confirmation is required |
+  | 119 | Setback setpoint | **Candidate** | same check. `{"119": v}` alone (no DP 109) |
+  | 120 | Pause setpoint | **Candidate** | same check. `{"120": v}` |
+
+  Comfort and setback belong to the app's settings block: after the MQTT publish is confirmed, the
+  integration posts the **whole** block `{"1", "118", "119", "121"}` through
+  `tuya.m.custom.wkf.settings.change` (`gwId` = the head's devId), built from the head's current
+  values, as the app does. If a value of the block is unknown, nothing is sent at all. A block
+  refused after a confirmed publish raises an error that says the head has the new value and the
+  cloud store may not.
+
+  **Open for the trial**: whether an isolated head's schedule takes a new setpoint without a
+  schedule rewrite (R3 is established for rooms only), and what DP 16 does to the current setpoint
+  outside a comfort slot. See docs/first-write-procedure.md.
+
+  The setpoints are `number` entities of an **isolated** head ("comfort setpoint", "setback
+  setpoint", "pause setpoint"), present only while their DPs are open on this path.
+
   The bounds are `number` entities of an **isolated** head ("upper setpoint bound", "lower setpoint
   bound"), present only while their DP is open on this path for that head — during a supervised
   trial, on the designated trial head only. When the DP closes again (trial disarmed or moved to
