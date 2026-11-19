@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased — 1.2.0 (gated cloud-MQTT write path for isolated heads)
+
+Adds the write path the Danfoss app uses for **isolated** heads (those not grouped into a room),
+which `tuya.m.custom.wkf.settings.change` does not reach (W-3): a DP publish over Tuya cloud MQTT.
+Reverse-engineered from the app and **validated on real hardware (2026-11-19)** — see
+docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
+
+### Added
+
+- **`enable_cloud_mqtt` option (OFF by default).** When on, the integration opens one Tuya cloud
+  MQTT connection from its **own** session (its distinct deviceId, so it coexists with the Danfoss
+  app and the MCP connector — confirmed on hardware: an independent session is accepted, `rc=0`,
+  while the phone app stays connected). It subscribes to `smart/mb/in/<gw>` and can publish a head
+  DP on `smart/mb/out/<gw>` (protocol-2.3 AES-GCM frame with the gateway localKey).
+- **Isolated-head child lock (DP 30) over MQTT.** With the option on and the link connected, an
+  isolated head's child-lock switch routes through MQTT (previously unavailable); otherwise the
+  local tunnel; otherwise unavailable — never an optimistic state. The write is **confirmed** by the
+  gateway's inbound protocol-4 `{cid,dps}` echo (or a cloud re-read), with a 15 s timeout and a
+  clear error if unconfirmed. **Validated 2026-11-19: DP 30 on an isolated test head, confirmed in the
+  cloud, the app and physically on the head.** DP 30 only for now (`MQTT_WRITE_DPS`); other settings
+  follow one per supervised validation.
+- **"Cloud MQTT link" connectivity binary sensor** (diagnostic, present only when the link exists),
+  so the link never fails silently; reconnect uses exponential backoff and picks up a refreshed
+  `sid`.
+
+### Notes
+
+- Experimental / unofficial path; it rides the app's Tuya auth. Enable only deliberately. The first
+  write per setting/model is done supervised (docs/first-write-procedure.md).
+- No secret or real device identifier in logs or diagnostics (the MQTT client id is kept out of the
+  log thread names; diagnostics redact ids).
+
 ## 1.1.0 — Real-hardware validation fixes (R-1, R-3, W-3), relays per building, gated unbind
 
 Minor release built from the real-hardware validation of 2026-11-18/19 on a large real install (about

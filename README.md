@@ -111,10 +111,28 @@ http://localhost:5173/demo/).
 
 - **Head in a room**: the switch writes the setting on the **room**, so it applies to **every head
   of that room** (attributes `write_path: room`, `room_head_count`).
-- **Isolated head** (in no room): the cloud route accepts the request but does not apply it
+- **Isolated head** (in no room): the ordinary cloud route accepts the request but does not apply it
   (real-hardware validation, 2026-11-19). Window detection then goes through the local tunnel if
-  `enable_local` is on and the head answers locally; otherwise, and always for the child lock, the
-  switch is **unavailable** rather than showing a state it cannot set.
+  `enable_local` is on and the head answers locally; otherwise the switch is **unavailable** rather
+  than showing a state it cannot set.
+
+### Cloud-MQTT write path for isolated heads (experimental, off by default)
+
+The Danfoss app writes an isolated head's settings by publishing the DP over Tuya cloud MQTT. The
+integration can do the same, **gated behind the `enable_cloud_mqtt` option (off by default)**.
+
+- **What it does**: when enabled, the integration opens one Tuya cloud MQTT connection from its own
+  session (its own deviceId, so it coexists with the app and does not log it out) and lets an
+  **isolated** head's **child-lock** switch write via MQTT instead of being unavailable. A
+  diagnostic **"Cloud MQTT link"** sensor shows whether the connection is up. Each write is confirmed
+  by the gateway's reply (or a cloud re-read) with a timeout and a clear error — it never shows a
+  value it did not confirm.
+- **Scope**: child lock (DP 30) only for now, validated on real hardware (2026-11-19). Other settings
+  will be added one at a time after their own supervised validation.
+- **Requirement**: the path uses `paho-mqtt` (declared in `manifest.json` as `>=1.6.1,<3`, the MQTT client Home Assistant's own MQTT integration already ships — HA pins the exact version); Home Assistant installs it automatically. No manual step.
+- **Risks**: this is an unofficial path that rides the app's Tuya authentication; it can break if
+  Tuya changes it. Leave it off unless you want to try it, and expect to validate a first write on a
+  test head yourself (see `docs/first-write-procedure.md`).
 
 ## Status
 

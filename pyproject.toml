@@ -65,6 +65,9 @@ module = [
   "voluptuous.*",
   "Crypto.*",
   "tinytuya",
+  "paho",
+  "paho.*",
+  "certifi",
   "requests",
   "requests.*",
 ]

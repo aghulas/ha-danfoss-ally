@@ -1,0 +1,86 @@
+# Cloud-MQTT DP publish (protocol 2.3) — maintenance spec
+
+Specification of the Tuya cloud MQTT path the integration uses to write an **isolated** head's
+settings (those not grouped into a room), behind the `enable_cloud_mqtt` option (OFF by default).
+It is the path the Danfoss app itself uses: `tuya.m.custom.wkf.settings.change` is accepted by the
+cloud but **never applied** to an isolated head (W-3, docs/interface-contract.md §4.2), whereas a DP
+**publish** over MQTT is. This file documents the wire format and the derivations **as implemented**
+(`api/mqtt_publish.py`, `api/mqtt_client.py`) so the code stays maintainable. The reverse-engineering
+method that established it is kept out of this public repository (see "Provenance" below).
+
+## Frame (protocol 2.3)
+
+```
+header (12 bytes) = "2.3" | seq (uint32 big-endian) | origin (uint32 big-endian) | 0x00
+body              = nonce (12 random bytes) | AES-GCM ciphertext | tag (16 bytes)
+key               = the gateway's localKey, as ASCII bytes (16 chars -> AES-128)
+plaintext (JSON)  = {"data": <data>, "protocol": <int>, "t": <epoch seconds>}   (compact, keys sorted)
+```
+
+- The 12-byte header is also the AES-GCM **additional authenticated data** (AAD); the nonce is
+  prepended to the ciphertext.
+- `protocol` = **5** for an outbound DP publish; inbound DP reports arrive as **4**.
+- Encode/decode: `mqtt_publish.encode_frame` / `decode_frame`. A frame that fails to authenticate is
+  rejected (wrong localKey or tampering).
+
+## Addressing
+
+- Topics: publish to `smart/mb/out/<gateway devId>`; the gateway answers on
+  `smart/mb/in/<gateway devId>`. The topic carries the **gateway** devId, not the head's.
+- `data` for a Zigbee sub-device (a head): `{"cid": <head node_id>, "ctype": 0, "dps": {<dp>: <v>}}`
+  (`mqtt_publish.dp_publish_data`). `cid` is the head's Zigbee node id.
+
+## Sequence / de-duplication
+
+The receiver drops a repeated `(seq, origin)` pair ("cloud command repeat"). `origin` is random per
+session, `seq` increments before each publish. Keep one `SeqOrigin` per gateway for the whole
+session and never reset it mid-session (`mqtt_publish.SeqOrigin`, one per gateway in
+`CloudMqttLink`).
+
+## Broker and credentials (as implemented)
+
+- Broker: `ssl://m1.<region>.tuya…:8883` (EU = `m1.tuyaeu.com`), `region` from the config entry.
+- clientId: `<package>_mb_<deviceId>_<md5hex(uid + "sdkfasodifca")>_DEFAULT`. The integration uses a
+  **dedicated** deviceId derived from its own (`derive_distinct_device_id`), so its clientId cannot
+  collide with the app's.
+- username: `<partnerIdentity>_v1_<appId>_<chKey>_mb_<sid><last16(md5hex(md5hex(appId) + ecode))>`,
+  where `appId` is the HTTP client id and `chKey` the installation channel key. Derivation:
+  `mqtt_publish.mqtt_username`.
+- password: the middle 16 chars of `md5hex(md5hex(sign_key) + ecode)` (`mqtt_publish.mqtt_password`).
+- user topic: `<partnerIdentity>/mb/<uid>`.
+
+`sign_key`, `uid`, `partnerIdentity`, `sid`, `ecode` all come from the integration's own session
+(`CloudClient.session` / `CloudClient.mqtt_identity`, populated at login). They are secret and never
+logged, put in diagnostics, or placed in the thread name.
+
+## Session policy (observed)
+
+The broker allows **one active MQTT connection per session**. Two clients that present the **same**
+session (same `sid`/`ecode`, hence the same username) conflict; two **different** sessions coexist.
+The integration therefore connects with **its own** session (distinct deviceId), independent of the
+Danfoss app's and the MCP connector's. Confirmed on real hardware: the integration's session is
+accepted (`CONNACK rc=0`) while the phone app stays connected.
+
+## Write and confirmation
+
+`CloudMqttLink.publish_dp` sends the frame and `await_confirmation` waits for the gateway's inbound
+protocol-4 `{cid, dps}` echo (matched on `cid` + the written DP/value) within a timeout; the switch
+then falls back to a cloud re-read, and raises a clear error if still unconfirmed — never an
+optimistic state. Reconnection uses exponential backoff and refreshes the credentials from the
+current session (a rotated `sid`); a link that is down makes the dependent switches unavailable.
+
+## Validation status
+
+- **Session coexistence**: confirmed on real hardware (2026-11-19) — independent-session connect
+  `rc=0`, inbound frames decoded, the phone app not evicted.
+- **First write**: DP 30 (child lock) on an isolated test head (2026-11-19), confirmed in the cloud,
+  in the app and physically on the head; no other head or setting affected.
+- **Scope today**: the MQTT write path carries **DP 30 only** (`api.writes.MQTT_WRITE_DPS`). Other
+  DPs (116 window, 133/101 mounting/orientation, 18/27 bounds, 118+16/119/120 setpoints, 1 preheat)
+  are added one at a time, each after its own supervised real-hardware write.
+
+## Provenance
+
+The method used to recover this protocol (app decompilation, dynamic instrumentation, and the
+credential/frame captures) is **not** in this public repository. It lives in the maintainer's
+private research notes. This file is the maintenance specification only.

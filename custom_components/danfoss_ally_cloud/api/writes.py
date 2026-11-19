@@ -16,6 +16,21 @@ def write_allowed(dev: DanfossDevice) -> bool:
     return bool(dev.product_id) and dev.product_id in WRITE_VERIFIED_PRODUCTS
 
 
+# Cloud-MQTT isolated-head write path: start with DP 30 (child lock) only. Extend setting by setting
+# AFTER a real-hardware validation (see docs/first-write-procedure.md / cloud-mqtt-publish.md §6).
+MQTT_WRITE_DPS = frozenset({30})
+
+
+def mqtt_write_value(dp: int, value: object) -> bool:
+    """Validate a value destined for the cloud-MQTT write path. Only DP 30 is allowed for now, and
+    it is a boolean. Raises CloudWriteError otherwise (a clear error, never a blind send)."""
+    if dp not in MQTT_WRITE_DPS:
+        raise CloudWriteError(f"DP {dp} is not enabled on the cloud-MQTT write path (DP 30 only)")
+    if not isinstance(value, bool):
+        raise CloudWriteError(f"DP {dp} expects a boolean, got {type(value).__name__}")
+    return value
+
+
 def encode_setpoint(celsius, low: float, high: float, step: float = 0.5) -> int:
     """Setpoint °C -> DP value (tenths), rounded to the step and clamped. Raises CloudWriteError."""
     try:

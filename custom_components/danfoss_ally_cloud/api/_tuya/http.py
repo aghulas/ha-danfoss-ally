@@ -243,4 +243,8 @@ def login(
         "chKey": ch_key,
         "deviceId": device_id,
         "uid": user.get("uid"),
+        # partnerIdentity: needed to build the Tuya cloud MQTT username/user-topic (the DP-publish
+        # path for isolated heads). Server-assigned, stable per account; may be absent on very old
+        # responses, hence .get(). See docs/cloud-mqtt-publish.md §5.
+        "partnerIdentity": user.get("partnerIdentity"),
     }
