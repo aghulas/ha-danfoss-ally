@@ -85,9 +85,33 @@ def _fenetre_desc():
     return next(d for d in SWITCHES if d.key == "window_detection")
 
 
-def _switch(desc, dev, *, client=None, groups=None, local=None):
+class _FakeMqttLink:
+    """Stand-in for CloudMqttLink: records publishes, no network."""
+
+    def __init__(self, gateways=("gw-1",), connected=True, fail=None, confirm=True):
+        self._gw = set(gateways)
+        self._connected = connected
+        self.fail = fail
+        self.confirm = confirm
+        self.published = []  # (mesh_id, node_id, dps)
+        self.confirmations = []  # (node_id, dp, value)
+
+    def can_publish(self, gateway_id):
+        return self._connected and gateway_id in self._gw
+
+    async def publish_dp(self, gateway_id, node_id, dps):
+        if self.fail:
+            raise self.fail
+        self.published.append((gateway_id, node_id, dps))
+
+    async def await_confirmation(self, node_id, dp, value, *, timeout_s):
+        self.confirmations.append((node_id, dp, value))
+        return self.confirm
+
+
+def _switch(desc, dev, *, client=None, groups=None, local=None, mqtt=None, cloud_mqtt=False):
     coord = _FakeCloudCoord({dev.id: dev}, client=client, groups=groups)
-    sw = DanfossSwitch(coord, dev.id, desc, local)
+    sw = DanfossSwitch(coord, dev.id, desc, local, mqtt, cloud_mqtt)
     sw.hass = _FakeHass()
     return sw, coord
 
@@ -353,3 +377,87 @@ async def test_preheat_tunnel_failure_raises():
     with pytest.raises(HomeAssistantError):
         await ph.async_turn_on()
     assert local.refreshed_heads == []
+
+
+# --- isolated head: dedicated-session cloud MQTT path (gated) -----------------------------------
+
+
+async def test_isolated_head_cloud_mqtt_path_when_enabled():
+    """Option ON + a connected link that knows the gateway -> PATH_MQTT, scope head."""
+    dev = head(child_lock=True)  # no group -> isolated
+    link = _FakeMqttLink(gateways=("gw-1",), connected=True)
+    sw, _ = _switch(_verrou_desc(), dev, mqtt=link, cloud_mqtt=True)
+    assert sw.available is True
+    assert sw.extra_state_attributes == {"write_path": "cloud_mqtt", "write_scope": "head"}
+
+
+async def test_isolated_head_cloud_mqtt_write_publishes_and_confirms():
+    dev = head(child_lock=False)
+    link = _FakeMqttLink(confirm=True)
+    sw, coord = _switch(_verrou_desc(), dev, mqtt=link, cloud_mqtt=True)
+    await sw.async_turn_on()
+    assert link.published == [("gw-1", "node-1", {"30": True})]
+    assert link.confirmations == [("node-1", 30, True)]  # waited for the inbound confirmation
+    assert coord.commanded == [dev.id]  # marked commanded (no optimistic state set)
+    assert coord.refreshed is True
+
+
+async def test_cloud_mqtt_window_dp116_not_routed_via_mqtt():
+    """Only DP 30 uses the MQTT path for now; DP 116 (window) falls through (here: unavailable)."""
+    dev = head(window_detection=True)  # isolated, no tunnel -> no path
+    link = _FakeMqttLink(connected=True)
+    sw, _ = _switch(_fenetre_desc(), dev, mqtt=link, cloud_mqtt=True)
+    assert sw.extra_state_attributes["write_path"] == "none"
+    assert sw.available is False
+
+
+async def test_cloud_mqtt_write_unconfirmed_and_cloud_still_differs_raises():
+    from homeassistant.exceptions import HomeAssistantError
+
+    dev = head(child_lock=False)  # cloud re-read keeps child_lock False, != commanded True
+    link = _FakeMqttLink(confirm=False)
+    sw, coord = _switch(_verrou_desc(), dev, mqtt=link, cloud_mqtt=True)
+    with pytest.raises(HomeAssistantError):
+        await sw.async_turn_on()
+    assert link.published  # it did send
+    assert coord.refreshed is True  # tried a cloud re-read before failing
+
+
+async def test_cloud_mqtt_ignored_when_option_off():
+    """Gate OFF but link present -> isolated head is NOT routed to MQTT (stays unavailable)."""
+    dev = head(child_lock=True)
+    link = _FakeMqttLink()
+    sw, _ = _switch(_verrou_desc(), dev, mqtt=link, cloud_mqtt=False)
+    assert sw.available is False
+    assert sw.extra_state_attributes["write_path"] == "none"
+
+
+async def test_cloud_mqtt_unavailable_when_link_not_connected():
+    dev = head(child_lock=True)
+    link = _FakeMqttLink(connected=False)
+    sw, _ = _switch(_verrou_desc(), dev, mqtt=link, cloud_mqtt=True)
+    assert sw.available is False  # never optimistic when the link cannot send
+
+
+async def test_grouped_head_prefers_room_over_cloud_mqtt():
+    """A grouped head keeps the proven ROOM path even if the MQTT link is available."""
+    dev = head(child_lock=False)
+    client = _FakeClient()
+    link = _FakeMqttLink()
+    sw, _ = _switch(
+        _verrou_desc(), dev, client=client, groups={dev.id: "g1"}, mqtt=link, cloud_mqtt=True
+    )
+    assert sw.extra_state_attributes["write_path"] == "room"
+    await sw.async_turn_on()
+    assert client.group_calls == [("g1", {"30": True})]
+    assert link.published == []  # not sent over MQTT
+
+
+async def test_cloud_mqtt_write_failure_raises_homeassistanterror():
+    from homeassistant.exceptions import HomeAssistantError
+
+    dev = head(child_lock=False)
+    link = _FakeMqttLink(fail=RuntimeError("broker down"))
+    sw, _ = _switch(_verrou_desc(), dev, mqtt=link, cloud_mqtt=True)
+    with pytest.raises(HomeAssistantError):
+        await sw.async_turn_on()

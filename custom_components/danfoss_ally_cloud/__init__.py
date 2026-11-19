@@ -16,11 +16,18 @@ from homeassistant.helpers.typing import ConfigType
 
 from .api import CloudClient, async_fetch_gateway_keys
 from .api.local.manager import LocalTunnelManager
+from .api.mqtt_client import (
+    CloudMqttLink,
+    GatewayRef,
+    MqttCredentials,
+    build_credentials,
+)
 from .const import (
     CONF_CH_KEY,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
+    CONF_ENABLE_CLOUD_MQTT,
     CONF_ENABLE_HEAD_UNBIND,
     CONF_ENABLE_LOCAL,
     CONF_ENABLE_VACATION_WRITE,
@@ -33,14 +40,17 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SIGN_KEY,
     CONF_USERNAME,
+    DATA_CLOUD_MQTT,
     DATA_COORDINATOR,
     DATA_HEAD_UNBIND,
     DATA_JOBS,
     DATA_LOCAL,
     DATA_MQTT,
+    DATA_MQTT_LINK,
     DATA_SCHEDULES,
     DATA_VACATION_WRITE,
     DEFAULT_DISTINCT_DEVICE_ID,
+    DEFAULT_ENABLE_CLOUD_MQTT,
     DEFAULT_ENABLE_HEAD_UNBIND,
     DEFAULT_ENABLE_VACATION_WRITE,
     DEFAULT_LOCAL_SCAN_INTERVAL,
@@ -109,6 +119,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # MQTT publishing (optional).
     publisher = await _async_setup_mqtt(hass, entry, coordinator)
 
+    # Cloud-MQTT live link (optional, EXPERIMENTAL write path for isolated heads). Best-effort;
+    # OFF by default. When on, the isolated-head switches route through it (a toggle then publishes
+    # a DP — the first such write must be supervised; see docs/first-write-procedure.md).
+    mqtt_link = await _async_setup_mqtt_link(hass, entry, client)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         DATA_COORDINATOR: coordinator,
         DATA_LOCAL: local_coordinator,
@@ -119,6 +134,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             CONF_ENABLE_VACATION_WRITE, DEFAULT_ENABLE_VACATION_WRITE
         ),
         DATA_HEAD_UNBIND: entry.options.get(CONF_ENABLE_HEAD_UNBIND, DEFAULT_ENABLE_HEAD_UNBIND),
+        DATA_CLOUD_MQTT: entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT),
+        # Live MQTT link: present only when enable_cloud_mqtt is on (OFF by default). The switches
+        # treat None as "no cloud-MQTT path", so isolated heads stay as PR #69 left them.
+        DATA_MQTT_LINK: mqtt_link,
     }
     await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
     _cleanup_orphaned_head_climates(hass, entry, coordinator)
@@ -164,6 +183,85 @@ async def _async_setup_local(
     # Non-blocking first survey: an unreachable gateway must not prevent startup.
     await local.async_refresh()
     return local
+
+
+async def _async_mqtt_creds_and_gateways(
+    entry: ConfigEntry, client: CloudClient, *, context: str
+) -> tuple[MqttCredentials, dict[str, GatewayRef]] | None:
+    """Build the MQTT credentials (from the integration's OWN session — no secret taken from HA
+    storage) and the gateway refs. Forces a fresh login so uid/partnerIdentity are known. Returns
+    None (logged) if the session is incomplete or no gateway has a local key."""
+    await client.async_login()
+    ident = client.mqtt_identity
+    sess = client.session
+    if not (ident["uid"] and ident["partner_identity"] and sess["sid"] and sess["ecode"]):
+        _LOGGER.warning(
+            "Cloud-MQTT %s: session incomplete (uid/partnerIdentity); skipped.", context
+        )
+        return None
+    gateways = await async_fetch_gateway_keys(client)
+    if not gateways:
+        _LOGGER.warning("Cloud-MQTT %s: no gateway with a local key; skipped.", context)
+        return None
+    data = entry.data
+    creds = build_credentials(
+        region=data.get(CONF_REGION, "eu"),
+        sign_key=data[CONF_SIGN_KEY],
+        sid=sess["sid"],
+        ecode=sess["ecode"],
+        uid=ident["uid"],
+        partner_identity=ident["partner_identity"],
+        device_id=data[CONF_DEVICE_ID],
+        ch_key=data[CONF_CH_KEY],
+    )
+    refs = {gw_id: GatewayRef(dev_id=gw_id, local_key=k.local_key) for gw_id, k in gateways.items()}
+    return creds, refs
+
+
+async def _async_setup_mqtt_link(
+    hass: HomeAssistant, entry: ConfigEntry, client: CloudClient
+) -> CloudMqttLink | None:
+    """Open the live cloud-MQTT link if ``enable_cloud_mqtt`` is on (OFF by default). Best-effort:
+    returns None on failure, never blocks setup. Uses the integration's OWN session. The link can
+    publish, but only the isolated-head switches reach ``publish_dp`` (and only when a user toggles
+    one); the first such write must be supervised (docs/first-write-procedure.md). Closes on unload.
+    If the ``sid`` later rotates, the reconnect is refused and the switches become unavailable
+    rather than lying — a session-refresh rewire is a follow-up."""
+    if not entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT):
+        return None
+    try:
+        built = await _async_mqtt_creds_and_gateways(entry, client, context="link")
+        if built is None:
+            return None
+
+        def _fresh_creds() -> MqttCredentials:
+            """Rebuild credentials from the client's current (possibly refreshed) session."""
+            ident = client.mqtt_identity
+            sess = client.session
+            data = entry.data
+            return build_credentials(
+                region=data.get(CONF_REGION, "eu"),
+                sign_key=data[CONF_SIGN_KEY],
+                sid=sess["sid"] or "",
+                ecode=sess["ecode"] or "",
+                uid=ident["uid"] or "",
+                partner_identity=ident["partner_identity"] or "",
+                device_id=data[CONF_DEVICE_ID],
+                ch_key=data[CONF_CH_KEY],
+            )
+
+        link = CloudMqttLink(credentials=built[0], gateways=built[1], creds_provider=_fresh_creds)
+    except Exception as err:  # noqa: BLE001 - never break setup
+        _LOGGER.warning("Cloud-MQTT link setup failed: %s", type(err).__name__)
+        return None
+
+    await hass.async_add_executor_job(link.start)
+    _LOGGER.warning(
+        "Cloud-MQTT live link started (EXPERIMENTAL): isolated-head switches may write via MQTT. "
+        "A first write must be supervised."
+    )
+    entry.async_on_unload(link.stop)
+    return link
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

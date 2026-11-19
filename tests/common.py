@@ -248,3 +248,14 @@ class FakeCloudClient:
 
     async def async_close(self):
         self.closed = True
+
+    async def async_login(self):
+        self.logged_in = True
+
+    @property
+    def session(self):
+        return {"sid": "SID-synth", "ecode": "ECODE-synth-16ch"}
+
+    @property
+    def mqtt_identity(self):
+        return {"uid": "UID-synth", "partner_identity": "p1"}

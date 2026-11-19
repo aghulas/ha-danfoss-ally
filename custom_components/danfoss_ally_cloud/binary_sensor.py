@@ -15,7 +15,8 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DATA_COORDINATOR, DOMAIN
+from .api.mqtt_client import CloudMqttLink
+from .const import DATA_COORDINATOR, DATA_MQTT_LINK, DOMAIN
 from .coordinator import DanfossCoordinator
 from .entity import DanfossEntity, DanfossHomeEntity
 
@@ -23,7 +24,8 @@ from .entity import DanfossEntity, DanfossHomeEntity
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    coordinator: DanfossCoordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+    data = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DanfossCoordinator = data[DATA_COORDINATOR]
     entities: list[BinarySensorEntity] = []
     for dev in coordinator.data.values():
         if not dev.is_head:
@@ -37,7 +39,29 @@ async def async_setup_entry(
     # Holiday (read only, contract §4.5): one per home.
     for gid, holiday in coordinator.holidays.items():
         entities.append(DanfossHoliday(coordinator, gid, holiday.get("name")))
+    # Cloud-MQTT link connectivity (only when the live link exists, i.e. enable_cloud_mqtt on): a
+    # diagnostic so the link never fails silently.
+    link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
+    if link is not None:
+        entities.append(DanfossCloudMqttConnectivity(entry.entry_id, link))
     async_add_entities(entities)
+
+
+class DanfossCloudMqttConnectivity(BinarySensorEntity):
+    """Connectivity of the experimental cloud-MQTT link (one per entry). Polled; no secret."""
+
+    _attr_name = "Cloud MQTT link"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_should_poll = True
+
+    def __init__(self, entry_id: str, link: CloudMqttLink) -> None:
+        self._link = link
+        self._attr_unique_id = f"{entry_id}_cloud_mqtt_link"
+
+    @property
+    def is_on(self) -> bool:
+        return self._link.connected
 
 
 class DanfossConnectivity(DanfossEntity, BinarySensorEntity):

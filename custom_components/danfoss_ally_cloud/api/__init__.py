@@ -35,7 +35,7 @@ from .decode import (
 )
 from .keys import GatewayKey, async_fetch_gateway_keys
 from .schedule import Schedule, count_transitions, validate_days
-from .writes import encode_setpoint, write_allowed
+from .writes import MQTT_WRITE_DPS, encode_setpoint, mqtt_write_value, write_allowed
 
 __all__ = [
     "CloudAuthError",
@@ -53,7 +53,9 @@ __all__ = [
     "decode_device",
     "decode_operation",
     "derive_distinct_device_id",
+    "MQTT_WRITE_DPS",
     "encode_setpoint",
+    "mqtt_write_value",
     "head_state",
     "holiday_running",
     "holiday_temperature",

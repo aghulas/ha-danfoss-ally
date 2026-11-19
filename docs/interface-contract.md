@@ -374,7 +374,18 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   Measured 2026-11-19 (DP 116): the tunnel write is **immediate** (read back from the head at
   T0 + ~20 s), and the head reports it to the cloud in under a minute (per-device route); the
   integration marks the head for the post-command per-device read (R-3) so HA follows one poll later.
-  The child lock has no proven isolated-head path (the local read does not expose it): **unavailable**.
+  The child lock has no tunnel path (the local read does not expose it).
+- **Isolated head via Tuya cloud MQTT (`enable_cloud_mqtt`, OFF by default — 1.2.0).** The app's own
+  path (`publishDps`) is reproduced: a protocol-2.3 frame `{"data":{"cid":<node>,"dps":{…}},
+  "protocol":5}` encrypted (AES-GCM) with the gateway's localKey, published on
+  `smart/mb/out/<gateway devId>`, over one MQTT connection opened from the integration's **own
+  session** (distinct deviceId — coexists with the app, proven 2026-11-19). The write is **confirmed**
+  by the gateway's inbound protocol-4 `{cid,dps}` echo on `smart/mb/in/<gw>` (or a cloud re-read),
+  with a timeout and a clear error — never optimistic. **Validated on real hardware 2026-11-19: DP 30
+  (child lock) on C-1 Salle ASH, confirmed in the cloud, the app and on the head.** For now the MQTT
+  path carries **DP 30 only** (`MQTT_WRITE_DPS`); other DPs are added one at a time after a supervised
+  write. When the option is on and the link connected, an isolated head's child-lock switch routes
+  here; otherwise the tunnel; otherwise unavailable. (Protocol details: docs/cloud-mqtt-publish.md.)
 - `async_write_setting` remains only for the back-to-schedule `at_home` label of an isolated head
   (display only, R5).
 

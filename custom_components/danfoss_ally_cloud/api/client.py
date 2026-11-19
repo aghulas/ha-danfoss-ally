@@ -127,6 +127,8 @@ class CloudClient:
         self._endpoint = ENDPOINTS.get(region.lower(), ENDPOINTS["eu"])
         self._sid = sid
         self._ecode = ecode
+        self._uid: str | None = None
+        self._partner_identity: str | None = None
         self._client: TuyaHttpClient | None = None
         self._lock = asyncio.Lock()
 
@@ -134,6 +136,12 @@ class CloudClient:
     def session(self) -> dict[str, str | None]:
         """Current session material (sid/ecode) - to persist in the HA entry."""
         return {"sid": self._sid, "ecode": self._ecode}
+
+    @property
+    def mqtt_identity(self) -> dict[str, str | None]:
+        """uid + partnerIdentity from the last login, for the Tuya cloud MQTT username/user-topic
+        (docs/cloud-mqtt-publish.md §5). Populated by ``async_login``; None before first login."""
+        return {"uid": self._uid, "partner_identity": self._partner_identity}
 
     def _build_client(self) -> TuyaHttpClient:
         return TuyaHttpClient(
@@ -166,6 +174,8 @@ class CloudClient:
             raise CloudAuthError("login without sid/ecode: invalid credentials or secrets.")
         self._sid = res["sid"]
         self._ecode = res["ecode"]
+        self._uid = res.get("uid")
+        self._partner_identity = res.get("partnerIdentity")
         if self._client is not None:
             await asyncio.to_thread(self._client.close)
         self._client = self._build_client()

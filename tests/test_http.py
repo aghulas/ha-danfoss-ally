@@ -101,12 +101,32 @@ def test_login_ok():
     reponses = iter(
         [
             FakeResp({"result": {"token": "T", "publicKey": str(key.n), "exponent": str(key.e)}}),
-            FakeResp({"result": {"sid": "S", "ecode": "E", "uid": "U"}}),
+            FakeResp({"result": {"sid": "S", "ecode": "E", "uid": "U", "partnerIdentity": "p1"}}),
         ]
     )
     with patch("requests.Session.post", side_effect=lambda *a, **k: next(reponses)):
         res = login("e@x", "pw", "33", "sk", "dev", "ck")
-    assert res == {"sid": "S", "ecode": "E", "chKey": "ck", "deviceId": "dev", "uid": "U"}
+    assert res == {
+        "sid": "S",
+        "ecode": "E",
+        "chKey": "ck",
+        "deviceId": "dev",
+        "uid": "U",
+        "partnerIdentity": "p1",
+    }
+
+
+def test_login_without_partner_identity_is_none():
+    key = RSA.generate(1024)
+    reponses = iter(
+        [
+            FakeResp({"result": {"token": "T", "publicKey": str(key.n), "exponent": str(key.e)}}),
+            FakeResp({"result": {"sid": "S", "ecode": "E", "uid": "U"}}),  # old response, no field
+        ]
+    )
+    with patch("requests.Session.post", side_effect=lambda *a, **k: next(reponses)):
+        res = login("e@x", "pw", "33", "sk", "dev", "ck")
+    assert res["partnerIdentity"] is None
 
 
 def test_login_erreur():
