@@ -147,9 +147,11 @@ At each start the integration removes what it can no longer provide, so nothing 
 
 A device is only removed when the integration is sure it is gone, and never in bulk:
 
-- the cloud's device list must be **complete** (every home answered) and **consistent with the
-  previous start** (no home missing, none suddenly empty). On a first start, or after a doubtful
-  answer, nothing is removed; the next start that confirms the same picture does it;
+- the cloud's device list must be **complete** (every home answered) and **the same as at the
+  previous start** (same homes, same number of devices in each). Whenever it differs — first
+  start, a home that did not answer, a shorter list — nothing is removed; the next start that
+  shows the same picture again does it. A device that left is therefore cleaned up one restart
+  later;
 - at most **3 devices per start, or 5 % of the entry's devices** if that is more. Above that,
   nothing is removed and a warning in the log says so: delete them yourself from their device page
   if they really left the account.

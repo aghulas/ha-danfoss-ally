@@ -77,7 +77,7 @@ async def test_device_of_a_head_gone_from_the_account_is_removed_with_its_entiti
     hass: HomeAssistant, hass_storage
 ):
     entry = _entry(hass)
-    _remember(hass_storage, entry, {"1": 2})  # an earlier complete list is on record
+    _remember(hass_storage, entry, {"1": 1})  # the previous start saw the same picture
     gone = _device(hass, entry, "dev-gone", "Old head")
     orphan_switch = _entity(hass, entry, "switch", "dev-gone_preheat", gone)
     orphan_sensor = _entity(hass, entry, "sensor", "dev-gone_battery", gone)
@@ -315,7 +315,7 @@ async def test_too_many_absent_devices_removes_nothing_and_warns_without_identif
     """4 of 5 devices absent on a confirmed list: over the limit (3, or 5 % if more), so nothing is
     removed. The warning carries counts only."""
     entry = _entry(hass)
-    _remember(hass_storage, entry, {"1": 5})
+    _remember(hass_storage, entry, {"1": 1})  # same picture as now: only the limit protects
     _device(hass, entry, "dev-1", "Salon")  # the live head, registered by an earlier run
     gone = _stale_devices(hass, entry, 4, prefix="secretid")
     await _setup(hass, entry, FakeCloudClient(devices=[head()]))
@@ -327,7 +327,7 @@ async def test_too_many_absent_devices_removes_nothing_and_warns_without_identif
 
 async def test_absent_devices_at_the_limit_are_removed(hass: HomeAssistant, hass_storage):
     entry = _entry(hass)
-    _remember(hass_storage, entry, {"1": 4})
+    _remember(hass_storage, entry, {"1": 1})
     gone = _stale_devices(hass, entry, 3)
     await _setup(hass, entry, FakeCloudClient(devices=[head()]))
     assert _remaining(hass, gone) == []
@@ -337,7 +337,7 @@ async def test_limit_follows_the_share_on_a_large_install(hass: HomeAssistant, h
     """100 devices: the 5 % share (5) is the limit. 6 absent are kept, 5 would be removed."""
     live = [head(f"h{i}", f"Head {i}") for i in range(94)]
     entry = _entry(hass)
-    _remember(hass_storage, entry, {"1": 100})
+    _remember(hass_storage, entry, {"1": 94})
     for dev in live:  # registered by earlier runs, as on a real install
         _device(hass, entry, dev.id, dev.name)
     gone = _stale_devices(hass, entry, 6)
@@ -346,7 +346,7 @@ async def test_limit_follows_the_share_on_a_large_install(hass: HomeAssistant, h
 
     entry2 = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, unique_id="autre@exemple.fr")
     entry2.add_to_hass(hass)
-    _remember(hass_storage, entry2, {"1": 100})
+    _remember(hass_storage, entry2, {"1": 95})
     live2 = [head(f"k{i}", f"Other {i}") for i in range(95)]
     for dev in live2:
         _device(hass, entry2, dev.id, dev.name)
@@ -362,3 +362,61 @@ async def test_record_of_known_homes_is_dropped_with_the_entry(hass: HomeAssista
     assert await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
     assert _recorded(hass_storage, entry) is None
+
+
+async def test_truncated_list_within_the_limit_removes_nothing_at_that_start(
+    hass: HomeAssistant, hass_storage
+):
+    """A home answers a complete-looking but SHORTER list (3 devices before, 1 now). The absence
+    fits the limit, yet one read cannot tell a truncated answer from devices that left: nothing
+    is removed at this start. If the next start shows the same picture, they are removed."""
+    entry = _entry(hass)
+    _remember(hass_storage, entry, {"1": 3})
+    _device(hass, entry, "dev-1", "Salon")
+    missing = _stale_devices(hass, entry, 2)
+    fake = FakeCloudClient(devices=[head()])  # complete flag true, 1 device instead of 3
+    await _setup(hass, entry, fake)
+    assert _remaining(hass, missing) == missing
+    assert _recorded(hass_storage, entry) == {"1": 1}  # the new picture is recorded
+
+    with patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=fake):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+    assert _remaining(hass, missing) == []  # confirmed over two starts
+
+
+async def test_truncated_list_that_recovers_never_removes_anything(
+    hass: HomeAssistant, hass_storage
+):
+    """The short answer was a glitch: the next start sees the full list again. The picture
+    differs from the recorded short one, so that start does not remove either, and the devices
+    are all present anyway."""
+    entry = _entry(hass)
+    _remember(hass_storage, entry, {"1": 3})
+    heads = [head("dev-1", "Salon"), head("dev-2", "Deux"), head("dev-3", "Trois")]
+    devices = [_device(hass, entry, h.id, h.name) for h in heads]
+    await _setup(hass, entry, FakeCloudClient(devices=heads[:1]))  # truncated
+    assert _remaining(hass, devices) == devices
+
+    with patch(
+        "custom_components.danfoss_ally_cloud.CloudClient",
+        return_value=FakeCloudClient(devices=heads),
+    ):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+    assert _remaining(hass, devices) == devices
+    assert _recorded(hass_storage, entry) == {"1": 3}
+
+
+async def test_a_new_device_delays_the_cleanup_by_one_start(hass: HomeAssistant, hass_storage):
+    """Any change of the picture, even a count going UP, postpones removals to the next start."""
+    entry = _entry(hass)
+    _remember(hass_storage, entry, {"1": 1})
+    gone = _stale_devices(hass, entry, 1)
+    fake = FakeCloudClient(devices=[head("dev-1", "Salon"), head("dev-2", "New")])
+    await _setup(hass, entry, fake)
+    assert _remaining(hass, gone) == gone
+    with patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=fake):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+    assert _remaining(hass, gone) == []

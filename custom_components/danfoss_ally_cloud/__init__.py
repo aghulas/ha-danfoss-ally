@@ -453,11 +453,15 @@ async def _async_device_list_confirmed(
     removal only when:
 
     - the client reports the list complete (every home answered with a list); and
-    - a previous complete list is on record for this entry, and every home it held is still
-      there, none having dropped from "some devices" to "none".
+    - the picture is STABLE over two starts: the homes and the number of devices in each are
+      IDENTICAL to those recorded at the previous complete start.
 
-    So a first start, a home that vanished, or a home answered empty, never removes anything: the
-    record is refreshed, and only a later start that confirms the same picture may remove.
+    A complete flag alone is not enough: a home can answer with a truncated list, non-empty but
+    shorter than the real one, and nothing in a single read tells it from devices that left. So
+    whenever the picture differs from the record (first start, a home that vanished or answered
+    empty, a count that moved in either direction), nothing is removed and the new picture is
+    recorded; a device that really left is removed at the next start, once the same picture is
+    seen again. One start of delay costs nothing for a cosmetic cleanup.
     """
     client = coordinator.client
     complete = bool(getattr(client, "device_list_complete", False))
@@ -466,9 +470,7 @@ async def _async_device_list_confirmed(
     known = ((await store.async_load()) or {}).get("homes")
     if complete and current != known:
         await store.async_save({"homes": current})
-    if not complete or known is None:
-        return False
-    return all(gid in current and (count == 0 or current[gid] > 0) for gid, count in known.items())
+    return complete and known is not None and current == known
 
 
 async def _async_cleanup_stale_devices(
@@ -480,7 +482,8 @@ async def _async_cleanup_stale_devices(
     Room and home devices are never removed here: their presence depends on best-effort reads
     (topology, holidays) that may fail at start-up. For the others, two guard-rails:
 
-    - the device list must be confirmed complete (``_async_device_list_confirmed``);
+    - the device list must be confirmed: complete, and the same picture as at the previous
+      complete start (``_async_device_list_confirmed``);
     - proportion: more than ``STALE_DEVICES_MAX`` devices to remove, and more than
       ``STALE_DEVICES_MAX_SHARE`` of the entry's devices, is not a cleanup but an anomaly. Nothing
       is removed, a warning says so, and the user can delete each device from its page
@@ -505,8 +508,9 @@ async def _async_cleanup_stale_devices(
         return 0
     if not confirmed:
         _LOGGER.info(
-            "%s device(s) absent from the cloud list were kept: the list is not confirmed "
-            "complete yet (first start, or a home that did not answer as before).",
+            "%s device(s) absent from the cloud list were kept: the list is not confirmed yet "
+            "(incomplete, or different from the previous start). They are removed at a later "
+            "start if the list stays the same.",
             len(stale),
         )
         return 0
