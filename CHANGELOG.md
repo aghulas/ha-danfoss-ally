@@ -2,7 +2,7 @@
 
 ## 1.1.0 — Real-hardware validation fixes (R-1, R-3, W-3), relays per building, gated unbind
 
-Minor release built from the real-hardware validation of 2026-11-18/19 on the school install (about
+Minor release built from the real-hardware validation of 2026-11-18/19 on a large real install (about
 99 heads, two homes): the integration was checked for coherence against the official Danfoss app and
 the MQTT it publishes. It fixes the active setpoint and heating state (R-1), adds an opt-in
 post-command refresh so writes show up in good time (R-3), attaches each boiler relay to its own
@@ -123,7 +123,7 @@ below).
 
 ### Validation status
 
-Validated on real hardware (2026-11-18/19, release candidates rc1 to rc3 on the school install):
+Validated on real hardware (2026-11-18/19, release candidates rc1 to rc3 on a real install):
 R-1, R-2 (open-window detection), R-3 and its settle delay, setpoint writes (comfort, setback,
 override and back to schedule, weekly schedule intact), head settings routed by room / local tunnel
 (W-3), window detection through the local tunnel, MQTT availability following `online`, preheat read

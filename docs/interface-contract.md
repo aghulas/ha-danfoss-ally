@@ -291,7 +291,7 @@ the shape observed on the app and **replayed on real hardware**, implemented by 
 `api/client.py` (`gw_id = dev.mesh_id or devId`, falling back to the `devId` if the `meshId` is
 missing). The code remains the reference; this table was aligned on it on 2026-11-17 (an earlier
 version of the contract said `gwId = devId` for an isolated head). **Confirmed on real hardware on
-2026-11-17** (C0b trial, ungrouped head "E-2 Local Menage"): a schedule write targeting the head
+2026-11-17** (C0b trial, an ungrouped test head): a schedule write targeting the head
 with `gwId = meshId` was accepted by the backend **and reached the hardware** (the Monday comfort
 slot appeared in the head's schedule, re-read through the tunnel). `gwId = devId` for a schedule
 write is **not** proven and must not be reintroduced blindly.
@@ -323,7 +323,7 @@ write is **not** proven and must not be reintroduced blindly.
 | End of return to schedule | `{"2": "at_home"}` | display only (R4, R5) |
 | Room settings | `{"1": bool}` preheat, `{"30": bool}` lock, `{"116": bool}` window, `{"18": 210}` upper bound | applied in 5 to 10 min |
 
-**Setback publish side effect (real hardware, 2026-11-19, E-2 Circulation, setback 14 → 13.5).**
+**Setback publish side effect (real hardware, 2026-11-19, a two-head test room, setback 14 → 13.5).**
 Publishing `{"109": v, "119": v}` makes the heads apply `v` **immediately** as their current setpoint
 (`OccupiedSetpoint` = `v`, `SetpointChangeSource` = `Externally`), **even in a comfort slot**. The
 schedule rewrite that follows (R3) brings the slot's setpoint back 1 to 3 min later (`Schedule`
@@ -340,7 +340,7 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   Measured 2026-11-19 (DP 30, a two-head room): applied on **both** heads in the cloud at
   T0 + ~15 s, well under the 5–10 min of R7.
 - **Isolated head**: `tuya.m.custom.wkf.settings.change` (resType 1) is **accepted but never
-  applied** for DP 30 / DP 116: C-1 stayed locked more than 10 min, with `gwId = meshId` (the
+  applied** for DP 30 / DP 116: the test head stayed locked more than 10 min, with `gwId = meshId` (the
   integration) and with `gwId = devId` (the MCP connector) alike — **addressing is not the cause**.
   Consistent with the connector's 2026-11-15 survey (DP 116 applied on 0 of 7 isolated heads).
   An app capture (emulator + frida, 2026-11-19) explains it: the app uses `settings.change` only for
@@ -398,7 +398,7 @@ reference, over the published product schema.
 > (`dp_schema_officiel.md`, see `docs/reuse.md`) announces a `10⁰` scale for DP 171; this is
 > **wrong**. The integration and `pydanfoss_cloud.local.tunnel` (`setpoint_value` / `DP_SETPOINT`)
 > encode the override in **hundredths of °C**, confirmed on real hardware on 2026-11-17 (C0 trial,
-> head #1 "D-1 Local Apel": an override to `7.0 °C` was published as raw `700` and read back by the
+> a test head: an override to `7.0 °C` was published as raw `700` and read back by the
 > head as `7`, idle — whereas a `10⁰` reading of `700` would have clamped to the upper bound and
 > requested heat). Do not "correct" the code to the schema.
 

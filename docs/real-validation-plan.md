@@ -8,7 +8,7 @@
 
 ## 0. Prerequisites (before the session)
 
-- [ ] Integration `danfoss_ally_cloud` **enabled** on the Pi (10.77.20.244). It is installed but was
+- [ ] Integration `danfoss_ally_cloud` **enabled** on the HA host. It is installed but was
       left disabled — re-enable it, confirm the config entry loads (`ha_integrations`).
 - [ ] **Distinct deviceId** from the MCP connector in the config entry (coexistence, PR #59) — else
       the two share one Tuya session and invalidate each other. Confirm both the app-side MCP and the

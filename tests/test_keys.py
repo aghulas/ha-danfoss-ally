@@ -17,13 +17,13 @@ class _FakeClient:
 
 async def test_fetch_gateway_keys_filtre_et_ip():
     raw = [
-        {"devId": "gw-1", "name": "A-0 Gateway", "category": "wg2", "localKey": "cle-synth-1"},
-        {"devId": "gw-2", "name": "B-0 Gateway", "category": "wg2", "localKey": ""},  # no key
+        {"devId": "gw-1", "name": "Gateway A", "category": "wg2", "localKey": "cle-synth-1"},
+        {"devId": "gw-2", "name": "Gateway B", "category": "wg2", "localKey": ""},  # no key
         {"devId": "head-1", "name": "Salon", "category": "wk", "localKey": ""},  # head, excluded
     ]
-    meta = {"gw-1": {"lan_ip": "10.77.20.226"}}
+    meta = {"gw-1": {"lan_ip": "192.0.2.10"}}
     keys = await async_fetch_gateway_keys(_FakeClient(raw, meta))
     assert set(keys) == {"gw-1"}  # gw-2 (no key) and the head excluded
     assert keys["gw-1"].local_key == "cle-synth-1"
-    assert keys["gw-1"].ip == "10.77.20.226"
-    assert keys["gw-1"].name == "A-0 Gateway"
+    assert keys["gw-1"].ip == "192.0.2.10"
+    assert keys["gw-1"].name == "Gateway A"

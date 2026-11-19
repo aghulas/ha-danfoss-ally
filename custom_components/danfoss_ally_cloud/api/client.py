@@ -628,11 +628,11 @@ class CloudClient:
 
         ⚠ NOT a working path for the head settings DP 30 (child lock) / DP 116 (window detection).
         Real-hardware validation W-3 (2026-11-19): on an ISOLATED head the request is accepted but
-        never applied (C-1 stayed locked > 10 min), both with ``gwId = meshId`` (this integration)
-        and ``gwId = devId`` (the MCP connector) - addressing is not the cause; consistent with the
-        connector's 2026-11-15 survey (DP 116 applied on 0 of 7 isolated heads). An app capture the
-        same day showed why: the app only uses this route for its "Settings" block
-        ``{"1", "118", "119", "121"}`` (with ``gwId = devId``) and toggles DP 30 through a DP
+        never applied (the test head stayed locked > 10 min), both with ``gwId = meshId`` (this
+        integration) and ``gwId = devId`` (the MCP connector) - addressing is not the cause;
+        consistent with the connector's 2026-11-15 survey (DP 116 applied on 0 of 7 isolated heads).
+        An app capture the same day showed why: the app only uses this route for its "Settings"
+        block ``{"1", "118", "119", "121"}`` (with ``gwId = devId``) and toggles DP 30 through a DP
         publish over Tuya cloud MQTT (``smart/mb/out/<gateway>``), not over HTTP. Contract §4.2.
 
         So the setting switches no longer call this: a grouped head is set through its room

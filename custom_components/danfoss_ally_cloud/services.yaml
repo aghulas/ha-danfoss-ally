@@ -33,7 +33,7 @@ create_room:
         object:
     home:
       required: false
-      example: "256784132"
+      example: "123456789"
       selector:
         text:
     config_entry_id:
