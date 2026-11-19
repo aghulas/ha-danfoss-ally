@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Collection
 from typing import Any
 
 from homeassistant.exceptions import HomeAssistantError
@@ -54,10 +55,16 @@ async def async_mqtt_write(
     dps: dict[int, Any],
     *,
     supervised: frozenset[int] = frozenset(),
+    confirm_dps: Collection[int] | None = None,
 ) -> str:
     """Publish ``dps`` ({dp: raw value}) to ``dev`` and return how the write was confirmed
     (``CONFIRMED_BY_ECHO`` / ``CONFIRMED_BY_CLOUD``). Raises ``HomeAssistantError`` when a value is
-    refused, the publish fails, or nothing confirms the write."""
+    refused, the publish fails, or nothing confirms the write.
+
+    ``confirm_dps``: the DPs whose confirmation is required (default: all of them). A companion DP
+    the app sends along but that the head may overrule at once (``temp_set`` next to the comfort
+    setting) is published and validated like the others, without making the write fail when its
+    own echo does not come."""
     if not dev.node_id or not dev.mesh_id:
         raise HomeAssistantError(
             "cloud-MQTT write impossible: the head's gateway address is unknown"
@@ -67,12 +74,15 @@ async def async_mqtt_write(
     except CloudError as err:
         raise HomeAssistantError(f"cloud-MQTT write refused: {err}") from err
 
+    required = {
+        dp: value for dp, value in values.items() if confirm_dps is None or dp in confirm_dps
+    }
     # Listen for the echoes before publishing, so a fast gateway cannot answer unheard.
     waiters = [
         asyncio.ensure_future(
             link.await_confirmation(dev.node_id, dp, value, timeout_s=MQTT_CONFIRM_TIMEOUT)
         )
-        for dp, value in values.items()
+        for dp, value in required.items()
     ]
     await asyncio.sleep(0)
     try:
@@ -92,12 +102,12 @@ async def async_mqtt_write(
         except CloudError as err:
             _LOGGER.debug("cloud-MQTT confirmation read failed (%s)", type(err).__name__)
             fresh = None
-        if not fresh or any(fresh.get(str(dp)) != value for dp, value in values.items()):
+        if not fresh or any(fresh.get(str(dp)) != value for dp, value in required.items()):
             await coordinator.async_request_refresh()
             raise HomeAssistantError(
                 "cloud-MQTT write not confirmed (no echo from the gateway, the cloud still differs)"
             )
         source = CONFIRMED_BY_CLOUD
-    _LOGGER.debug("cloud-MQTT DP(s) %s confirmed by %s", sorted(values), source)
+    _LOGGER.debug("cloud-MQTT DP(s) %s confirmed by %s", sorted(required), source)
     await coordinator.async_request_refresh()
     return source

@@ -193,6 +193,11 @@ class _SetupCoord(_FakeCloudCoord):
 REMOVED: list[str] = []  # unique ids the last platform setup flagged as closed
 
 
+def _removed_bounds():
+    """The bound entities the last setup flagged as closed (other head numbers left aside)."""
+    return [uid for uid in REMOVED if uid.endswith("_bound")]
+
+
 async def _setup(
     devices,
     *,
@@ -224,18 +229,18 @@ async def _setup(
 
 async def test_no_bound_entity_by_default():
     assert await _setup([_head(dev_id="iso")], supervised=frozenset()) == []  # candidates closed
-    assert REMOVED == ["iso_upper_bound", "iso_lower_bound"]
+    assert _removed_bounds() == ["iso_upper_bound", "iso_lower_bound"]
     assert await _setup([_head(dev_id="iso")], cloud_mqtt=False) == []
-    assert REMOVED == ["iso_upper_bound", "iso_lower_bound"]
+    assert _removed_bounds() == ["iso_upper_bound", "iso_lower_bound"]
     assert await _setup([_head(dev_id="iso")], trial_head=None) == []  # no trial head designated
-    assert REMOVED == ["iso_upper_bound", "iso_lower_bound"]
+    assert _removed_bounds() == ["iso_upper_bound", "iso_lower_bound"]
 
 
 async def test_open_dp_without_a_link_creates_nothing_and_removes_nothing():
     """The link failed to start: transient. The entities are not created this run, and their
     registry entries are kept (no customisation lost)."""
     assert await _setup([_head(dev_id="iso")], link=False) == []
-    assert REMOVED == []
+    assert _removed_bounds() == []
 
 
 async def test_bound_entities_only_for_isolated_verified_heads_and_open_dps():
@@ -245,10 +250,10 @@ async def test_bound_entities_only_for_isolated_verified_heads_and_open_dps():
     ents = await _setup([isolated, grouped, other_model], groups={"grp": "g1"})
     assert sorted(e.unique_id for e in ents) == ["iso_lower_bound", "iso_upper_bound"]
     # The grouped head's bounds are closed; the unverified model is never considered at all.
-    assert REMOVED == ["grp_upper_bound", "grp_lower_bound"]
+    assert _removed_bounds() == ["grp_upper_bound", "grp_lower_bound"]
     only_upper = await _setup([isolated], supervised=frozenset({18}))
     assert [e.unique_id for e in only_upper] == ["iso_upper_bound"]
-    assert REMOVED == ["iso_lower_bound"]
+    assert _removed_bounds() == ["iso_lower_bound"]
 
 
 async def test_trial_is_confined_to_the_designated_head():
@@ -256,7 +261,7 @@ async def test_trial_is_confined_to_the_designated_head():
     head's are not provided (and any leftover registry entry is flagged for removal)."""
     ents = await _setup([_head(dev_id="iso"), _head(dev_id="iso2")], trial_head="iso")
     assert sorted(e.unique_id for e in ents) == ["iso_lower_bound", "iso_upper_bound"]
-    assert REMOVED == ["iso2_upper_bound", "iso2_lower_bound"]
+    assert _removed_bounds() == ["iso2_upper_bound", "iso2_lower_bound"]
     assert all(e.extra_state_attributes.get("write_trial") is True for e in ents)
 
 

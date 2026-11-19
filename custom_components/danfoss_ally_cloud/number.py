@@ -9,10 +9,11 @@ comfort or setback directly, whatever the mode.
 Exposed only for verified products (``WRITE_VERIFIED_PRODUCTS``): elsewhere no path-1a write method
 is proven, so no entity (rather than a lying one).
 
-Per ISOLATED head, two ``number`` entities set the **upper bound** (DP 18) and the **lower bound**
-(DP 27) of its setpoint, over the Tuya cloud MQTT channel — the only path the app itself uses for
-them (contract §4.2). They exist only when the cloud-MQTT write option is on and their DP is open
-on that channel (proven, or a candidate listed for its supervised trial): with no proven path there
+Per ISOLATED head, ``number`` entities set the **upper bound** (DP 18) and the **lower bound**
+(DP 27) of its setpoint, and its **comfort** (DP 118 + 16), **setback** (DP 119) and **pause**
+(DP 120) setpoints, over the Tuya cloud MQTT channel — the only path the app itself uses for them
+(contract §4.2). They exist only when the cloud-MQTT write option is on and their DPs are open on
+that channel (proven, or candidates listed for their supervised trial): with no proven path there
 is no entity rather than a lying one.
 """
 
@@ -50,8 +51,13 @@ from .const import (
     DATA_COORDINATOR,
     DATA_MQTT_LINK,
     DOMAIN,
+    DP_AT_HOME_SETPOINT,
+    DP_HOLIDAY_SETPOINT,
+    DP_LEAVING_HOME_SETPOINT,
     DP_LOWER_TEMP,
     DP_PAUSE_SETPOINT,
+    DP_PREHEAT,
+    DP_TEMP_SET,
     DP_UPPER_TEMP,
     MODE_GROUP_SETPOINT_DP,
     SETPOINT_MAX,
@@ -115,6 +121,14 @@ async def async_setup_entry(
             elif link is not None:
                 entities.append(DanfossHeadBound(coordinator, dev.id, desc, link, supervised))
             # Open but no link (it failed to start): transient, the registry entry is kept.
+        for sp in HEAD_SETPOINTS:
+            # A setpoint needs ALL its DPs open (comfort: 118 and 16).
+            if not (
+                cloud_mqtt_on and isolated and all(mqtt_dp_open(dp, supervised) for dp in sp.dps)
+            ):
+                closed.append(f"{dev.id}_{sp.key}")
+            elif link is not None:
+                entities.append(DanfossHeadSetpoint(coordinator, dev.id, sp, link, supervised))
     remove_closed_head_numbers(hass, entry, closed)
     async_add_entities(entities)
 
@@ -301,16 +315,56 @@ def bound_write_dps(
     return dps
 
 
-class DanfossHeadBound(DanfossEntity, NumberEntity):
-    """Upper or lower setpoint bound of an ISOLATED head, written over Tuya cloud MQTT.
+class _HeadMqttNumber(DanfossEntity, NumberEntity):
+    """A numeric setting of an ISOLATED head written over Tuya cloud MQTT.
 
     Unavailable when the head is no longer isolated, or the link cannot publish: there is no other
-    proven path for a head's bound. Never optimistic: the value shown is the one the cloud returns.
+    proven path for these settings. Never optimistic: the value shown is the one the cloud returns.
     """
 
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_native_step = SETPOINT_STEP
     _attr_mode = NumberMode.BOX
+    _dps: tuple[int, ...] = ()  # every DP the write sends
+
+    def __init__(
+        self,
+        coordinator: DanfossCoordinator,
+        device_id: str,
+        link: CloudMqttLink,
+        supervised_dps: frozenset[int] = frozenset(),
+    ) -> None:
+        super().__init__(coordinator, device_id)
+        self._link = link
+        self._supervised_dps = supervised_dps
+
+    def _write_path(self, dev: DanfossDevice | None) -> str:
+        if dev is None or not write_allowed(dev) or not dev.node_id or not dev.mesh_id:
+            return PATH_NONE
+        if self.coordinator.group_of(dev.id) is not None:
+            return PATH_NONE  # a grouped head is written through its room, not here
+        if not all(mqtt_dp_open(dp, self._supervised_dps) for dp in self._dps):
+            return PATH_NONE
+        return PATH_MQTT if self._link.can_publish(dev.mesh_id) else PATH_NONE
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._write_path(self.device) != PATH_NONE
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | bool]:
+        path = self._write_path(self.device)
+        attrs: dict[str, str | bool] = {"write_path": path}
+        if path == PATH_MQTT:
+            attrs["write_scope"] = "head"
+            if any(dp in MQTT_CANDIDATE_DPS for dp in self._dps):
+                attrs["write_trial"] = True
+        return attrs
+
+
+class DanfossHeadBound(_HeadMqttNumber):
+    """Upper or lower setpoint bound of an ISOLATED head, written over Tuya cloud MQTT."""
+
     entity_description: HeadBoundDescription
 
     def __init__(
@@ -321,27 +375,13 @@ class DanfossHeadBound(DanfossEntity, NumberEntity):
         link: CloudMqttLink,
         supervised_dps: frozenset[int] = frozenset(),
     ) -> None:
-        super().__init__(coordinator, device_id)
+        super().__init__(coordinator, device_id, link, supervised_dps)
         self.entity_description = description
-        self._link = link
-        self._supervised_dps = supervised_dps
+        self._dps = (description.dp,)
         self._attr_unique_id = f"{device_id}_{description.key}"
         low, high = MQTT_TENTHS_RANGE[description.dp]
         self._attr_native_min_value = low / 10
         self._attr_native_max_value = high / 10
-
-    def _write_path(self, dev: DanfossDevice | None) -> str:
-        if dev is None or not write_allowed(dev) or not dev.node_id or not dev.mesh_id:
-            return PATH_NONE
-        if self.coordinator.group_of(dev.id) is not None:
-            return PATH_NONE  # a grouped head has no proven bound write here
-        if not mqtt_dp_open(self.entity_description.dp, self._supervised_dps):
-            return PATH_NONE
-        return PATH_MQTT if self._link.can_publish(dev.mesh_id) else PATH_NONE
-
-    @property
-    def available(self) -> bool:
-        return super().available and self._write_path(self.device) != PATH_NONE
 
     @property
     def native_value(self) -> float | None:
@@ -349,16 +389,6 @@ class DanfossHeadBound(DanfossEntity, NumberEntity):
         if dev is None:
             return None
         return dev.max_setpoint if self.entity_description.bound == "upper" else dev.min_setpoint
-
-    @property
-    def extra_state_attributes(self) -> dict[str, str | bool]:
-        path = self._write_path(self.device)
-        attrs: dict[str, str | bool] = {"write_path": path}
-        if path == PATH_MQTT:
-            attrs["write_scope"] = "head"
-            if self.entity_description.dp in MQTT_CANDIDATE_DPS:
-                attrs["write_trial"] = True
-        return attrs
 
     async def async_set_native_value(self, value: float) -> None:
         dev = self.device
@@ -368,3 +398,148 @@ class DanfossHeadBound(DanfossEntity, NumberEntity):
         await async_mqtt_write(
             self.coordinator, self._link, dev, dps, supervised=self._supervised_dps
         )
+
+
+# --- isolated head: comfort / setback / pause setpoints over Tuya cloud MQTT ----------------------
+
+# The app's "Settings" block: after publishing a setpoint of this block over MQTT, the app also
+# posts the WHOLE block through ``settings.change`` (the cloud-side store of the workflow, contract
+# §4.2). Keys in the order the app sends them.
+SETTINGS_BLOCK_DPS: tuple[int, ...] = (
+    DP_PREHEAT,
+    DP_AT_HOME_SETPOINT,
+    DP_LEAVING_HOME_SETPOINT,
+    DP_HOLIDAY_SETPOINT,
+)
+
+
+@dataclass(frozen=True, kw_only=True)
+class HeadSetpointDescription(NumberEntityDescription):
+    """A per-mode setpoint of a head: what is read, and what the app publishes to set it."""
+
+    setpoint: str  # key in DanfossDevice.setpoints
+    dp: int  # the setting DP: its confirmation is required
+    companions: tuple[int, ...] = ()  # DPs the app publishes along, with the same value
+    in_settings_block: bool = False  # the app also posts the settings block over HTTP
+
+    @property
+    def dps(self) -> tuple[int, ...]:
+        return (self.dp, *self.companions)
+
+
+HEAD_SETPOINTS: tuple[HeadSetpointDescription, ...] = (
+    HeadSetpointDescription(
+        key="comfort_setpoint",
+        translation_key="comfort_setpoint",
+        setpoint="comfort",
+        dp=DP_AT_HOME_SETPOINT,
+        companions=(DP_TEMP_SET,),  # the app publishes {"118": v, "16": v}
+        in_settings_block=True,
+    ),
+    HeadSetpointDescription(
+        key="setback_setpoint",
+        translation_key="setback_setpoint",
+        setpoint="setback",
+        dp=DP_LEAVING_HOME_SETPOINT,  # {"119": v} alone: no DP 109 on an isolated head
+        in_settings_block=True,
+    ),
+    HeadSetpointDescription(
+        key="pause_setpoint",
+        translation_key="pause_setpoint",
+        entity_category=EntityCategory.CONFIG,
+        setpoint="pause",
+        dp=DP_PAUSE_SETPOINT,
+    ),
+)
+
+
+def settings_block(dev: DanfossDevice, changed: dict[int, int]) -> dict[str, object]:
+    """The whole settings block to post after a setpoint write: the head's current values, as the
+    cloud holds them, with ``changed`` applied. Raises ``HomeAssistantError`` when a value of the
+    block is unknown: the block is sent whole or not at all, never with a guessed value."""
+    block: dict[str, object] = {}
+    for dp in SETTINGS_BLOCK_DPS:
+        value = changed.get(dp, dev.dps.get(str(dp)))
+        if value is None or value == "":
+            raise HomeAssistantError(
+                f"setpoint write refused: DP {dp} of the head's settings block is unknown, so the "
+                "block the app posts with a setpoint change cannot be built"
+            )
+        block[str(dp)] = value
+    return block
+
+
+class DanfossHeadSetpoint(_HeadMqttNumber):
+    """Comfort, setback or pause setpoint of an ISOLATED head, written the way the app does.
+
+    1. The setpoint DP(s) are published over Tuya cloud MQTT and the setting DP's confirmation is
+       awaited (``async_mqtt_write``).
+    2. For the settings of the app's "Settings" block (comfort, setback), the whole block is then
+       posted through ``settings.change``, as the app does: it keeps the cloud-side store of the
+       workflow in step with the head. That HTTP call alone never reaches an isolated head (W-3);
+       it is not the write.
+
+    The value is checked against the head's own bounds before anything is sent.
+    """
+
+    entity_description: HeadSetpointDescription
+
+    def __init__(
+        self,
+        coordinator: DanfossCoordinator,
+        device_id: str,
+        description: HeadSetpointDescription,
+        link: CloudMqttLink,
+        supervised_dps: frozenset[int] = frozenset(),
+    ) -> None:
+        super().__init__(coordinator, device_id, link, supervised_dps)
+        self.entity_description = description
+        self._dps = description.dps
+        self._attr_unique_id = f"{device_id}_{description.key}"
+
+    @property
+    def native_min_value(self) -> float:
+        dev = self.device
+        return dev.min_setpoint if dev and dev.min_setpoint is not None else SETPOINT_MIN
+
+    @property
+    def native_max_value(self) -> float:
+        dev = self.device
+        return dev.max_setpoint if dev and dev.max_setpoint is not None else SETPOINT_MAX
+
+    @property
+    def native_value(self) -> float | None:
+        dev = self.device
+        return dev.setpoints.get(self.entity_description.setpoint) if dev else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        desc = self.entity_description
+        dev = self.device
+        if dev is None or self._write_path(dev) != PATH_MQTT:
+            raise HomeAssistantError("setpoint write unavailable for this head")
+        try:
+            raw = encode_setpoint(
+                value, self.native_min_value, self.native_max_value, SETPOINT_STEP
+            )
+        except CloudError as err:
+            raise HomeAssistantError(f"setpoint refused: {err}") from err
+        # Build the HTTP block BEFORE publishing: if it cannot be built, nothing is sent at all.
+        block = settings_block(dev, {desc.dp: raw}) if desc.in_settings_block else None
+        await async_mqtt_write(
+            self.coordinator,
+            self._link,
+            dev,
+            dict.fromkeys(desc.dps, raw),
+            supervised=self._supervised_dps,
+            confirm_dps=(desc.dp,),
+        )
+        if block is None:
+            return
+        try:
+            # ``gwId`` = the head's own devId for this block, as the app sends it.
+            await self.coordinator.client.async_write_setting(dev.id, dev.product_id or "", block)
+        except CloudError as err:
+            raise HomeAssistantError(
+                "setpoint written on the head and confirmed, but the cloud-side settings block "
+                f"was refused ({err}): the cloud may hold the previous value"
+            ) from err

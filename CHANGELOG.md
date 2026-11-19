@@ -42,6 +42,12 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   are checked before sending (schema range and step, ordering, no bound that excludes the comfort
   or setback setpoint). Raising the lower bound above the pause setpoint also sends DP 120 in the
   same frame. **Not validated on real hardware yet.**
+- **Comfort, setback and pause setpoints of an isolated head (DP 118 + 16, 119, 120) as cloud-MQTT
+  candidates, closed by default.** Three `number` entities per isolated head, present only while
+  their DPs are open. They had no path at all before. Written as the app does: MQTT publish, then
+  for comfort and setback the whole settings block over HTTP. Values are checked against the head's
+  own bounds before sending. **Not validated on real hardware yet**; the trial must also settle
+  whether a schedule rewrite is needed after the publish.
 - The cloud-MQTT write confirmation falls back to one read of the head through the per-device
   route when the gateway's echo does not come (it used the bulk list, which lags for minutes).
 
