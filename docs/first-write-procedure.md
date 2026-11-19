@@ -237,7 +237,9 @@ Reading the result:
      head may apply the frame late (stage A's "only after minutes" case). Record the delay if it
      does; the trial is not passed either way.
   2. If the head ended up at the trial value: disarm, restore it through the tunnel (the preheat
-     switch, proven), read `0x0025` back (= `V0`).
+     switch, proven), read `0x0025` back (= `V0`). Then read cloud DP 1 through the per-device
+     route: a tunnel write does not update that cache, so if it still shows the trial value,
+     resynchronise it from the app as in step 3.
   3. If the head stayed at `V0` while **cloud DP 1 shows the trial value**, the gateway cache is
      out of step with the head — the HTTP failure, reproduced. Toggling the switch back does
      **not** fix it: the integration reads the head, finds it already at `V0` and publishes

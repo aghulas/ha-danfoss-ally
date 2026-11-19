@@ -156,6 +156,7 @@ async def test_preheat_not_confirmed_when_the_head_does_not_change():
         await async_mqtt_write_preheat(local, link, head(), True, supervised=_ARMED)
     # The message does not claim more than is known: the frame left, and may still apply later.
     assert "the frame was sent" in str(err.value)
+    assert " s later" in str(err.value)  # the time really elapsed, not the nominal timeout
     assert "may still apply it later" in str(err.value)
     link.publish_dp.assert_awaited_once()
     assert local.data["dev-1"] is False  # the switch keeps showing what the head said

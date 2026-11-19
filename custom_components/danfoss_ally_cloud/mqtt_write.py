@@ -48,7 +48,8 @@ DP_PREHEAT = 1
 # PREHEAT_CONFIRM_INTERVAL seconds until its attribute 0x0025 shows the value, for at most
 # PREHEAT_CONFIRM_TIMEOUT seconds (the stop rule of docs/first-write-procedure.md: an independent
 # source that does not show the change within about a minute is the "accepted but not applied"
-# failure). One tunnel read takes several seconds, hence the interval.
+# failure). One tunnel read takes several seconds, hence the interval; the last read starts before
+# the deadline and may end after it, so the error reports the time really elapsed.
 PREHEAT_CONFIRM_TIMEOUT = 60.0
 PREHEAT_CONFIRM_INTERVAL = 10.0
 
@@ -199,9 +200,9 @@ async def async_mqtt_write_preheat(
             return CONFIRMED_BY_TUNNEL
         if loop.time() >= deadline:
             raise HomeAssistantError(
-                "cloud-MQTT preheat write not confirmed: the frame was sent, and after "
-                f"{PREHEAT_CONFIRM_TIMEOUT:.0f} s the head's attribute 0x0025, read through the "
-                "local tunnel, does not show the value (the gateway's echo and the cloud are "
+                "cloud-MQTT preheat write not confirmed: the frame was sent, and "
+                f"{loop.time() - sent_at:.0f} s later the head's attribute 0x0025, read through "
+                "the local tunnel, does not show the value (the gateway's echo and the cloud are "
                 "not accepted as confirmation for preheat). The head may still apply it later, "
                 "and the cloud's DP 1 may now differ from the head: read both again before "
                 "any other write"
