@@ -92,6 +92,10 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
 
 ### Fixed
 
+- **`get_local_survey` failed on every call** with "'method' object is not iterable" (service
+  and WebSocket command): the heads were passed to the tunnel manager as the coordinator's
+  method instead of its result. Present since the service was added (0.4.0); found on real
+  hardware with 1.2.0-rc3 (2026-11-19). The test double now has the real coordinator's shape.
 - **Building panel: single-head rooms were missing.** A room of the app with one head has no
   schedule-group, so the fleet overview (contract §3.6) only listed the grouped rooms and every total
   ignored the other heads (a 99-head fleet showed 66, and a fault or low battery on a lone head was

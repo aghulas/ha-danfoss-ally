@@ -1016,7 +1016,7 @@ async def local_survey(hass: HomeAssistant, store: dict) -> dict:
     local = store.get(DATA_LOCAL)
     if local is None:
         raise OperationError("local_disabled", "local tunnel not enabled on this account")
-    heads = local.heads
+    heads = local.heads()  # a method of DanfossLocalCoordinator, not an attribute
     summaries = await hass.async_add_executor_job(local.manager.survey_heads, heads)
     reachable = sum(1 for s in summaries.values() if not s.get("unreachable"))
     return {
