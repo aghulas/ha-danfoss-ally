@@ -260,7 +260,12 @@ async def _async_setup_mqtt_link(
         "Cloud-MQTT live link started (EXPERIMENTAL): isolated-head switches may write via MQTT. "
         "A first write must be supervised."
     )
-    entry.async_on_unload(link.stop)
+
+    async def _stop_link() -> None:
+        # loop_stop() joins the paho thread: never block the event loop.
+        await hass.async_add_executor_job(link.stop)
+
+    entry.async_on_unload(_stop_link)
     return link
 
 

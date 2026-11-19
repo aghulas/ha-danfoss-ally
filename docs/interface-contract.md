@@ -382,7 +382,7 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   session** (distinct deviceId — coexists with the app, proven 2026-11-19). The write is **confirmed**
   by the gateway's inbound protocol-4 `{cid,dps}` echo on `smart/mb/in/<gw>` (or a cloud re-read),
   with a timeout and a clear error — never optimistic. **Validated on real hardware 2026-11-19: DP 30
-  (child lock) on C-1 Salle ASH, confirmed in the cloud, the app and on the head.** For now the MQTT
+  (child lock) on an isolated test head, confirmed in the cloud, the app and on the head.** For now the MQTT
   path carries **DP 30 only** (`MQTT_WRITE_DPS`); other DPs are added one at a time after a supervised
   write. When the option is on and the link connected, an isolated head's child-lock switch routes
   here; otherwise the tunnel; otherwise unavailable. (Protocol details: docs/cloud-mqtt-publish.md.)

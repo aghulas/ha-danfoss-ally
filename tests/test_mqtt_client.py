@@ -128,6 +128,7 @@ class _FakePaho:
         self.username = self.password = None
         self.tls = None
         self.loop_started = self.loop_stopped = self.disconnected = False
+        self.loop_stop_thread = None
         self.published = []
         self.connected_to = None
         import types
@@ -151,7 +152,10 @@ class _FakePaho:
         self.loop_started = True
 
     def loop_stop(self):
+        import threading
+
         self.loop_stopped = True
+        self.loop_stop_thread = threading.current_thread()
 
     def disconnect(self):
         self.disconnected = True

@@ -1,17 +1,10 @@
-"""Tuya cloud MQTT DP publish (protocol 2.3) - PROTOTYPE, codec only, no network.
+"""Tuya cloud MQTT DP publish (protocol 2.3) — codec only, no network.
 
-Why: the Danfoss app writes an isolated head's settings (DP 1, 30, 116, 133, 101, 18, 27,
-118+16, 119, 120) with ``AbsThingDevice.publishDps`` -> MQTT publish on
-``smart/mb/out/<gateway devId>``; ``tuya.m.custom.wkf.settings.change`` is NOT that path (W-3,
-capture 2026-11-19). This module reproduces the frame the app builds, from the decompiled Thing
-SDK of the Danfoss app (classes4/5/9.dex; class names are obfuscated, the "compiled from"
-names are given):
-
-- ``MqttControl2_3`` (qpbpqpq) / ``PublishMapper`` (qqddbpb) / ``AesGcmUtil``: encoder.
-- ``MsgProtocol2_3`` (qbpppdb): decoder of ``smart/mb/in/<gw>`` (same layout).
-- ``dddbppd`` + ``dqdpbbd.sendCommand``: DP publish = protocol 5, data ``{cid, ctype, dps}``.
-- ``SandO``: per-device (sequence, origin) counter.
-- ``SdkMqttCertificationInfo`` (dqqbdqb): broker username/password (see docs/cloud-mqtt-publish.md).
+The path the Danfoss app uses to write an **isolated** head's settings:
+``tuya.m.custom.wkf.settings.change`` is accepted by the cloud but never applied (W-3,
+docs/interface-contract.md §4.2), whereas publishing the DP on ``smart/mb/out/<gateway devId>``
+is. This module builds/parses that frame and derives the broker credentials. Full wire
+specification: docs/cloud-mqtt-publish.md.
 
 Frame 2.3 (bytes)::
 
@@ -20,10 +13,11 @@ Frame 2.3 (bytes)::
     key     = gateway localKey, as ASCII bytes (16 chars -> AES-128)
     plaintext = JSON {"data": <data>, "protocol": <int>, "t": <epoch seconds>}  (compact)
 
-Nothing here opens a connection or sends anything: callers get a topic and a payload. Sending it
-to a real gateway is a WRITE on a real head and is out of scope until Rémi gives the go-ahead
-(see the design note). SECRETS: the localKey and the session material are never logged nor put
-in a repr.
+DP publish: protocol 5, ``data = {"cid": <head node_id>, "ctype": 0, "dps": {...}}``; inbound DP
+reports arrive as protocol 4 with the same layout.
+
+Nothing here opens a connection or sends anything: callers get a topic and a payload. SECRETS: the
+localKey and the session material are never logged nor put in a repr.
 """
 
 from __future__ import annotations
@@ -44,7 +38,7 @@ HEADER_LEN = 12
 NONCE_LEN = 12
 TAG_LEN = 16
 
-# Thing SDK protocol numbers (dddbppd): 5 = DP publish (the one we need), 22 = DP publish variant
+# Protocol numbers: 5 = DP publish (the one we use), 22 = a DP publish variant
 # used by another builder, 31 = DP query, 63 = sub-device add/cancel, 200/51 = config.
 PROTOCOL_DP_PUBLISH = 5
 
@@ -105,7 +99,7 @@ def encode_frame(
     t: int | None = None,
     nonce: bytes | None = None,
 ) -> bytes:
-    """Build a 2.3 frame (MqttControl2_3). ``nonce`` only for deterministic tests."""
+    """Build a 2.3 frame. ``nonce`` only for deterministic tests."""
     hdr = header(seq, origin)
     nonce = os.urandom(NONCE_LEN) if nonce is None else nonce
     if len(nonce) != NONCE_LEN:
@@ -135,7 +129,7 @@ class Frame:
 
 
 def decode_frame(local_key: str, frame: bytes) -> Frame:
-    """Decode and authenticate a 2.3 frame (MsgProtocol2_3). Raises FrameError."""
+    """Decode and authenticate a 2.3 frame. Raises FrameError."""
     if len(frame) < HEADER_LEN + NONCE_LEN + TAG_LEN:
         raise FrameError("frame too short")
     hdr = frame[:HEADER_LEN]
@@ -162,9 +156,9 @@ def decode_frame(local_key: str, frame: bytes) -> Frame:
 
 @dataclass
 class SeqOrigin:
-    """SandO: ``origin`` random per client session, ``seq`` starts at 2 and is bumped BEFORE each
-    publish (first frame carries 3). The receiver drops a repeated (seq, origin)
-    ("cloud command repeat"), so keep one instance per gateway for the whole MQTT session."""
+    """Per-session (seq, origin) counter: ``origin`` is random per session, ``seq`` starts at 2 and
+    is bumped BEFORE each publish (first frame carries 3). The receiver drops a repeated
+    (seq, origin) ("cloud command repeat"), so keep one instance per gateway for the session."""
 
     origin: int = field(default_factory=lambda: random.randint(1000, 1_000_999))  # noqa: S311
     seq: int = 2
@@ -218,7 +212,7 @@ def build_dp_publish(
     return PublishPlan(topic=topic_out(gateway_id), payload=payload, seq=seq, origin=origin)
 
 
-# --- Broker credentials (SdkMqttCertificationInfo, appTag "os", ThingSmartNetWork.mSdk = true) ---
+# --- Broker credentials (see docs/cloud-mqtt-publish.md) ---
 
 
 def _md5_hex(s: str) -> str:
@@ -237,26 +231,22 @@ def mqtt_client_id(package: str, device_id: str, uid: str, tag: str = DEFAULT_TA
 def mqtt_username(partner_identity: str, app_id: str, ch_key: str, sid: str, ecode: str) -> str:
     """``<partnerIdentity>_v1_<appId>_<chKey>_mb_<sid><last16(md5hex(md5hex(appId) + ecode))>``.
 
-    ``chKey`` = ThingNetworkSecurity.getChKey(ctx, appId) - the SAME call that fills the HTTP
-    ``chKey`` parameter, i.e. the installation chKey the integration already has. ``app_id`` =
-    ThingSmartNetWork.mAppId (the HTTP ``clientId``). Secret: never log the result."""
+    ``ch_key`` is the installation channel key the integration already holds (same value as the
+    HTTP ``chKey``); ``app_id`` is the HTTP client id. Secret: never log the result."""
     tail = _md5_hex(_md5_hex(app_id) + ecode)[-16:]
     return f"{partner_identity}_v1_{app_id}_{ch_key}_mb_{sid}{tail}"
 
 
 def _do_command_native_cmd2(sign_key: str, ecode: str) -> str:
-    """Reproduces ``SecureNativeApi.doCommandNative(ctx, 2, ecode, null, false)``.
+    """The broker password source: ``md5hex( md5hex(sign_key) + ecode )`` (32 hex chars).
 
-    Reverse-engineered on the AVD (2026-11-19, synthetic ecodes, 4/4): the native worker at
-    ``libthing_security.so+0x9364`` returns ``md5hex( md5hex(sign_key) + ecode )`` (32 hex chars).
-    It uses no HMAC/AES (confirmed: the mbedtls hook never fired). ``sign_key`` =
-    ``com.danfoss.ally_<deviceId>_<appSecret1>_<appSecret2>`` (the same global the request
-    signature uses), already held by the integration. Secret in, secret out: never log either."""
+    ``sign_key`` is the same composed key the request signature uses, already held by the
+    integration. Secret in, secret out: never log either."""
     return _md5_hex(_md5_hex(sign_key) + ecode)
 
 
 def mqtt_password(sign_key: str, ecode: str) -> str:
-    """Broker password = middle 16 chars of ``doCommandNative(cmd=2, ecode)`` (SdkMqttCertInfo).
+    """Broker password = the middle 16 chars of the cmd-2 digest (see _do_command_native_cmd2).
 
     Pure Python now (no app, no oracle): derive the 32-hex cmd-2 output, take ``[8:24]``."""
     if not sign_key or not ecode:

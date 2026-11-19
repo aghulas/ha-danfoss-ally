@@ -190,6 +190,11 @@ async def test_cloud_mqtt_live_link_setup_routes_isolated_switch(hass: HomeAssis
     assert sw._write_path(sw.device) == PATH_MQTT
     assert sw.available is True
 
+    import threading
+
+    loop_thread = threading.current_thread()
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert c.loop_stopped and c.disconnected  # link closed on unload
+    # loop_stop() joins the paho thread: it must run in the executor, not on the event loop.
+    assert c.loop_stop_thread is not None and c.loop_stop_thread is not loop_thread

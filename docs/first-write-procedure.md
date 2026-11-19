@@ -23,7 +23,7 @@ session or the validation session.**
 ## Preconditions
 
 - Test head: an **isolated** head (not grouped into a room) on a `WRITE_VERIFIED_PRODUCTS` model —
-  suggested **C-1 Salle ASH**. Confirm it is isolated and `online`.
+  an isolated test head on a verified model. Confirm it is isolated and `online`.
 - Note its current child-lock value `V0` (to restore).
 - Danfoss iPhone app open on that head's page (to observe; also confirms coexistence).
 - Physical access to the head (to read its screen / lock behaviour).
@@ -36,7 +36,7 @@ session or the validation session.**
 1. **Baseline**: read child-lock in HA and in the app; confirm they agree and the head is `online`.
    Record `V0`.
 2. **Arm**: enable `enable_cloud_mqtt` for the entry. The entry reloads; the link connects. Confirm
-   the **"Cloud MQTT link"** sensor is `connected`, and the C-1 child-lock switch shows
+   the **"Cloud MQTT link"** sensor is `connected`, and the test head's child-lock switch shows
    `write_path: cloud_mqtt`, `write_scope: head`, and is `available`.
 3. **Write** `not V0`: toggle the child-lock switch once. The integration publishes one DP-30 frame
    to `smart/mb/out/<gateway>` for this head's `cid` and waits for the confirmation.
@@ -60,7 +60,7 @@ session or the validation session.**
 - The switch write **raises** (not confirmed, or publish error) → stop; investigate (link
   connected? sensor shows connected? sid fresh?). The write may or may not have reached the head —
   read the head before retrying.
-- Any effect on a head other than C-1 → stop; the addressing (`cid`) is wrong.
+- Any effect on a head other than the test head → stop; the addressing (`cid`) is wrong.
 - The iPhone app gets disconnected when the link connects → stop; re-check the coexistence result.
 - Any doubt about reversibility → stop and revert (turn `enable_cloud_mqtt` off; the entry reloads
   and the link closes).

@@ -41,8 +41,8 @@ DEFAULT_REGION = "eu"
 # Marker for the dedicated R&D deviceId, distinct from the integration's own ("ha") and the app's.
 RD_DEVICE_ID_MARKER = "mqttrd"
 
-# ThingSmartNetWork.mAppId (= the HTTP clientId). The MQTT username's chKey is getChKey(ctx, appId),
-# so this is the app id used there, not the account deviceId.
+# The HTTP client id. The MQTT username uses this app id and the installation chKey (not the
+# account deviceId).
 DEFAULT_APP_ID = "7kypwcaqcvw3uvr7u95a"
 
 

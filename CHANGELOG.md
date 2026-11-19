@@ -18,7 +18,7 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   isolated head's child-lock switch routes through MQTT (previously unavailable); otherwise the
   local tunnel; otherwise unavailable — never an optimistic state. The write is **confirmed** by the
   gateway's inbound protocol-4 `{cid,dps}` echo (or a cloud re-read), with a 15 s timeout and a
-  clear error if unconfirmed. **Validated 2026-11-19: DP 30 on C-1 Salle ASH, confirmed in the
+  clear error if unconfirmed. **Validated 2026-11-19: DP 30 on an isolated test head, confirmed in the
   cloud, the app and physically on the head.** DP 30 only for now (`MQTT_WRITE_DPS`); other settings
   follow one per supervised validation.
 - **"Cloud MQTT link" connectivity binary sensor** (diagnostic, present only when the link exists),

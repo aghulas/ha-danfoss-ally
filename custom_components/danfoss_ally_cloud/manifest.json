@@ -16,6 +16,7 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/aghulas/ha-danfoss-ally/issues",
   "requirements": [
+    "paho-mqtt==1.6.1",
     "pycryptodome==3.21.0",
     "tinytuya==1.15.1"
   ],
