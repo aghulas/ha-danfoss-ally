@@ -16,8 +16,8 @@ optimistic state.
 
 Status of the cloud-MQTT channel: validated on real hardware and on `main`, behind the option
 `enable_cloud_mqtt`, **off by default**. Its write path carries the child lock only
-(`api.writes.MQTT_WRITE_DPS`); window detection is implemented as a candidate, closed until its
-supervised write; a diagnostic entity reports the link state. Wire format:
+(`api.writes.MQTT_WRITE_DPS`); window detection and the setpoint bounds are implemented as
+candidates, closed until their supervised write; a diagnostic entity reports the link state. Wire format:
 `docs/cloud-mqtt-publish.md`; procedure for a first write of a new DP:
 `docs/first-write-procedure.md`. With the option off, an isolated head's child lock is unavailable.
 
@@ -69,6 +69,7 @@ frames, so neither channel asks anything more of the user.
 | Weekly schedule | Cloud HTTP | Cloud HTTP |
 | Child lock | Cloud HTTP: room publish (applies to **every** head of the room) | Cloud MQTT when enabled and connected; otherwise unavailable |
 | Window detection | Cloud HTTP: room publish (whole room) | Local tunnel when the head answers locally; otherwise unavailable. Cloud MQTT is a **candidate** fallback, closed until its supervised write |
+| Setpoint bounds (upper, lower) | No path yet | Cloud MQTT, **candidate**: closed until its supervised write |
 | Preheat | Local tunnel (0x0025) | Local tunnel (0x0025) |
 | Setpoint override until the next schedule change | Local tunnel (DP 171) | Local tunnel (DP 171) |
 | Valve exercise day and time | Local tunnel | Local tunnel |
@@ -129,8 +130,8 @@ for a DP proven on it; (4) otherwise unavailable.
 - `coordinator.py` — conservative cloud polling, per-device overlay for recently commanded heads,
   overlay of the local truths.
 - Platforms: `climate` (setpoint, presets), `sensor` (battery, valve, heat request, fault code),
-  `binary_sensor` (online, window), `number` (holiday, bounds), `switch` (child lock, window,
-  preheat).
+  `binary_sensor` (online, window), `number` (room setpoints; an isolated head's bounds over cloud
+  MQTT), `switch` (child lock, window, preheat).
 - `mqtt_publisher.py` — MQTT publishing, modes `discovery` / `zigbee2mqtt`, source `cloud` /
   `local`.
 - `diagnostics.py` — strict secret redaction.

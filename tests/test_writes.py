@@ -107,3 +107,22 @@ def test_mqtt_write_value_messages_and_types():
         writes.mqtt_write_value(2, "manual", frozenset({2}))
     with pytest.raises(CloudWriteError, match="boolean"):
         writes.mqtt_write_value(116, "true", frozenset({116}))
+
+
+def test_mqtt_write_value_tenths_range_and_step():
+    import pytest
+
+    from custom_components.danfoss_ally_cloud.api import CloudWriteError, writes
+
+    trial = frozenset({18, 27, 120})
+    assert writes.mqtt_write_value(18, 345, trial) == 345
+    assert writes.mqtt_write_value(27, 50, trial) == 50
+    assert writes.mqtt_write_value(120, 55, trial) == 55
+    for dp, bad in ((18, 195), (18, 355), (27, 45), (27, 205), (120, 45), (18, 301)):
+        with pytest.raises(CloudWriteError, match="out of range"):
+            writes.mqtt_write_value(dp, bad, trial)
+    for bad in (30.0, "300", True):
+        with pytest.raises(CloudWriteError, match="integer"):
+            writes.mqtt_write_value(18, bad, trial)
+    with pytest.raises(CloudWriteError, match="supervised first write"):
+        writes.mqtt_write_value(18, 300)  # closed by default
