@@ -1,9 +1,31 @@
 # Architecture
 
-## Principle: cloud-first, local fallback
+## Principle: three channels, one router
 
-The cloud API covers most of the control. But we have established on real hardware cases where the
-cloud **lies or does not act**, which must be handled locally:
+A head can be reached through **three channels**. None of them covers everything, and each has
+operations it accepts without applying. The integration therefore routes **each operation to the
+channel proven for it on real hardware**, and shows the entity **unavailable** when no proven
+channel is up. It never falls back to a channel that merely accepts the call, and never shows an
+optimistic state.
+
+| Channel | Transport | Proven for | Known limits |
+|---|---|---|---|
+| **Cloud HTTP** (path 1a) | The app's signed HTTP API | Fleet read, **room-level** writes (setpoints, head settings of a grouped head, weekly schedule), holiday, room management, relay binding, unbind | `settings.change` on an **isolated** head is accepted and never applied. The bulk list route lags by minutes after a change. Mode labels and cloud DP 1 do not reach the head (below). |
+| **Tuya cloud MQTT** | The app's MQTT broker, protocol 2.3 frames keyed by the gateway localKey | DP publish to an **isolated** head, applied in seconds and confirmed by the gateway's echo (child lock, 2026-11-19). Inbound DP reports are pushed and decode. | One connection per session. Proven for one DP so far; every other DP needs its own supervised write. Inbound coverage (which heads, which DPs, how often) not measured yet. |
+| **Local tunnel** | LAN, Zigbee tunnel DP 198→199 through the gateway | The head's own truth: real weekly schedule, preheat (attribute 0x0025), setpoint override (DP 171), window detection, valve exercise | Slow (seconds per head, surveyed on a long period), a head may not answer for a while, needs LAN access to the gateways |
+
+Status of the cloud-MQTT channel: validated on real hardware, **not on `main` yet**. Its write path
+is proposed behind an option that is off by default; the wire format is specified in
+`docs/cloud-mqtt-publish.md` on that branch. Until it lands, an isolated head's child lock is
+unavailable.
+
+"MQTT" names two unrelated things in this project. **Tuya cloud MQTT** is a channel *to the heads*
+(above). **MQTT publishing** (`mqtt_publisher.py`) sends the integration's state *to the user's own
+broker*. This document always says which one it means.
+
+### Where the cloud lies or does not act
+
+Established on real hardware; these cases are why a single channel is not enough:
 
 - It is the **switch to manual mode** (DP 2 `manual`) that erases the head's schedule (R4).
   `at_home` / `leaving_home` published via DP 2 are only **labels** on the cloud side: the head
@@ -15,10 +37,64 @@ cloud **lies or does not act**, which must be handled locally:
   tunnel.
 - `update_time` is an event-driven registration timestamp: never infer freshness from it. `online`
   is authoritative for connectivity.
+- Head settings of an **isolated** head (child lock, window detection): the HTTP `settings.change`
+  call is accepted and never applied, whatever the addressing. The app itself writes them with a DP
+  publish over Tuya cloud MQTT (contract §4.2).
+- The bulk list route keeps returning the previous state for several minutes after a change, even
+  when asked to refresh. The per-device route is fresher.
 
-So: **cloud by default, local tunnel (optional) for the operations the cloud misses**. The same
-integration fetches the gateway keys, so the local fallback stays internal, asking nothing more of
-the user.
+The same integration fetches the gateway keys, which serve both the local tunnel and the cloud-MQTT
+frames, so neither channel asks anything more of the user.
+
+## Routing
+
+### Reads
+
+| What | Source | Note |
+|---|---|---|
+| Fleet state (temperature, mode, valve, battery, window, faults) | Cloud HTTP, bulk list | Conservative polling. Lags after a change. |
+| Active setpoint | Bulk list, DP 171 (`OccupiedSetpoint`) | Not the comfort setting: the setpoint of the current schedule slot or override. |
+| Heating action | Bulk list, DP 3 (`work_state`) | Taken from the head, never recomputed from temperature vs setpoint. |
+| A head just commanded | Cloud HTTP, per-device route, overlaid on the bulk state | Option `post_command_refresh`, bounded (see `docs/roadmap.md`, R-3). |
+| Real weekly schedule, preheat state | Local tunnel survey | Unavailable per head when that head does not answer. |
+| Connectivity | `online` | Never `update_time`. |
+
+### Writes
+
+| Operation | Grouped head (in a room) | Isolated head |
+|---|---|---|
+| Comfort / setback setpoint | Cloud HTTP: room publish, then rewrite the room schedule (R3) | No path on `main`; candidate for cloud MQTT |
+| Weekly schedule | Cloud HTTP | Cloud HTTP |
+| Child lock | Cloud HTTP: room publish (applies to **every** head of the room) | Cloud MQTT when enabled and connected; otherwise unavailable |
+| Window detection | Cloud HTTP: room publish (whole room) | Local tunnel; otherwise unavailable |
+| Preheat | Local tunnel (0x0025) | Local tunnel (0x0025) |
+| Setpoint override until the next schedule change | Local tunnel (DP 171) | Local tunnel (DP 171) |
+| Valve exercise day and time | Local tunnel | Local tunnel |
+| Holiday, room management, relay binding, unbind | Cloud HTTP (holiday and unbind behind options) | — |
+| Pairing | Out of scope: permit-join travels over MQTT and needs a physical action on site | — |
+
+A setting switch states its route in its attributes (`write_path`, `write_scope`,
+`room_head_count`), so the user sees when a write will touch the whole room.
+
+### Rules for adding a route
+
+- A channel is "proven" for an operation only after a supervised write on real hardware, read back
+  from a source that does not depend on the channel written (the local tunnel when it exposes the
+  value, otherwise the app and the head itself).
+- One DP at a time. A new DP on the cloud-MQTT channel does not inherit the proof of another DP.
+- Preheat is the known trap: cloud DP 1 over HTTP only changed the gateway cache. A DP 1 publish
+  over cloud MQTT must be read back as attribute 0x0025 before it is trusted.
+- After a successful write, the entity shows what the channel returns (echo or re-read), with a
+  timeout and a clear error. No optimistic state.
+
+### Open questions
+
+- **Cloud MQTT as a read source.** If the pushed DP reports cover the whole fleet, they could
+  replace the post-command per-device read and allow a longer polling period. To measure first:
+  which heads and DPs are reported, and how often.
+- **Account exposure.** A long-lived broker connection from a client that is not the app is more
+  visible than spaced HTTP polling. The channel stays opt-in, with backoff and a clean shutdown.
+- **Isolated-head setpoints.** The app publishes them over cloud MQTT; not yet attempted here.
 
 ## Layers
 
@@ -27,7 +103,10 @@ the user.
   hardware).
 - `api/local/tunnel.py` — Zigbee tunnel DP 198→199 (tinytuya): real schedule, attribute 0x0025, real
   attributes.
-- `coordinator.py` — conservative cloud polling + overlay of the local truths.
+- `api/writes.py` — value validation and the verified-model guard-rail before any write.
+- `switch.py` — picks the path of a setting write (`room`, `local`, `none`) per head and setting.
+- `coordinator.py` — conservative cloud polling, per-device overlay for recently commanded heads,
+  overlay of the local truths.
 - Platforms: `climate` (setpoint, presets), `sensor` (battery, valve, heat request, fault code),
   `binary_sensor` (online, window), `number` (holiday, bounds), `switch` (child lock, window,
   preheat).

@@ -89,6 +89,29 @@ state), and stays fresh for 5 minutes; uncommanded heads are unaffected. The TTL
 long the overlay is trusted, not a guarantee the per-device route itself is instantaneous — to
 measure on real hardware in the validation session.
 
+**Confirmed on real hardware (2026-11-19).** With the option on, a room setpoint write showed up in
+HA and in the published MQTT state within one to two polls, while the bulk list still returned the
+old value: `smartlife.m.device.get` **is** fresher than the bulk list for a head. The option stays
+off by default (extra reads on the user's account).
+
+## Tuya cloud MQTT channel — staged, each stage gated
+
+Background and routing: `docs/architecture.md`. The app writes an isolated head's settings with a DP
+publish over Tuya cloud MQTT, the only path found that applies them (contract §4.2).
+
+1. **Write, child lock only.** Option off by default; a link-state diagnostic entity; confirmation
+   by the gateway's echo or a cloud re-read, never optimistic. Validated on real hardware
+   2026-11-19 (session coexists with the phone app; write applied on the head).
+2. **More DPs, one at a time**, each after its own supervised write read back from an independent
+   source: window detection (compare with the local tunnel), bounds, isolated-head setpoints.
+   Preheat last, read back as attribute 0x0025 (cloud DP 1 over HTTP only changed the gateway cache).
+3. **Measure inbound coverage**: which heads and DPs the broker pushes, and how often, over a full
+   day.
+4. **Push as a read source**, if stage 3 shows full coverage: feed the coordinator from the pushed
+   reports, drop the post-command per-device read, lengthen the polling period.
+5. **Hardening before it is on by default anywhere**: kill switch, reconnect backoff, session
+   rotation, redacted diagnostics for the link, "unofficial" wording in the README.
+
 ## Per-room schedules and embedded frontend
 
 Work described by `docs/interface-requirements.md`, framed by the contract
