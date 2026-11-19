@@ -2,13 +2,16 @@
 
 Path 1a: the app account's credentials (email/password login) + installation material captured
 once (sign_key, deviceId, chKey - see README). The login validates the credentials AND the secrets
-at once. Re-authentication is handled by the client (the password is kept in the entry, encrypted
-at rest by HA). Secrets are never logged.
+at once. Session renewal is handled by the client (the password is kept in the entry). When the
+login itself is refused (password changed, installation secrets no longer valid), the coordinator
+raises ``ConfigEntryAuthFailed`` and HA starts the ``reauth`` step below: same account, new
+password, and new installation secrets only if they changed. Secrets are never logged.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -63,6 +66,15 @@ def _schema(schema: vol.Schema) -> Any:
 
 _REGIONS = ["eu", "us", "cn", "in"]
 
+# Installation secrets the reauth step may replace (left empty = keep the entry's value).
+_INSTALL_SECRETS = (CONF_SIGN_KEY, CONF_DEVICE_ID, CONF_CH_KEY)
+
+
+def _account_id(username: str) -> str:
+    """The entry's unique id for an account (the login, case and spaces ignored)."""
+    return username.strip().lower()
+
+
 # Labels of the cloud-MQTT candidate DPs in the supervised-trial selector.
 _CANDIDATE_DP_LABELS = {
     16: "16 — temp_set (needed with 118: the app publishes both for the comfort setpoint)",
@@ -87,7 +99,7 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> Any:
         errors: dict[str, str] = {}
         if user_input is not None:
-            await self.async_set_unique_id(user_input[CONF_USERNAME].strip().lower())
+            await self.async_set_unique_id(_account_id(user_input[CONF_USERNAME]))
             self._abort_if_unique_id_configured()
             client = CloudClient(
                 username=user_input[CONF_USERNAME],
@@ -126,6 +138,66 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
             }
         )
         return self.async_show_form(step_id="user", data_schema=_schema(schema), errors=errors)
+
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> Any:
+        """The login was refused at runtime (``ConfigEntryAuthFailed``): ask for new credentials."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> Any:
+        """Same account, new password; the installation secrets are replaced only if given.
+
+        The username and the region stay those of the entry (the account cannot change here: a
+        different login is refused). The new values are checked by a real login before the entry
+        is updated and reloaded; nothing typed here is logged or echoed back in a message.
+        """
+        entry = self._get_reauth_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            expected = entry.unique_id or _account_id(entry.data[CONF_USERNAME])
+            if _account_id(user_input[CONF_USERNAME]) != expected:
+                return self.async_abort(reason="wrong_account")
+            updates: dict[str, Any] = {CONF_PASSWORD: user_input[CONF_PASSWORD]}
+            for key in _INSTALL_SECRETS:
+                value = str(user_input.get(key) or "").strip()
+                if value:
+                    updates[key] = value
+            data = {**entry.data, **updates}
+            client = CloudClient(
+                username=data[CONF_USERNAME],
+                password=data[CONF_PASSWORD],
+                country_code=data[CONF_COUNTRY_CODE],
+                sign_key=data[CONF_SIGN_KEY],
+                device_id=data[CONF_DEVICE_ID],
+                ch_key=data[CONF_CH_KEY],
+                region=data[CONF_REGION],
+                distinct_device_id=DEFAULT_DISTINCT_DEVICE_ID,
+            )
+            try:
+                await client.async_validate()
+            except CloudAuthError:
+                errors["base"] = "invalid_auth"
+            except CloudError:
+                errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001 - config_flow robustness
+                _LOGGER.exception("Unexpected error while re-validating the Danfoss Ally account")
+                errors["base"] = "unknown"
+            finally:
+                await client.async_close()
+            if not errors:
+                return self.async_update_reload_and_abort(entry, data_updates=updates)
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_USERNAME, default=entry.data.get(CONF_USERNAME, "")): str,
+                vol.Required(CONF_PASSWORD): str,
+                vol.Optional(CONF_SIGN_KEY): str,
+                vol.Optional(CONF_DEVICE_ID): str,
+                vol.Optional(CONF_CH_KEY): str,
+            }
+        )
+        return self.async_show_form(
+            step_id="reauth_confirm", data_schema=_schema(schema), errors=errors
+        )
 
     @staticmethod
     @callback

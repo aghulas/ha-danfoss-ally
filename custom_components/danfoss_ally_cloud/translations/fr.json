@@ -13,6 +13,17 @@
      "device_id": "Identifiant d'appareil (deviceId)",
      "ch_key": "Clé de canal (chKey)"
     }
+   },
+   "reauth_confirm": {
+    "title": "Se reconnecter à Danfoss Ally (Cloud)",
+    "description": "Le compte Danfoss Ally a refusé la connexion (mot de passe changé, ou secrets d'installation qui ne sont plus valides). Saisissez le mot de passe du même compte. Ne remplissez la clé de signature, l'identifiant d'appareil ou la clé de canal que s'ils ont changé : laissés vides, la valeur actuelle est conservée.",
+    "data": {
+     "username": "Identifiant (e-mail)",
+     "password": "Mot de passe",
+     "sign_key": "Clé de signature (sign_key) — seulement si elle a changé",
+     "device_id": "Identifiant d'appareil (deviceId) — seulement s'il a changé",
+     "ch_key": "Clé de canal (chKey) — seulement si elle a changé"
+    }
    }
   },
   "error": {
@@ -21,7 +32,9 @@
    "unknown": "Erreur inattendue"
   },
   "abort": {
-   "already_configured": "Ce compte est déjà configuré"
+   "already_configured": "Ce compte est déjà configuré",
+   "reauth_successful": "Reconnexion réussie",
+   "wrong_account": "Ce n'est pas le compte de cette entrée : connectez-vous avec le même compte, ou ajoutez l'autre compte comme nouvelle entrée"
   }
  },
  "options": {

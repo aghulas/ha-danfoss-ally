@@ -78,6 +78,13 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
 
 ### Fixed
 
+- **Re-authentication step in the config flow.** When the account refuses the sign-in at
+  runtime (password changed, installation secrets no longer valid), the coordinator raised
+  `ConfigEntryAuthFailed` but the flow had no `reauth` step: the entry had to be deleted and
+  recreated. Home Assistant now offers *Re-authenticate*: the same account (another login is
+  refused), the new password, and the sign key / device id / channel key only if they changed
+  (left empty, kept). The values are checked by a real sign-in before the entry is updated and
+  reloaded; nothing typed there is logged.
 - **The window-detection switch of an isolated head follows the local survey.** Its write path
   (`local`) depends on the head answering the local tunnel, but the switch only listened to the
   cloud coordinator: after the non-blocking start it stayed unavailable after its head had been
