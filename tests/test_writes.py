@@ -50,18 +50,29 @@ def test_encode_setpoint_rounding_and_bounds():
         encode_setpoint("chaud", 5.0, 35.0)
 
 
-async def test_switch_verrou_enfant_envoie_dp30():
+async def test_switch_verrou_enfant_envoie_dp30_par_la_piece():
     dev = _dev()
     dev.mesh_id = "gw-mesh-1"
     coord = _coord(dev)
+    coord.group_of = MagicMock(return_value="g-synth")
+    coord.room_members = MagicMock(return_value=(dev.id,))
+    coord.client.async_group_publish = AsyncMock(return_value=True)
     desc = next(d for d in SWITCHES if d.key == "child_lock")
     ent = DanfossSwitch(coord, dev.id, desc)
     await ent.async_turn_on()
-    # The settings write addresses the head's gateway (meshId), aligned on the schedule path.
-    coord.client.async_write_setting.assert_awaited_once_with(
-        dev.id, dev.product_id, {"30": True}, gw_id="gw-mesh-1"
-    )
+    # Grouped head: the setting is published on its room (proven path), never settings.change.
+    coord.client.async_group_publish.assert_awaited_once_with("g-synth", {"30": True})
     await ent.async_turn_off()
-    coord.client.async_write_setting.assert_awaited_with(
-        dev.id, dev.product_id, {"30": False}, gw_id="gw-mesh-1"
-    )
+    coord.client.async_group_publish.assert_awaited_with("g-synth", {"30": False})
+    coord.client.async_write_setting.assert_not_awaited()
+
+
+async def test_switch_verrou_enfant_tete_isolee_sans_ecriture():
+    dev = _dev()
+    coord = _coord(dev)
+    coord.group_of = MagicMock(return_value=None)
+    desc = next(d for d in SWITCHES if d.key == "child_lock")
+    ent = DanfossSwitch(coord, dev.id, desc)
+    await ent.async_turn_on()
+    # Isolated head (W-3): settings.change is accepted but never applied -> no write at all.
+    coord.client.async_write_setting.assert_not_awaited()

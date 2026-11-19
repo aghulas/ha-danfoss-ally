@@ -107,6 +107,15 @@ Other commands: `npm --prefix frontend test` (Vitest), `npm --prefix frontend ru
 `npm --prefix frontend run demo` (demo page outside Home Assistant, synthetic test data, at
 http://localhost:5173/demo/).
 
+## Head settings (child lock, window detection)
+
+- **Head in a room**: the switch writes the setting on the **room**, so it applies to **every head
+  of that room** (attributes `write_path: room`, `room_head_count`).
+- **Isolated head** (in no room): the cloud route accepts the request but does not apply it
+  (real-hardware validation, 2026-11-19). Window detection then goes through the local tunnel if
+  `enable_local` is on and the head answers locally; otherwise, and always for the child lock, the
+  switch is **unavailable** rather than showing a state it cannot set.
+
 ## Status
 
 **v0.1 — cloud read-only**: each head appears as a thermostat (temperature, setpoint); battery,

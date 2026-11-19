@@ -319,12 +319,47 @@ write is **not** proven and must not be reintroduced blindly.
 | End of return to schedule | `{"2": "at_home"}` | display only (R4, R5) |
 | Room settings | `{"1": bool}` preheat, `{"30": bool}` lock, `{"116": bool}` window, `{"18": 210}` upper bound | applied in 5 to 10 min |
 
-An isolated head is set via `tuya.m.custom.wkf.settings.change` (already in `async_write_setting`);
-this path proved unreliable on grouped heads. Since 2026-11-17 this settings write uses `gwId =
-meshId` (the head's gateway), **aligned on the schedule path** (§4.1): the previous `gwId = devId`
-was the lone divergence inside `api/client.py` and is lifted. `async_write_setting` takes an
-optional `gw_id`; callers pass the head's `meshId` (falling back to `devId` when the `meshId` is
-unknown).
+Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware result W-3
+(2026-11-19)**:
+
+- **Grouped head**: set through its **room** with the group publish above (`{"30": bool}` /
+  `{"116": bool}`), the proven path. ⚠ The setting applies to **every head of the room**; the
+  integration's switch says so (`write_path: room`, `write_scope: room`, `room_head_count`).
+- **Isolated head**: `tuya.m.custom.wkf.settings.change` (resType 1) is **accepted but never
+  applied** for DP 30 / DP 116: C-1 stayed locked more than 10 min, with `gwId = meshId` (the
+  integration) and with `gwId = devId` (the MCP connector) alike — **addressing is not the cause**.
+  Consistent with the connector's 2026-11-15 survey (DP 116 applied on 0 of 7 isolated heads).
+  An app capture (emulator + frida, 2026-11-19) explains it: the app uses `settings.change` only for
+  its "Settings" block `{"1", "118", "119", "121"}` (sent whole, `gwId = devId`), and toggles
+  DP 30 on an isolated head with a **DP publish over Tuya cloud MQTT** (`publishDps`, topic
+  `smart/mb/out/<gateway devId>`, protocol 2.3 frame) — no HTTP call. That MQTT path is **not
+  implemented** (follow-up).
+
+  Second capture, same day, going through **every** settings screen of an isolated head: **every**
+  head setting goes through `publishDps` on Tuya cloud MQTT (topic `smart/mb/out/<gateway devId>`),
+  none through an HTTP write route:
+
+  | Setting (app) | `publishDps` |
+  |---|---|
+  | Preheat | `{"1": bool}` |
+  | Child lock | `{"30": bool}` |
+  | Open-window detection | `{"116": bool}` |
+  | Mounting (vertical / horizontal) | `{"133": "Vertical" \| "Horizontal"}` |
+  | Viewing direction | `{"101": bool}` |
+  | Upper bound | `{"18": 210}` |
+  | Lower bound | `{"27": 50}` (with `{"120": …}` when the pause setpoint must follow) |
+  | Comfort setpoint | `{"118": 205, "16": 205}` |
+  | Setback setpoint | `{"119": 145}` |
+  | Pause setpoint | `{"120": 50}` |
+
+  For preheat and the setpoints (`1`, `118`, `119`, `121`) the app **also** sends
+  `settings.change` with the whole block (cloud-side store of the workflow), in addition to the
+  MQTT publish: that HTTP call alone is not the write to the head.
+- Hence, on an isolated head: window detection is written through the **local tunnel** (§4.4,
+  W-4 ✅) when it is active and the head answers locally; otherwise the switch is **unavailable**.
+  The child lock has no proven isolated-head path (the local read does not expose it): **unavailable**.
+- `async_write_setting` remains only for the back-to-schedule `at_home` label of an isolated head
+  (display only, R5).
 
 ### 4.3 State
 
