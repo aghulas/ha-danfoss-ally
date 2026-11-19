@@ -1,0 +1,650 @@
+# Real-hardware validation — results
+
+**Dates:** 2026-11-18 / 2026-11-19.
+Real-hardware validation on a large real install (~99 heads, two homes). Anonymised: room names,
+identifiers and site details replaced by neutral labels.
+Plan: [`../real-validation-plan.md`](../real-validation-plan.md). Preheat curve reading (§3):
+[`2026-11-preheat-curves.md`](2026-11-preheat-curves.md).
+
+## Labels used in this report
+
+| Label | Role |
+|---|---|
+| Building 1 / home 1 | First Danfoss home (holds Room A, Room B and most of the heads named here) |
+| Building 2 / home 2 | Second Danfoss home |
+| Room A | Isolated head (no room), main test head |
+| Room B | Room with two grouped heads (corridor), writable room entity |
+| Head C | Building 2 head; manual mode; window stayed open on the morning test |
+| Heads D, E, F | Building 2 heads; window opened then closed on the morning test |
+| Head G | Building 2 head; setback 5 °C / comfort 12 °C |
+| Heads H, I | Washroom heads, setback mode, comfort 18 °C |
+| Head J | Manual mode, active setpoint 5 °C, comfort 21 °C |
+| Heads K, L | Same profile as Head J (manual, active 5 °C, comfort 21 °C) |
+| Head M | Comfort = active = 5 °C; preheat OFF |
+| Head N | Building 2 head, valve almost always fully open |
+| Head P | Preheat OFF |
+| Head Q | Preheat OFF, switched ON in the controlled trial |
+| Head R | Preheat ON, switched OFF in the controlled trial |
+| Room S | Three-head room at 5 °C (frost protection); head #3 offline |
+| Sensor T | A Danfoss room sensor (not a head) |
+| relay 1 / relay 2 | Danfoss relays of Building 1 / Building 2 |
+
+Entity ids are written with placeholders, e.g. `switch.<room_a>_child_lock`.
+
+---
+
+Interactive session of 2026-11-18. The owner was present; the Danfoss iPhone app is the reference
+view. Follows `../real-validation-plan.md`. Claude reads HA (through the HA admin and Danfoss
+connectors) and MQTT (through an MQTT connector); the owner reads the app. Pass = the three views
+agree.
+
+## Prerequisites §0
+
+| Prerequisite | State |
+|---|---|
+| `danfoss_ally_cloud` integration loaded (on the HA host, a Raspberry Pi) | ✅ `loaded` |
+| deviceId distinct from the MCP connector's (coexistence, PR #59) | ✅ `distinct_device_id = true`, both sessions hold |
+| MQTT publishing: mode / source / base topic | ✅ enabled during the session: `mqtt_mode = discovery` (was `off`), `mqtt_source = cloud`, base `danfoss_ally_cloud` |
+| Mosquitto broker reachable | ✅ on the HA host, port 1883, mosquitto 2.1.2 |
+| `enable_local` | ✅ true (preheat testable) |
+| `enable_vacation_write` | ⛔ false — vacation gated (W-6 / TARGET 2 not tested) |
+| `enable_head_unbind` | ⛔ missing from the options — §2b not exposed |
+
+Write performed: `mqtt_mode off → discovery` (write batch, explicit approval from the owner).
+
+### Publishing structure confirmed (discovery, source cloud)
+- State: `danfoss_ally_cloud/<devId>` → JSON `{temperature, setpoint, battery, valve_opening, window_open}`
+- Availability: `danfoss_ally_cloud/<devId>/availability` → `online` / `offline`
+- 198 topics (2 per device). Discovery configs under `homeassistant/<component>/danfoss_<devId>_<key>/config`.
+- ⚠️ False friend: 660 topics `danfoss_l/…` (and `*_local` entities) come from a **separate local
+  bridge belonging to another project** on the same host, **not** from our integration. Excluded.
+
+## Test head
+
+- **Room A** (isolated head) — its own gateway.
+- Entities of our integration: `climate.<room_a>_2`, `sensor.<room_a>_temperature_2`,
+  `sensor.<room_a>_battery_2`, `sensor.<room_a>_valve_opening_2`,
+  `sensor.<room_a>_fault_code`, `binary_sensor.<room_a>_window`,
+  `binary_sensor.<room_a>_online`, `switch.<room_a>_child_lock`,
+  `switch.<room_a>_open_window_detection_2`, `switch.<room_a>_pre_heating`.
+- MQTT entities auto-created (discovery): `sensor.<room_a>_temperature_3`,
+  `…_battery_3`, `…_valve_opening_3`, `sensor.<room_a>_setpoint`, `binary_sensor.<room_a>_window_2`.
+- (MTrab's `danfoss_ally` entities, without suffix, and the bridge's `*_local` entities also coexist.)
+- Type: "Danfoss Ally™ Radiator Thermostat". Firmware: ZigBee Module **0.2.2**;
+  Product Version 1.0.0; RSSI **−75 dBm**.
+
+## §1 — Read (R-1), 2026-11-18 ~20:12
+
+| Quantity | App (ref.) | HA `danfoss_ally_cloud` | MQTT discovery | Verdict |
+|---|---|---|---|---|
+| Measured temperature | ~18.7 | 18.7 (`current_temperature` / `sensor…_temperature_2`) | `temperature` 18.7 | ✅ |
+| Setpoint | **14** (setback) | attribute `setpoint` **21** (= comfort); `setpoints`={comfort 21, setback 14, manual 8, pause 5, holiday 14.5}; `mode`=setback | `setpoint` **21** | ❌ **MISMATCH** |
+| Valve / heating | **not heating** | `valve_opening` 1 %; **`hvac_action` = heating** | `valve_opening` 1 % | ❌ **MISMATCH** (hvac_action) |
+| Battery | — | 68 % | `battery` 68 | ✅ |
+| Window open | — | `off` | `window_open` false | ✅ |
+| Online | — | `on` | availability `online` | ✅ |
+| Fault | — | `none` | (not published) | ✅ |
+
+### Anomaly found (R-1) — single root cause
+The "active" setpoint exposed by the integration does **not** take the current mode/slot into
+account. In `setback` mode it should be the setback value (14), but the integration publishes
+`comfort` (21), both in the climate's `setpoint` attribute **and** in the MQTT JSON `setpoint`.
+The same error contaminates `hvac_action`: 18.7 °C compared with 21 (comfort) → `heating`. With the
+real active setpoint (14) the room is above setpoint → it should be `idle`/`off` (the app confirms:
+not heating, valve 1 %).
+
+→ **Root cause confirmed by the raw statuses**: the cloud already exposes the right values; the
+integration does not use them.
+- `OccupiedSetpoint = 1400` (= 14.0 °C) = the real active setpoint → **to publish as `setpoint`**,
+  instead of `temp_set` / `at_home_setting` (210 = comfort).
+- `work_state = NoHeat` (and `pi_heating_demand = 1`) = the real heating state → **`hvac_action`
+  must follow `work_state`**, instead of being recomputed locally (18.6 vs comfort 21 → wrongly
+  heating).
+- Other useful codes: `mode = leaving_home` (setback), `SetpointChangeSource = Schedule`,
+  `at_home_setting=210`, `leaving_home_setting=140`, `holiday_setting=145`, `pause_setting=50`.
+
+To fix in the coordinator/climate + `mqtt_publisher` (outside this validation session).
+Directly affects W-1 (comfort write): interpret it accordingly.
+→ Fix session started: `fix-consigne-active-hvac`, dedicated branch.
+
+## §1 — Read R-3 (heat demand / valve), 2026-11-18 ~21:06
+
+The owner raises Room A's setpoint to **21** (max = the head's upper bound `upper_temp`=210) in
+manual mode. Baseline before: valve 1 %, `pi_heating_demand` 1, `work_state` NoHeat.
+
+| View | Valve | pi_heating_demand | mode / active setpoint | work_state |
+|---|---|---|---|---|
+| Cloud **per-device route** (`danfoss_appareil`) | **82 %** | **82** | manual / 21 (`OccupiedSetpoint` 2100) | **Heat** |
+| Cloud **list/bulk route** (`danfoss_appareils` with refresh) | **1 %** | — | setback / 14 (`consigne_active`) | — |
+| HA `sensor…_valve_opening_2` | **1.0 %** (frozen, updated 20:10) | — | — | — |
+| MQTT `valve_opening` | **1.0 %** (frozen) | — | — | — |
+
+### Anomaly found (R-3) — source freshness
+The coordinator polls **`async_list_devices`** (list/bulk route, [coordinator.py:57]), which **lags
+badly**: several minutes after the change, and despite `refresh=true`, it still shows the schedule
+state (setback / 14 / valve 1 %), while the **per-device** route (and the physical head) are at
+manual / 21 / valve **82 %**. The MCP connector reads the per-device route → fresh.
+Consequence: fast-changing values (valve, demand) — and the **write round-trips** (W-1…W-5) — are
+not reflected in time in the integration or in MQTT.
+→ Separate from the R-1 mapping bug. Option: for recently commanded heads, query the per-device
+route (more API calls), or accept the latency and document it. To decide (API load vs
+responsiveness), outside this session.
+
+**Clarification (fix session, Frida capture of the Tuya SDK):** the bulk payload
+`tuya.m.my.group.device.list` **does contain** DP 171 (`OccupiedSetpoint`, hundredths /100) and DP 3
+(`work_state` Heat/NoHeat), next to DP 2/16/118/119/170. So the **R-1 mapping fix works on the
+bulk route** (the per-device route is not needed to *select* the active setpoint). The capture even
+shows the R-1 case: head at_home, DP 171=2100, DP 3=NoHeat, valve DP 170=2.
+⚠️ Do not confuse: the **presence** of these DPs in the bulk payload ≠ their **freshness**. R-3
+remains a freshness problem of the `device.list` endpoint (values lag behind the per-device route),
+independent of the mapping. Both are needed for good responsiveness.
+
+R-3 verdict: **valve/demand do rise on the real head + per-device cloud route (82 %)**, but there is
+a **HA/MQTT mismatch** due to bulk-route latency. To reconfirm later by re-reading whether the bulk
+route catches up.
+
+## §1 — Read R-2 (window detection), 2026-11-18
+
+**Validation finding:** the **Danfoss iPhone app does not show** the per-head "window open" flag.
+So the reference view has **no counterpart** for `window_open`: this line cannot be validated
+against the app. The flag exists on the cloud side (`window_state` in the raw status) and is exposed
+by HA (`binary_sensor.<room_a>_window`) and MQTT (`window_open`). Validation falls back to cloud
+(per-device route) ↔ HA ↔ MQTT, without the app leg.
+
+**Postponed to the next morning (2026-11-19):** when the site opens, morning airing naturally puts
+**several valves** into window-open — an opportunistic R-2 test with no manipulation, on several
+heads, comparing cloud ↔ HA ↔ MQTT. To group with preheat §3 (P-1…P-3), also read on the morning
+curves, and with a re-check of the bulk latency (R-3: see whether HA/MQTT caught up with the valve).
+
+### R-2 — result 2026-11-19 (morning airing) ✅
+
+At 08:06, `danfoss_sante` reports **4 heads** with window open (Building 2): Head C, Head D,
+Head E, Head F. MQTT `window_open` = **true** for all 4 → cloud ↔ MQTT agreement **4/4** (valve 1 %
+everywhere, heating off). Version in place = **pre-fix** (main not deployed).
+
+**Transition captured (no manipulation)** between 08:06 and 08:14, end of airing:
+
+| Head | window_open (MQTT) | valve | |
+|---|---|---|---|
+| Head E | true → **false** | 1 % → **98 %** | window closed, heating resumed |
+| Head D | true → **false** | 1 % → 56 % | same |
+| Head F | true → **false** | 1 % → 12 % | same |
+| Head C | true (unchanged) | 1 % | stays open (control) |
+
+**Fresh per-device route** confirmation on Head E: `fenetre_ouverte=false`,
+`window_state=close`, `ouverture_vanne=98`, `pi_heating_demand=98`, `work_state=Heat` → **matches
+MQTT**.
+
+**R-2 verdict: ✅** the flag goes `true→false` **and** the valve reopens, consistent between the
+integration (MQTT) and the fresh cloud. No app leg (flag not shown — established the day before).
+
+**R-3 observed live:** at 08:14, `danfoss_sante` (**bulk** route) **still lists all 4** with window
+open, including Head E, already closed according to the per-device route + MQTT. A clear
+illustration of the `device.list` latency → for a live transition, trust the **per-device route +
+MQTT**, not `danfoss_sante`. (PR #66, targeted freshness, merged but gated off / not deployed.)
+
+**Setpoint note:** MQTT `setpoint` = 21 everywhere is **not** evidence of the R-1 defect this
+morning: `OccupiedSetpoint` = 2100 (21 °C), and the active morning slot **is** 21
+(comfort/at_home). The R-1 defect only shows when active ≠ comfort (see Room A the day before:
+active 14 vs comfort 21).
+
+## §1 — Extent of the R-1 bug across the fleet (autonomous tests, 2026-11-18 ~21:51)
+
+Comparison of **active setpoint (cloud, `consigne_active`)** vs **published MQTT `setpoint`**, on a
+discriminating sample of 8 heads (varied modes and setpoints):
+
+| Head | mode | active setpoint (cloud) | MQTT `setpoint` | verdict |
+|---|---|---|---|---|
+| Room A | setback | 14 | 21 | ❌ |
+| Head G | setback | 5 | 12 | ❌ |
+| Head H | setback | 7 | 18 | ❌ |
+| Head I | setback | 12 | 18 | ❌ |
+| Head C | manual | 21 | 21 | ✅ (comfort = active) |
+| Head J | manual | 5 | 21 | ❌ |
+| Head M | setback | 5 | 5 | ✅ (comfort = active) |
+| Head N | setback | 14 | 21 | ❌ |
+
+**Conclusion**: MQTT always publishes the **comfort/at_home** setpoint (a per-room value: 21, 18,
+12…), never the **active** setpoint. They only coincide when comfort = active. At the evening
+reading, **~95 of the 99 heads are in `setback` mode** → the R-1 mismatch affects **almost the whole
+fleet**. Confirms a deterministic bug (setpoint selection), not an isolated case. Serves as the
+**baseline for re-checking after PR #65 is merged**.
+
+## §1 — R-1 re-validation after deploying the fix (2026-11-19 ~08:45) ✅
+
+**Deployment**: `danfoss_ally_cloud` deployed to the Pi at 08:27:50 (write batch, connector tool
+`ha_composant_deployer_preparer`, source = branch `docs/real-validation-plan` = commit `67b6c1e`,
+R-1 code identical to PR #65). Core restart started at 08:30 (task: config ✅, restart ✅ 141 s,
+last step "HA back up" ❌ `state = None` after 600 s — a **false negative of the checker**: HA
+`running`, integration `loaded`, new code active). **Not on the Pi**: #66 (R-3), #63/#64 (unbind) —
+gated off.
+
+**Method pitfall**: the obvious test heads were **not discriminating** this morning — Room A and
+Head G are in the comfort slot (`OccupiedSetpoint` = comfort; Head G = 12 °C and
+`work_state=Heat`). The connector's `danfoss_appareils` reported Head G as "setback / 5" at 08:36:
+**stale** (bulk route). Discriminating heads were picked from the raw cloud reading of 08:43
+(`OccupiedSetpoint` ≠ `at_home_setting` **and** `work_state` disagreeing with temp vs comfort):
+
+| Head | cloud state (08:43) | MQTT `setpoint` yesterday | MQTT `setpoint` now | HA `hvac_action` |
+|---|---|---|---|---|
+| Head J | manual, active **5**, comfort 21, 14.4 °C, NoHeat | **21** ❌ | **5** ✅ | **idle** ✅ |
+| Head K | manual, active **5**, comfort 21, 14.2 °C, NoHeat | — | **5** ✅ | — |
+| Head L | manual, active **5**, comfort 21, 14.1 °C, NoHeat | — | **5** ✅ | — |
+
+**R-1 verdict: ✅** published setpoint = active setpoint (DP 171), `hvac_action` = `work_state`.
+
+Remarks (not blocking, possible follow-ups):
+- HA attribute `setpoints.setpoint` = **21**: it is the raw per-DP table (`_SETPOINT_DPS`, key
+  `setpoint` = DP 16 / `temp_set`), not the active setpoint → misleading name.
+- The **head** climate has `supported_features: 0` → HA does not expose `temperature`: the active
+  setpoint is only visible in HA through the MQTT entity `sensor.<head>_setpoint`.
+- Connector restart checker: `state = None` for 600 s while HA was running.
+- Origin of the 08:30 restart not established (neither the validation session nor the connector,
+  according to their reports).
+
+## Deployment of full `main` (2026-11-19 ~08:40–08:58) ✅
+
+- `main` (`f9827b5`: R-1 #65, R-3 #66, unbind #63/#64) **put on the Pi around 08:4x** by another
+  session (direct approval from the owner), from a clean checkout of `origin/main`.
+  The confirm **expired on the client side**: the files were pushed (token then "already used"),
+  but **no entry in the connector's log** → untracked deployment, identified afterwards by comparing
+  fingerprints (the 08:27 batch = `67b6c1e`; the Pi = `main`, 41 identical files; a preview from
+  `67b6c1e` proposed ~14).
+- **Core restart** at 08:55:15 (owner's approval): config ✅ 34 s, restart ✅ 155 s. Just before,
+  re-checked that the disk = `main` (no deployment in between). The confirm also expired on the
+  client side, but the detached task ran.
+- **Proof that `main` is loaded**: the options form now exposes `post_command_refresh` (R-3) and
+  `enable_head_unbind` (missing the day before), both `false`.
+- Origin of the 08:30 restart: most likely another session working on another integration on the
+  same host (a backup and another add-on's options changed at 08:27).
+
+- **R-3 option enabled**: `post_command_refresh` false → **true** at 09:08 (write batch, owner's
+  approval), other options unchanged. A first attempt (08:59) was dropped with no effect: it waited
+  on the lock held by the faulty restart checker. Integration reloaded → `loaded`; MQTT still
+  correct (Head J `setpoint` 5, `online`). R-3 still **to validate** with a write round-trip (W-x).
+
+## §2 — W-1 (comfort setpoint) + R-3 validation, 2026-11-19 ~09:21 ✅
+
+Test room **Room B** (pid `03wvrwpv`, 2 heads, corridor; Room A has no writable room entity).
+Lever: `climate.set_temperature` on the **room** climate `climate.<room_b>` (comfort mode → the
+group's durable `at_home` setpoint) — this is the path that calls `note_commanded` (R-3). Write
+21 → **20.5** at **09:20:54** (write batch, owner's approval). Room at ~21.7 °C, no noticeable
+effect.
+
+| Time | Per-device cloud (#1/#2) | HA room climate | MQTT `setpoint` (2 heads) | Bulk route (connector) |
+|---|---|---|---|---|
+| T0 + ~10 s | `at_home_setting` 205 ✅, `OccupiedSetpoint` still 2100 | `setpoints.comfort` 20.5, `temperature` 21 | 21 / 21 | — |
+| ~09:22–09:23 | `OccupiedSetpoint` **2050** | `temperature` **20.5** (updated 09:22) | **20.5 / 20.5** ✅ | consigne_active **21** (stale) |
+
+- **W-1 ✅**: the written comfort setpoint appears in the cloud, HA and MQTT.
+- **W-7 (W-1) ✅**: MQTT reflects the new active setpoint ~2 min after the write.
+- **R-3 ✅**: the integration reflects the change within ~1–2 readings (90 s scan), while the bulk
+  route still shows 21 at the same moment — recovery through the per-device route works. (The day
+  before, without R-3, a round-trip on Room A was never reflected.)
+- **R4 ✅**: the room's weekly schedule, re-read after the write = **identical** to the reference
+  state (Mon/Tue/Thu/Fri 08:30–17:30 comfort; Wed/Sat/Sun empty). To cross-check in the app.
+- Head-specific delay: the active setpoint (DP 171) only switches after the head syncs
+  (`at_home_setting` written immediately, `OccupiedSetpoint` ~1–2 min later).
+- Code inconsistency found: the comfort/setback `number` entity (`DanfossRoomSetpoint`) does the
+  same write **without** `note_commanded` → no R-3 on that path.
+- **Restore**: back 20.5 → **21** at 09:23:54 (write batch, owner's approval). At ~09:26: cloud
+  `at_home_setting` 210 / `OccupiedSetpoint` 2100, HA target 21 (updated 09:25), MQTT 21 / 21,
+  schedule still identical to the reference. Second R-3 round-trip ✅ in ≤ ~2 min.
+
+## §2 — W-2 (setback setpoint), 2026-11-19 ~09:42 ✅ (with a transient effect)
+
+Same room (Room B). All rooms are in the comfort slot from 08:30 to 17:30 → no room in setback to
+make the active setpoint switch; W-2 done through the entity `number.<room_b>_setback_setpoint`
+14 → **13.5** (path without R-3).
+
+- 1st attempt (09:28:35) **lost with no effect**: it waited on the lock held by a core restart
+  started by another session (deployment of another integration on the same host, 09:27:58), and
+  was dropped at 09:33:35. Write collision between sessions on the Pi, reported.
+- 2nd attempt **09:42:15** (write batch, owner's approval).
+
+| Time | Cloud (#1 and #2) | HA `number` | MQTT `setpoint` |
+|---|---|---|---|
+| T0 + ~15 s | `leaving_home_setting` **135** ✅; ⚠️ `OccupiedSetpoint` **1350**, `SetpointChangeSource` = **Externally** (mode `at_home`, `temp_set` 210) | **13.5** ✅ | 21 |
+| ~09:45 | `leaving_home_setting` 135; `OccupiedSetpoint` **2100**, source **Schedule** | 13.5 | 21 ✅ |
+
+- **W-2 ✅**: setback setpoint written (cloud + HA).
+- **MQTT ✅**: stays at 21 (room in comfort); the transient excursion was not published (bulk).
+- **R4 ✅**: schedule identical to the reference.
+- ⚠️ **Undocumented behaviour**: publishing the setback (`{"109": …, "119": …}`) makes the head
+  apply the setback value **immediately** as the current setpoint (source `Externally`), even in a
+  comfort slot; rewriting the schedule (R3) brings it back to the slot ~1–3 min later. No thermal
+  effect observed (corridor at ~21.5 °C). To add to the contract (§4.2, "Setback setpoint" row);
+  hypothesis: DP 109 = "now" setpoint, DP 119 = setback setting.
+- **Restore**: setback 13.5 → **14** at 09:46:06 (write batch, owner's approval). At ~09:49: both
+  heads `leaving_home_setting` 140, `OccupiedSetpoint` 2100 (source Schedule), schedule identical.
+  (HA unavailable at the same moment: a new deployment of the other integration + core restart at
+  09:48 by the other session.)
+
+## §2 — W-3 (child lock, DP 30), 2026-11-19 ~09:59 ❌ not applied
+
+**Isolated** head Room A (no room; the integration's switches write per head through
+`tuya.m.custom.wkf.settings.change`, resType 1, `gwId = meshId`). Reference: `child_lock` true
+(cloud, HA `on`, app "enabled"). `switch.turn_off` at **09:59:01** (write batch, owner's approval).
+Pi lock checked free before (the other integration's restart finished at 09:51).
+
+| Time | Cloud `child_lock` | HA switch | App (owner) |
+|---|---|---|---|
+| T0 + ~10 s | true | on (updated 09:50) | — |
+| T0 + ~3 min | true (head active: 20.9 °C, Heat, valve 39 %) | on | **enabled** |
+| T0 + ~10 min | true (21 °C, valve 36 %) | on | — |
+
+- **W-3 ❌**: request accepted (service `ok`, no error raised), **never applied** to the head after
+  10 min (beyond the R7 delay of 5–10 min for settings).
+- **Consistency ✅**: the three views stay aligned on the real state (locked) — the integration
+  does not lie (no optimistic state).
+- Matches the warning in the code (`async_write_setting`: "real effect to confirm; some settings via
+  this path did not reach all isolated heads"): first real-hardware data point, **negative**, for
+  `gwId = meshId` addressing on an isolated-head setting.
+- Nothing to restore; **to re-check later** (a late application is possible → re-lock).
+- W-4 (window detection, DP 116): the cloud **switch** uses the same path; the
+  `set_window_detection` **service** goes through the local tunnel.
+
+### W-3 — diagnosis (2026-11-19 ~10:13–10:24)
+
+Hypothesis: since PR #35 (`c6511a6`), the integration writes settings with **`gwId = meshId`**
+(justified by an earlier trial that was about a **schedule** write), while the MCP connector uses
+**`gwId = devId`** (validated once on real hardware: screen orientation on an isolated head).
+
+Discriminating test (owner's approval): the same DP 30 → false write on Room A through the connector
+(`danfoss_tuya_reglage_*`, `gwId = devId`) at ~10:13; request accepted (`reponse: true`).
+
+| Time | Cloud `child_lock` | Head active? |
+|---|---|---|
+| T0 | true | yes |
+| T0 + ~4 min | true | yes (valve 36 %) |
+| T0 + ~10 min | **true** | yes (20.9 °C, Heat, valve 35 %) |
+
+**Conclusion**: it also fails with `gwId = devId` → **addressing is not the cause**.
+`tuya.m.custom.wkf.settings.change` does not apply (or not reliably) the settings of an **isolated**
+head — consistent with the connector's finding of 15/11 (DP 116: 0/7 isolated heads in 8 min).
+What works: the **per-room** setting (`s.m.dev.group.dp.publish`, grouped heads) and the **local
+tunnel**. The local read of Room A does not expose the child lock (no on-head proof possible for
+DP 30).
+
+Consequences / follow-ups for the integration:
+- the `child_lock` / `window_detection` switches of **isolated heads** must not show as writable
+  until this path is proven ("unavailable rather than lying" principle); for window detection,
+  route to the local tunnel;
+- for **grouped heads**, write the setting through the room (group publish, proven) instead of
+  per-head `settings.change`;
+- the contract §4.2 and the `async_write_setting` warning must be updated with this result.
+Nothing to restore (no write applied); check later that none is applied late.
+
+## §2 — W-4 (window detection, DP 116) through the local tunnel, 2026-11-19 ~10:22 ✅
+
+Isolated head Room A (its gateway). Integration service
+`danfoss_ally_cloud.set_window_detection {target: {type: device, id}, enabled: false}` — written
+through the **local tunnel** (not `settings.change`). Called through the Supervisor: **no**
+`not_admin` refusal. 10:22:44, write batch (owner's approval); response in 0.1 s.
+
+| View | Before | After | Delay |
+|---|---|---|---|
+| Head (local read, authoritative) | `detection_fenetre` true | **false** | immediate (re-read at T0 + ~20 s) |
+| Cloud (per-device route) | `window_toggle` true | **false** | < 1 min |
+| HA `switch…_open_window_detection_2` | on | **off** (updated 10:25) | ~2.5 min |
+| App | (owner) | to confirm | |
+
+- **W-4 ✅** through the local path, where the cloud path (W-3, `settings.change`) applies nothing.
+- The head then **reports** the setting up to the cloud: the HA switch (which reads the cloud)
+  follows on its own.
+- Inconsistency window of ~2.5 min where the HA switch still shows `on` while the head is `off`
+  (this path does not call `note_commanded` → no R-3; the bulk route catches up).
+- The rest of the head is unchanged (schedule, setpoints, settings re-read locally).
+- **Restore**: re-enabled at 10:28:35 (write batch, owner's approval) → head `detection_fenetre`
+  true (re-read immediately), cloud `window_toggle` true, HA `on` (updated 10:28, < 1 min this
+  time). W-3 check along the way: `child_lock` still **true** (neither of the two
+  `settings.change` writes was applied late).
+
+## §2 — W-5 (override, then back to schedule), 2026-11-19 ~10:34–10:49 ✅
+
+Scope: the W-5 **that the integration exposes** — `set_override` / `clear_override`, through the
+local tunnel (DP 171 "setpoint now", until the next schedule change; **no** manual mode, so R4 does
+not apply). The scenario "manual → `restore_schedule` (rewrite the schedule, then `at_home`)" is not
+covered here (the integration does not expose switching to manual).
+
+Isolated head Room A (its gateway), comfort slot 21. Head schedule read locally before
+(Mon/Tue/Thu/Fri 00:00→14, 08:30→21, 17:30→14; Wed/Sat/Sun 14).
+
+| Step | Head (local, authoritative) | Cloud | MQTT | HA head climate |
+|---|---|---|---|---|
+| Before | setpoint 21, source 1 (schedule) | `OccupiedSetpoint` 2100 | 21 | — |
+| `set_override 19` 10:34:13 (write batch) | **19**, source 2 (external) at T0+~20 s; schedule **identical** | **1900**, `Externally` | **19** (≤ ~3 min) | `hvac_action` idle (21 > 19) |
+| `clear_override` 10:46:37 (write batch, 4.7 s) | **21**, source 2; schedule **identical** | **2100**, `Externally`, `work_state` Heat | **21** (≤ ~2.5 min) | — |
+
+- **W-5 ✅**: the override applies in the head in ~20 s; returning to schedule restores the planned
+  setpoint (21); **the head's schedule is never modified** (re-read locally).
+- The source stays "external" after `clear_override`: expected (the override equals the schedule
+  setpoint and expires at the next change, 17:30). **To re-check after 17:30**: back to source
+  schedule.
+- **W-7 (W-5) ✅**: MQTT follows within a few minutes; this path does not call `note_commanded`
+  (no R-3). The head climate does not show the setpoint (UX limit already noted).
+- Access: call through the Supervisor accepted (no `not_admin` refusal), like W-4.
+
+## §3 — Preheat (P-1…P-3), curves of 2026-11-19 — see [`2026-11-preheat-curves.md`](2026-11-preheat-curves.md)
+
+Read-only, by a dedicated session (no write). Summary:
+- **P-1 ✅**: 70 usable heads with preheat ON; valve ≥ 10 % from 52 to 448 min before the slot
+  (median 252 min); the cloud "Pre-Heating" flag (MTrab) goes ON at the same time.
+- **P-2 ✅ (2 heads)**: Head P and Head Q (preheat OFF) open at 08:34 (slot + 4 min), with no
+  anticipated ramp. Limit: already OFF before the window → the switch → 0x0025 write path is **not**
+  validated.
+- **P-3 ✅ partial**: preheat switch `unavailable` head by head when the tunnel does not answer
+  (online = on, no fake ON/OFF); total tunnel outage not observed.
+- Annexes: preheat very early (up to 7 h 50; temperature rising from ~06:00, boiler room?); orphan
+  switch entities to clean up.
+- **Controlled trial started** (owner's approval): preheat OFF on Head R (write batch) and ON on
+  Head Q (write batch), 10:58, ~7 s each through the tunnel. **Switch → 0x0025 write validated on
+  real hardware**: re-read locally right away, Head R `pre_chauffage` true → **false**
+  (`mode_programmation` 3 → 1), Head Q false → **true** (1 → 3), schedules and setpoints unchanged;
+  still in place at ~11:04 (no rollback).
+  HA switches updated only at **11:11** (~13 min): the state comes from the local survey (15 min,
+  ~8 s/head), no optimistic state after a write.
+  To read on **Friday 20/11** (08:30 slot): Head R must stay closed until ~08:30 without the cloud
+  flag; Head Q must open before 08:30 with the flag. Then **restore** (Head R ON, Head Q OFF) after
+  09:00.
+
+## Deployment of `main` `f1cf051` (#67 + #68), 2026-11-19 ~11:14 ✅
+
+Owner's approval ("Deploy right away", during working hours). Clean checkout of `origin/main`
+(detached worktree, HEAD `f1cf051`, not dirty), Pi lock free. Deployment 11:14:33 (write batch,
++0 ~4 −32 caches, check OK on 41 files), then core restart (confirm expired on the client side,
+detached task ran). Integration `loaded`.
+
+- **#67 ✅** on `climate.<room_a>_2`: `active_setpoint` 21, `temperature` 21 now exposed
+  (`supported_features` 0 → **1**), `setpoints.temp_set` 21 + deprecated alias `setpoint`.
+- **#68 ✅** (relays per building, "Offline"): checked visually by the owner in the panel —
+  relay 2 under Building 2, relay 1 under Building 1, both "Offline".
+
+## Deployment of `1.1.0-rc1` (`b246f6d`, #69 per-room / tunnel settings), 2026-11-19 ~12:20
+
+Owner's approval. Clean checkout of tag `1.1.0-rc1` (= `main` `b246f6d`, manifest 1.1.0, not
+dirty), lock free. Deployment 12:20:22 (write batch, +0 ~5 −32 caches, OK on 41 files), then core
+restart (confirm expired on the client side, task ran).
+
+#69 routing checked on the entities:
+- Room A (isolated): `switch…_child_lock` **unavailable** ✅; window detection `write_path:
+  local`, `write_scope: head` ✅.
+- Room B (room, 2 heads): `child_lock` `write_path: room`, `write_scope: room`,
+  `room_head_count: 2` ✅.
+
+**Write through the room (W-3 fixed)**: `switch.turn_off` on `switch.<room_b>_1_child_lock` at
+12:25:23 (write batch, owner's approval).
+- Cloud: `child_lock` **false on BOTH heads** from T0 + ~15 s ✅ (where per-head
+  `settings.change` failed after 10 min).
+- HA: switch **#2 → off** (updated 12:25) ✅, but switch **#1 (the one actuated) still `on`**
+  (updated 12:23) at the same moment ⚠️ — the written entity lags behind its neighbour. To watch /
+  fix before the final `1.1.0`.
+- App ✅ (owner: Room B as expected). Version **1.1.0** shown in the panel ✅ (owner).
+- **Restore**: `switch.turn_on` #1 at 12:26:00 (write batch) → cloud `child_lock` **true on both
+  heads** immediately ✅. HA at 12:26: #2 `on` ✅ but #1 `off` (= the value of the previous write);
+  **#1 resyncs to `on` at 12:27** (next reading).
+- **Finding**: the **actuated** entity is **one write behind** for ~1 reading (the refresh that
+  follows the write reads its head before the cloud has taken it; the neighbouring head, read in the
+  same refresh, is right). Transient (~1 min), not blocking; preferably to fix before the final
+  `1.1.0` (optimistic state after a successful write, or a delayed re-read).
+- **W-3 ✅ through the room** for grouped heads; isolated head: child lock unavailable (no proven
+  path), window detection through the tunnel (W-4 ✅).
+
+## Deployment of `1.1.0-rc2` (`50b4ed3`, #73 R-3 settle delay), 2026-11-19 ~13:19 ✅
+
+Owner's approval. Clean checkout of tag `1.1.0-rc2` (= `main` `50b4ed3`, manifest 1.1.0, not dirty;
+only addition vs rc1: #73). Deployment 13:19:01 (write batch, +0 ~2 −32 caches, OK on 41 files),
+then core restart (confirm expired on the client side, task ran; HA back at 13:21). R-3
+(`post_command_refresh`) ON.
+
+Test (owner's approval): `switch.turn_off` on `switch.<room_b>_1_child_lock` (room, 2 heads) at
+13:22:04 (write batch).
+
+| Time | Switch #1 (actuated) | Switch #2 | Cloud #1 |
+|---|---|---|---|
+| T0 + ~3 s | on (updated 13:21) | — | — |
+| T0 + ~20 s | **off** (updated 13:22) ✅ | **off** (updated 13:22) | `child_lock` false |
+
+- **#73 ✅**: the actuated switch agrees within ~15–20 s (settle delay), instead of being one write
+  behind until the next reading (rc1 finding, 12:25–12:27).
+- **Restore**: `switch.turn_on` at 13:23:01 (write batch) → at T0 + ~22 s, switches #1 and #2
+  **on** (updated 13:23), cloud `child_lock` true ✅ — same behaviour in the reverse direction.
+
+## Tuya cloud MQTT listening probe (R&D, PR #71 not merged), 2026-11-19 ~13:48–14:04 ✅ coexistence
+
+Owner's approval, a single session on the Pi (the R&D session stepped back). Code audited before
+deployment: the probe (`CloudMqttListener`) has **no send path**; the MQTT write path present in the
+same commit (`CloudMqttLink`, `cloud_mqtt` path of the switches) is **closed twice**
+(`enable_cloud_mqtt` OFF by default, link wired to `None`). CI green.
+
+- `cb05109` deployed 13:48 (write batch) + restart; then `3313f7f` (same code + 2 log lines for the
+  verdict, to read it without the diagnostics) 13:52 (write batch) + restart.
+- The owner opens the Danfoss app on iPhone; option `cloud_mqtt_probe` → true at 13:58:03 (write
+  batch).
+- **13:59:34 — `cloud-mqtt probe: CONNACK rc=0 (Connection Accepted.)`** with the integration's own
+  session (distinct deviceId).
+- **iPhone app: still connected** (owner).
+- Option → false at 14:04:16 (write batch) → `cloud-mqtt probe stopped (unload): connack_rc=0
+  received=426 decoded=426 last_error=None` (≈ 4 min 40 of listening, 100 % of frames decoded).
+
+**Verdict: connection is PER SESSION** — the broker accepts the integration's session in parallel
+with the app's, without kicking it out. The MQTT channel (read, and later writing the settings of
+isolated heads) is **viable**; the decoder holds on 426 real frames.
+Hygiene: the paho thread name (`paho-mqtt-client-<client id>`) exposes the MQTT client id in the HA
+log (the diagnostics redact it) — to fix.
+Back: rc2 `50b4ed3` redeployed at 14:04:19 (write batch, +0 ~7 −36: probe code removed); core
+restart by the owner. **Checked ~14:10**: integration `loaded`, the `cloud_mqtt_probe` /
+`enable_cloud_mqtt` options have disappeared from the form (rc2 loaded), R-3 still ON; options
+fingerprint identical to the one before the probe.
+Hygiene fix applied by R&D: paho thread renamed (commit `e0334bc` on #71).
+
+## §2 — W-6 (vacation "away", TARGET 2), 2026-11-19 ~14:12–14:16 ✅
+
+rc2 on the Pi. The owner confirms in the app: **no vacation scheduled** on Building 1 (required:
+`cancel_vacation` applies to the whole home). Test designed **with no thermal effect**: a Saturday
+(schedule already in setback 14 °C all day), 14.5 °C = the heads' current `holiday_setting`, a
+single room (corridor).
+
+- `enable_vacation_write` → true at 14:12:48 (write batch, owner's approval).
+- `set_vacation` at 14:14:35 (write batch): home 1 (Building 1), rooms = Room B,
+  2026-12-05 08:00 → 2026-12-05 18:00, 14.5 °C → response ok in 1.6 s.
+- **HA, immediately**: `binary_sensor.<home_1>_holiday_active` attribute `detail` =
+  `{startDate 2026-12-05, startTime 08:00, endDate 2026-12-05, endTime 18:00, temperature 145,
+  roomList [Room B], isRunning false, vacationType 3}` (dates sent as YYYYMMDD); `sensor…_holiday_setpoint` 14.5.
+- **App ✅** (owner): vacation visible on Room B, dates and temperature as expected.
+- `cancel_vacation` at 14:15:34 (write batch) → ok; HA at 14:15: `holiday_active` **off**, no
+  more `detail`, `holiday_setpoint` unknown ✅.
+
+- `enable_vacation_write` → **false** at 14:16:09 (write batch): back to the default state.
+
+**W-6 verdict ✅** (plan.leave + cancel validated on real hardware, immediate HA round-trip). Still
+untested: `set_vacation_at_home` (plan.athome) and `end_vacation` (leave.now, vacation in
+progress).
+
+⚠️ **Defect**: `binary_sensor…_holiday_active` turns **on** for a **scheduled** vacation
+(`isRunning: false`) — it treats "detail not empty" as "active". Fix: `is_on =
+detail.isRunning` (and expose "scheduled" separately). Note: `vacation.detail` therefore also
+contains scheduled vacations (the initial empty detail did prove that no vacation was scheduled).
+
+## First Tuya cloud MQTT write (DP 30, isolated head), 2026-11-19 ~14:26–14:35 ✅
+
+Code `0e39fc0` (PR #71 draft, never merged; = rc2 + gated MQTT write path). Audit before
+deployment: `MQTT_WRITE_DPS = frozenset({30})` (any other DP refused before encoding); only
+`CloudMqttLink.publish_dp` publishes to the heads, reached only by a switch on the `cloud_mqtt`
+path (option ON + link present + DP ∈ {30} + **isolated** head of a verified model — a grouped head
+goes through the room, tested before). CI green.
+
+- Deployment 14:26:28 (write batch, +2 ~10 −32) + restart (14:26:31). Option `enable_cloud_mqtt`
+  present and OFF; Room A child-lock switch `unavailable` (no path).
+- Baseline Room A: `child_lock` **true** (V0). Note: Room A's comfort changed 21 → 20.5 during the
+  day **by the owner from the app** (no write by the connector) — confirmed.
+- `enable_cloud_mqtt` → true at 14:31:59 (write batch). **Point 1**: `binary_sensor.cloud_mqtt_link`
+  **on** (14:33:28); log `cloud-mqtt link: CONNACK rc=0` (thread `danfoss-cloud-mqtt-link`, no
+  client id); Room A switch `on`, available, `write_path: cloud_mqtt`, `write_scope: head`.
+- **Write** `switch.turn_off` Room A at 14:34 (write batch, owner's approval) → service **with no
+  error** in 0.5 s (= confirmation, protocol-4 echo or cloud re-read — not distinguished in the
+  log). **Point 2**: cloud `child_lock` **false** within a few seconds (reported by the head; vs
+  W-3 `settings.change`: never), HA switch `off` (14:34); **app AND physical head unlocked**
+  (owner); no other Room A setting changed; app not kicked out.
+
+**Verdict: ✅ first Tuya cloud MQTT write validated on real hardware** — DP 30 of an isolated head
+applies through MQTT (where `settings.change` fails). Also validates the inbound path end to end.
+
+Restore after the first MQTT write: Room A re-locked through MQTT at 14:36 (write batch, cloud
+`child_lock` true, switch `on`). `enable_cloud_mqtt` → false at 14:40:46 (write batch, queued
+behind an HA restart started by the other integration's session at 14:37:37 — collision, no
+damage). Went back **directly to rc3** (instead of rc2) on the owner's decision.
+
+## Deployment of `1.1.0-rc3` (`0541a5b`, #74 fixes), 2026-11-19 ~14:43 ✅ (quick check)
+
+Clean checkout of tag `1.1.0-rc3` (= `main`, manifest 1.1.0). Deployment 14:43:35 (write batch,
++0 ~16 −36: MQTT code removed) + core restart. Read-only check:
+- integration `loaded`; **no** `danfoss_ally_cloud` **error line** in the log at startup;
+- MQTT options (`enable_cloud_mqtt`, `cloud_mqtt_probe`) **gone** from the form; R-3 ON;
+- `binary_sensor.cloud_mqtt_link`: no longer provided → it stayed in the registry as an **orphan**;
+  **deleted** at 14:57:25 (write batch, owner's approval, orphan check OK);
+- `holiday_active` **off** on both homes with the attribute **`scheduled: false`** (fix #74);
+- Room A climate available (`active_setpoint` 20.5); Room A child-lock switch `unavailable`
+  (expected: isolated head, no proven path without MQTT); Room A locked (V0) on the cloud side;
+- preheat: switches available, trial in progress (Head R `off`, Head Q `on`) until Friday;
+- version **1.1.0** shown in the panel ✅ (owner).
+Writes of the #74 fixes (R-3 on `number`, preheat re-read, scheduled vacation): covered by unit
+tests, real-hardware validation at the next window.
+
+**Defects found in the connector tooling** (to report to the HA admin connector):
+- a confirm that expires on the client side **loses the log entry** although the write happened;
+- the "HA back up" restart checker returns `state = None` for 600 s while HA is running (false
+  negative, task marked as failed);
+- `reconnect_session_connector` cannot reload a healthy stdio MCP server: a new tool only appears
+  after a manual restart of the server.
+
+## §3 — online vs update_time (autonomous spot-check)
+
+- Room A (online) → MQTT availability `online` ✅.
+- **Room S head #3** (offline head, `danfoss_sante`) → MQTT availability **`offline`** ✅ →
+  availability does follow `online`, not `update_time`.
+- Sensor T (**sensor**) and relay 1 (**relay**) → availability topic **missing**: these categories
+  are **not published** in discovery (the integration publishes heads; sensors/relays are outside
+  the MQTT scope). Worth noting, not a defect.
+
+## R-3 — addendum (lost transient)
+
+Re-read of Room A ~21:51: back on schedule (`setback`, `OccupiedSetpoint` 1400, valve 1 %,
+`work_state` NoHeat). The manual peak (21 / valve 82 %) of ~21:06 **was never reflected** by the
+integration or MQTT (bulk route): it appeared and disappeared between two visible polls. Confirms
+that fast variations go under the radar of the bulk route.
+
+## Session state (2026-11-18, evening)
+
+- **Done**: §0 (prerequisites + discovery enabled), R-1 (2 mismatches: setpoint + hvac_action),
+  R-3 (bulk route latency). Head firmware recorded.
+- **Postponed to the next morning**: R-2 (windows during airing), P-1…P-3 (preheat curves),
+  bulk latency re-check.
+- **Suspended**: writes W-1…W-7 — not very conclusive as long as (a) the mapping fix is not merged
+  and (b) the bulk latency is not settled (round-trips are not visible in time).
+- **Gated / not tested**: W-6 vacation (TARGET 2, option off), §2b unbind (TARGET 3, not exposed).
+- **R-1 fix**: session `fix-consigne-active-hvac` — **coded, tests green** (407 passed, coverage
+  93.45 %, ruff OK), **not committed**, waiting for review/commit by the owner.
+  Mapping: DP 171 → (fallback: mode+settings) → DP 16. R-3 (freshness) left out of this PR.
+- **To restore**: Room A left in manual 21 during R-3 → to put back on schedule.
+- **Config**: `mqtt_mode=discovery` left on for the next morning's observation.
