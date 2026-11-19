@@ -135,6 +135,31 @@ cloud MQTT channel below). Read-only: no command topic.
   `enable_local` is on and the head answers locally; otherwise the switch is **unavailable** rather
   than showing a state it cannot set.
 
+## Devices and entities that are no longer provided
+
+At each start the integration removes what it can no longer provide, so nothing lingers as a
+"restored, unavailable" orphan:
+
+- the device (and all its entities) of a head, relay or sensor that has **left the account**;
+- the **preheat** switches when the local tunnel option (`enable_local`) is off — they only exist
+  through the tunnel. If the tunnel is enabled but could not start, they are kept;
+- the "Cloud MQTT link" sensor when the cloud-MQTT option is off.
+
+A device is only removed when the integration is sure it is gone, and never in bulk:
+
+- the cloud's device list must be **complete** (every home answered) and **the same as at the
+  previous start** (same homes, same number of devices in each). Whenever it differs — first
+  start, a home that did not answer, a shorter list — nothing is removed; the next start that
+  shows the same picture again does it. A device that left is therefore cleaned up one restart
+  later;
+- at most **3 devices per start, or 5 % of the entry's devices** if that is more. Above that,
+  nothing is removed and a warning in the log says so: delete them yourself from their device page
+  if they really left the account.
+
+Room and home devices are never removed automatically (their presence depends on reads that may
+fail at start-up). A room that was dissolved can be deleted by hand from its device page: the
+"Delete" action is offered for any device the integration no longer provides.
+
 ### Cloud-MQTT write path for isolated heads (experimental, off by default)
 
 The Danfoss app writes an isolated head's settings by publishing the DP over Tuya cloud MQTT. The

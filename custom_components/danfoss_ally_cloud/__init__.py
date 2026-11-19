@@ -11,8 +11,10 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .api import MQTT_CANDIDATE_DPS, CloudClient, async_fetch_gateway_keys
@@ -154,6 +156,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
     await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
     _cleanup_orphaned_head_climates(hass, entry, coordinator)
+    await _async_cleanup_stale_entities(
+        hass, entry, coordinator, has_mqtt_link=mqtt_link is not None
+    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # Head -> room device links (via_device_id), now that the devices exist, then on each
     # update so attach / detach follows.
@@ -416,16 +421,183 @@ def _cleanup_orphaned_head_climates(
             registry.async_remove(ent_id)
 
 
+def _live_device_keys(coordinator: DanfossCoordinator) -> set[str]:
+    """Identifier values of the devices this entry provides now: heads/relays/sensors of the last
+    cloud read, rooms (``group_<id>``) and homes (``home_<gid>``)."""
+    keys = set(coordinator.data)
+    keys |= {f"group_{group_id}" for group_id in coordinator.rooms}
+    keys |= {f"home_{gid}" for gid in coordinator.holidays}
+    return keys
+
+
+# Stale-device removal guard-rails. Removing a device drops its entities with their customised
+# ids, names and areas, and whatever refers to them; a cosmetic cleanup must never do that on a
+# doubtful read. So: at most this many devices per start, or this share of the entry's devices if
+# that is more. Above it nothing is removed and the user decides, device by device.
+STALE_DEVICES_MAX = 3
+STALE_DEVICES_MAX_SHARE = 0.05
+
+
+def _homes_store(hass: HomeAssistant, entry: ConfigEntry) -> Store[dict[str, dict[str, int]]]:
+    """Per entry: the homes of the last COMPLETE device list and how many devices each held."""
+    return Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.homes")
+
+
+async def _async_device_list_confirmed(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: DanfossCoordinator
+) -> bool:
+    """True if the device list of this start can be trusted to say a device is GONE.
+
+    ``CloudClient.async_list_devices`` is tolerant: a home answering with something that is not a
+    list, or missing from the homes list, just contributes no device. Its result is trusted for a
+    removal only when:
+
+    - the client reports the list complete (every home answered with a list); and
+    - the picture is STABLE over two starts: the homes and the number of devices in each are
+      IDENTICAL to those recorded at the previous complete start.
+
+    A complete flag alone is not enough: a home can answer with a truncated list, non-empty but
+    shorter than the real one, and nothing in a single read tells it from devices that left. So
+    whenever the picture differs from the record (first start, a home that vanished or answered
+    empty, a count that moved in either direction), nothing is removed and the new picture is
+    recorded; a device that really left is removed at the next start, once the same picture is
+    seen again. One start of delay costs nothing for a cosmetic cleanup.
+    """
+    client = coordinator.client
+    complete = bool(getattr(client, "device_list_complete", False))
+    current: dict[str, int] = dict(getattr(client, "device_list_homes", {}) or {})
+    store = _homes_store(hass, entry)
+    known = ((await store.async_load()) or {}).get("homes")
+    if complete and current != known:
+        await store.async_save({"homes": current})
+    return complete and known is not None and current == known
+
+
+async def _async_cleanup_stale_devices(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: DanfossCoordinator
+) -> int:
+    """Remove the DEVICE (and so every entity) of a head, relay or sensor gone from the account.
+    Returns how many were removed.
+
+    Room and home devices are never removed here: their presence depends on best-effort reads
+    (topology, holidays) that may fail at start-up. For the others, two guard-rails:
+
+    - the device list must be confirmed: complete, and the same picture as at the previous
+      complete start (``_async_device_list_confirmed``);
+    - proportion: more than ``STALE_DEVICES_MAX`` devices to remove, and more than
+      ``STALE_DEVICES_MAX_SHARE`` of the entry's devices, is not a cleanup but an anomaly. Nothing
+      is removed, a warning says so, and the user can delete each device from its page
+      (``async_remove_config_entry_device``).
+    """
+    confirmed = await _async_device_list_confirmed(hass, entry, coordinator)
+    dev_reg = dr.async_get(hass)
+    candidates = [
+        device
+        for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id)
+        if (keys := {value for domain, value in device.identifiers if domain == DOMAIN})
+        and not any(k.startswith(("group_", "home_")) for k in keys)
+    ]
+    stale = [
+        device
+        for device in candidates
+        if {value for domain, value in device.identifiers if domain == DOMAIN}.isdisjoint(
+            coordinator.data
+        )
+    ]
+    if not stale:
+        return 0
+    if not confirmed:
+        _LOGGER.info(
+            "%s device(s) absent from the cloud list were kept: the list is not confirmed yet "
+            "(incomplete, or different from the previous start). They are removed at a later "
+            "start if the list stays the same.",
+            len(stale),
+        )
+        return 0
+    limit = max(STALE_DEVICES_MAX, int(len(candidates) * STALE_DEVICES_MAX_SHARE))
+    if len(stale) > limit:
+        _LOGGER.warning(
+            "%s of %s devices are absent from the cloud list: too many for an automatic cleanup "
+            "(limit %s), nothing was removed. If they really left the account, delete them from "
+            "their device page.",
+            len(stale),
+            len(candidates),
+            limit,
+        )
+        return 0
+    for device in stale:
+        dev_reg.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
+    return len(stale)
+
+
+async def _async_cleanup_stale_entities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: DanfossCoordinator,
+    *,
+    has_mqtt_link: bool = False,
+) -> None:
+    """Remove what this entry can no longer provide, instead of leaving it "restored, unavailable"
+    for the user to delete by hand (real-hardware finding, 2026-11-19: orphaned preheat switches
+    and an orphaned link sensor had to be removed manually).
+
+    Conservative, three exact cases:
+
+    1. the DEVICE of a head, relay or sensor that is gone from the account (unbound, replaced):
+       the device and all its entities, under the guard-rails of
+       ``_async_cleanup_stale_devices`` (confirmed-complete list, proportion limit);
+    2. the PREHEAT switches when the local tunnel option is off: they exist only through the
+       tunnel. A tunnel that is enabled but failed to start keeps them (transient);
+    3. the cloud-MQTT LINK sensor when the cloud-MQTT option is off and no link was opened (so a
+       link opened for another reason keeps its sensor).
+    """
+    removed = await _async_cleanup_stale_devices(hass, entry, coordinator)
+
+    ent_reg = er.async_get(hass)
+    local_on = bool(entry.options.get(CONF_ENABLE_LOCAL))
+    cloud_mqtt_on = bool(entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT))
+    link_sensor_uid = f"{entry.entry_id}_cloud_mqtt_link"
+    for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        stale = (
+            not local_on and entity.domain == "switch" and entity.unique_id.endswith("_preheat")
+        ) or (
+            not cloud_mqtt_on
+            and not has_mqtt_link
+            and entity.domain == "binary_sensor"
+            and entity.unique_id == link_sensor_uid
+        )
+        if stale:
+            ent_reg.async_remove(entity.entity_id)
+            removed += 1
+    if removed:
+        _LOGGER.info("Removed %s stale device(s)/entity(ies) no longer provided.", removed)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Let the user delete a device from the UI when this entry no longer provides it (a room that
+    was dissolved, a head that left the account). A device that is still provided cannot be
+    deleted: it would come back at the next reload."""
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if not data:
+        return False
+    live = _live_device_keys(data[DATA_COORDINATOR])
+    return not any(value in live for domain, value in device_entry.identifiers if domain == DOMAIN)
+
+
 async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload the entry when options change (MQTT, local, interval)."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """On removal of the LAST entry: clean up the Lovelace resource (contract §6).
+    """Drop this entry's record of known homes; on removal of the LAST entry, also clean up the
+    Lovelace resource (contract §6).
 
     We do not clean up on a simple unload/reload (which only calls `async_unload_entry`), but only
     when no entry remains.
     """
+    await _homes_store(hass, entry).async_remove()
     if not hass.config_entries.async_entries(DOMAIN):
         await async_unregister_frontend(hass)

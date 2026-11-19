@@ -110,6 +110,15 @@ class FakeCloudClient:
             raise self._list_exc
         return list(self._devices)
 
+    # Completeness of the device list (single-home fixture, complete unless a test says otherwise).
+    device_list_complete = True
+
+    list_homes = None  # override: {gid: device count}
+
+    @property
+    def device_list_homes(self):
+        return dict(self.list_homes) if self.list_homes is not None else {"1": len(self._devices)}
+
     async def async_get_homes(self):
         return [{"gid": 1, "name": "Maison"}]
 

@@ -65,6 +65,22 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   (`>=1.6.1,<3`, the same range as `manifest.json`); the codec alone needs no extra. CI now builds
   the wheel and imports the MQTT modules from it. To be published to PyPI for the MCP connector.
 
+### Fixed
+
+- **Stale devices and entities are removed at start-up** instead of lingering as restored orphans
+  that had to be deleted by hand (real-hardware finding, 2026-11-19): the device of a head, relay
+  or sensor gone from the account, with its entities; the preheat switches when `enable_local` is
+  off; the "Cloud MQTT link" sensor when the cloud-MQTT option is off. Room and home devices are
+  never removed automatically; a device that is no longer provided can be deleted from its device
+  page. A device is removed only on a device list that is **complete and identical, home by
+  home, to the previous start's** (never on a first start, a home that did not answer, or a list
+  that got shorter: the removal then happens one restart later, if the picture holds), and **at
+  most 3 devices per start, or 5 % of the entry's devices**; above that nothing is
+  removed and a warning says so.
+- `CloudClient.device_list_complete` / `device_list_homes` (library, additive): whether the last
+  `async_list_devices` had an answer from every home. The list itself is unchanged and still
+  tolerant; for a later `pydanfoss-cloud` 0.3.1.
+
 ### Added (MQTT publishing to your own broker)
 
 - **Boiler relays are published in `discovery` mode**: one read-only binary sensor (on/off) per
