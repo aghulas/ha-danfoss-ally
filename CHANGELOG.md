@@ -34,6 +34,14 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   (`>=1.6.1,<3`, the same range as `manifest.json`); the codec alone needs no extra. CI now builds
   the wheel and imports the MQTT modules from it. To be published to PyPI for the MCP connector.
 
+### Added (MQTT publishing to your own broker)
+
+- **Boiler relays are published in `discovery` mode**: one read-only binary sensor (on/off) per
+  relay, with its availability. Real-hardware finding (2026-11-19): relays and room sensors had no
+  topic at all. Relays were a gap (the integration has the entity); **room sensors stay out of
+  scope on purpose**, since the integration does not decode that category yet. The scope is now
+  written down in the README. `zigbee2mqtt` mode is unchanged (heads only).
+
 ### Notes
 
 - Experimental / unofficial path; it rides the app's Tuya auth. Enable only deliberately. The first

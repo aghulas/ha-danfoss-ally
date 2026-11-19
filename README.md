@@ -107,6 +107,25 @@ Other commands: `npm --prefix frontend test` (Vitest), `npm --prefix frontend ru
 `npm --prefix frontend run demo` (demo page outside Home Assistant, synthetic test data, at
 http://localhost:5173/demo/).
 
+## MQTT publishing: what is published
+
+`mqtt_mode` publishes the integration's state to **your own broker** (nothing to do with the Tuya
+cloud MQTT channel below). Read-only: no command topic.
+
+| Device | `discovery` | `zigbee2mqtt` |
+|---|---|---|
+| Thermostatic head | temperature, active setpoint, battery, valve opening, window; availability | same values under z2m property names, plus `running_state`; availability; listed in `bridge/devices` |
+| Boiler relay | one binary sensor (on/off); availability | not published |
+| Room sensor, gateway, anything else | not published | not published |
+
+- **Boiler relays** are published in `discovery` mode only: the `zigbee2mqtt` device list describes
+  thermostats to a z2m consumer, and a relay does not fit that description.
+- **Room sensors are not published, on purpose for now**: the integration does not decode that
+  category at all (it creates no Home Assistant entity for them either), because their data points
+  have not been verified on real hardware. Publishing them needs that verification first.
+- Topics: `<base>/<device id>` (state, JSON) and `<base>/<device id>/availability` in `discovery`
+  mode; `<base>/<name>` and `<base>/<name>/availability` in `zigbee2mqtt` mode.
+
 ## Head settings (child lock, window detection)
 
 - **Head in a room**: the switch writes the setting on the **room**, so it applies to **every head
