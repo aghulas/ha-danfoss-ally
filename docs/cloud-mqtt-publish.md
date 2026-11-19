@@ -160,8 +160,14 @@ diagnostics or the repo. `mqtt_publish.py` never puts them in a repr or an error
    memory). Operational takeaway: the integration must drive MQTT from **its own managed session**
    (its distinct deviceId), not a borrowed one; a live read-only CONNACK is best validated from inside
    the integration (fresh, auto-refreshed session) rather than a captured app session.
-4. **First write** (Rémi's go-ahead, on site) — procedure written: `docs/first-write-procedure.md`
-   (isolated head, reversible DP 30, observe app+head+ack, revert, stop criteria). Not executed.
+4. **First write** — ✅ DONE, SUCCESS on real hardware (2026-11-19). On C-1 Salle ASH (isolated head),
+   with Rémi's go-ahead and `enable_cloud_mqtt` on: `switch.turn_off` (child-lock DP 30) returned in
+   0.5 s with no error; the head reported `child_lock=false` to the cloud seconds later; **Rémi
+   confirmed the head unlocked in the app AND physically**. No other head/setting on C-1 touched; the
+   iPhone app was not evicted; `CONNACK rc=0`, thread `danfoss-cloud-mqtt-link` (no client id in the
+   log). So the cloud-MQTT isolated-head write path works end to end. (The echo-vs-cloud-re-read
+   confirmation path is now logged at debug to tell which one fired.) Restore to V0 + option OFF done
+   by the validation session. Extend per DP/model only after more such supervised writes.
 5. **Async client + routing** — ⏳ STARTED (offline, this branch). `api/mqtt_client.py`: `CloudMqttLink`
    (one per entry, `SeqOrigin` per gateway kept for the session, subscribe `smart/mb/in/<gw>` +
    decode, gated publish), credentials for a **dedicated R&D deviceId**. Transport **aiomqtt**

@@ -19,6 +19,7 @@ attribute 0x0025, via the LOCAL TUNNEL. The preheat switch therefore exists only
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -39,6 +40,8 @@ from .api.mqtt_client import CloudMqttLink
 from .const import DATA_CLOUD_MQTT, DATA_COORDINATOR, DATA_LOCAL, DATA_MQTT_LINK, DOMAIN
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 from .entity import DanfossEntity
+
+_LOGGER = logging.getLogger(__name__)
 
 # Write paths of a setting switch (``write_path`` attribute).
 PATH_ROOM = "room"  # group publish on the head's room: affects every head of the room
@@ -221,7 +224,9 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
             except Exception as err:  # noqa: BLE001 - surface any send failure, never a blind write
                 raise HomeAssistantError(f"cloud-MQTT setting write failed: {err}") from err
             self.coordinator.note_commanded([dev.id])
-            if not confirmed:
+            if confirmed:
+                _LOGGER.debug("cloud-MQTT DP %s confirmed by inbound echo frame", dp)
+            else:
                 # Fall back to a cloud re-read; if still unconfirmed, say so (do not claim success).
                 await self.coordinator.async_request_refresh()
                 dev2 = self.device
@@ -229,6 +234,7 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
                     raise HomeAssistantError(
                         "cloud-MQTT write not confirmed (no inbound frame, cloud still differs)"
                     )
+                _LOGGER.debug("cloud-MQTT DP %s confirmed by cloud re-read (no echo frame)", dp)
                 return
         else:
             head = self._local_head(dev)
