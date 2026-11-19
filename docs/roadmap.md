@@ -63,6 +63,15 @@ route. Bounded on purpose (the user's real Tuya account): only hot heads are ind
 most `POST_COMMAND_REFRESH_MAX_HEADS` (12) per poll, one read each; a read failure or an empty
 response keeps the bulk value (never raises).
 
+**Settle delay (`POST_COMMAND_SETTLE`, 15 s; 1.1.0-rc1 finding).** The cloud takes a command into
+account in about 15 s. A per-device read made right after the write returns the **pre-command**
+state: on rc1 the written switch stayed one write behind until the next poll, while its room
+neighbour, read from the bulk list, was already right. So a hot head is **not** overlaid during the
+first 15 s (the write's own immediate refresh keeps the bulk value), and **one extra refresh** is
+scheduled at the end of the delay to read it once the cloud has it: the result shows up in ~15 s
+instead of a full poll. Re-arming on a new command keeps a single pending refresh; it is cancelled
+on shutdown. Still never optimistic: what is shown is what the cloud returns.
+
 **GATED, off by default (`enable_post_command_refresh`, `CONF_POST_COMMAND_REFRESH`).** Two reasons:
 it adds a per-device read pattern on the real account, and **that `smartlife.m.device.get` is fresher
 than the bulk list for a HEAD is the R-3 hypothesis still to confirm on real hardware** — the

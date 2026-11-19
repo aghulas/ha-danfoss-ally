@@ -35,7 +35,10 @@ below).
   option **Post-command refresh** (`post_command_refresh`), heads just commanded are read through a
   per-device route (`smartlife.m.device.get`) for 300 s, at most 12 reads per poll, then return to
   the bulk poll. Validated on real hardware: a setpoint write shows up in HA and MQTT in about
-  2 minutes, the weekly schedule left intact.
+  2 minutes, the weekly schedule left intact. That per-device read starts after a **15 s settle
+  delay**, followed by one scheduled refresh: read right after the write, it returned the
+  pre-command state and left the written switch one write behind until the next poll (found on
+  1.1.0-rc1, fixed for rc2). Never optimistic.
 - **New `active_setpoint` state attribute** on room and head climates: the setpoint in force.
 - **Head unbind ("disconnect") — GATED, pending real-hardware validation through HA.** New service
   `danfoss_ally_cloud.disconnect_head` (and `CloudClient.async_device_reset`) unbinds a single head

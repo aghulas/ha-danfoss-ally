@@ -12,14 +12,19 @@ import time
 from collections.abc import Iterable
 from datetime import timedelta
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import CloudAuthError, CloudClient, CloudError, DanfossDevice, apply_dps_overlay
 from .api.local.manager import Head, LocalTunnelManager
 from .api.rooms import Room, RoomState, aggregate_room
-from .const import POST_COMMAND_REFRESH_MAX_HEADS, POST_COMMAND_REFRESH_TTL
+from .const import (
+    POST_COMMAND_REFRESH_MAX_HEADS,
+    POST_COMMAND_REFRESH_TTL,
+    POST_COMMAND_SETTLE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,11 +51,14 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
             update_interval=timedelta(seconds=scan_interval),
         )
         self.client = client
-        # Post-command refresh (R-3): head_id -> monotonic deadline until which the head is read via
-        # the per-device route instead of trusting the lagging bulk list. Empty (and a no-op) unless
-        # the option is on.
+        # Post-command refresh (R-3): head_id -> (not_before, deadline), monotonic. Between the two
+        # the head is read via the per-device route instead of trusting the lagging bulk list;
+        # before not_before (settle delay) the cloud may not have taken the command yet, so the
+        # bulk value is kept. Empty (and a no-op) unless the option is on.
         self._post_command_refresh = post_command_refresh
-        self._commanded: dict[str, float] = {}
+        self._commanded: dict[str, tuple[float, float]] = {}
+        # One-shot refresh scheduled at the end of the settle delay (cancelled on shutdown).
+        self._settle_unsub: CALLBACK_TYPE | None = None
         # Aggregated rooms (group_id -> RoomState) and head -> room membership, recomputed on each
         # refresh from the cached topology and the current head state.
         self.rooms: dict[str, RoomState] = {}
@@ -89,31 +97,65 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         """Mark heads just commanded so the next polls read them via the per-device route (R-3).
 
         No-op unless the post-command refresh option is on. Called by the write paths (room
-        setpoint, schedule set / restore) right after a successful cloud write, including before the
-        write's own ``async_request_refresh`` — so that first refresh already overlays the fresh
-        per-device state instead of the lagging bulk list. Each call (re)arms the window for
-        ``POST_COMMAND_REFRESH_TTL`` seconds; expired ids are pruned on the next poll.
+        setpoint, schedule set / restore, room settings) right after a successful cloud write.
+        Each call (re)arms the window for ``POST_COMMAND_REFRESH_TTL`` seconds.
+
+        The overlay only starts after ``POST_COMMAND_SETTLE`` seconds: a per-device read made right
+        after the write returns the pre-command state (the cloud takes the command in ~15 s), which
+        left the written entity one write behind until the next poll. The write's own immediate
+        refresh therefore keeps the bulk value, and one extra refresh is scheduled at the end of the
+        settle delay to read the commanded heads once the cloud has them. Never optimistic: what is
+        shown is always what the cloud returns.
         """
         if not self._post_command_refresh:
             return
-        deadline = time.monotonic() + POST_COMMAND_REFRESH_TTL
+        now = time.monotonic()
+        window = (now + POST_COMMAND_SETTLE, now + POST_COMMAND_REFRESH_TTL)
+        marked = False
         for head_id in head_ids:
             if head_id:
-                self._commanded[head_id] = deadline
+                self._commanded[head_id] = window
+                marked = True
+        if marked:
+            self._schedule_settle_refresh()
+
+    def _schedule_settle_refresh(self) -> None:
+        """(Re)schedule the one-shot refresh at the end of the settle delay."""
+        if self._settle_unsub is not None:
+            self._settle_unsub()
+        self._settle_unsub = async_call_later(
+            self.hass, POST_COMMAND_SETTLE, self._async_settle_refresh
+        )
+
+    async def _async_settle_refresh(self, _now: object) -> None:
+        self._settle_unsub = None
+        await self.async_request_refresh()
+
+    async def async_shutdown(self) -> None:
+        """Cancel a pending settle refresh, then the base shutdown."""
+        if self._settle_unsub is not None:
+            self._settle_unsub()
+            self._settle_unsub = None
+        await super().async_shutdown()
 
     async def _overlay_commanded(self, data: dict[str, DanfossDevice]) -> None:
         """Overlay the per-device (fresh) DPs onto recently commanded heads (R-3). Best-effort.
 
         Bounded on purpose (the user's real account): only heads still inside their post-command
-        window are read, at most ``POST_COMMAND_REFRESH_MAX_HEADS`` per poll, one per-device read
-        each. A read failure or an empty response keeps the bulk value (never raises). Expired
-        entries are pruned so a head returns to the bulk route after its window.
+        window and past the settle delay are read, at most ``POST_COMMAND_REFRESH_MAX_HEADS`` per
+        poll, one per-device read each. A read failure or an empty response keeps the bulk value
+        (never raises). Expired entries are pruned so a head returns to the bulk route after its
+        window.
         """
         if not self._post_command_refresh or not self._commanded:
             return
         now = time.monotonic()
-        self._commanded = {h: dl for h, dl in self._commanded.items() if dl > now}
-        hot = [h for h in self._commanded if h in data and data[h].is_head]
+        self._commanded = {h: w for h, w in self._commanded.items() if w[1] > now}
+        hot = [
+            h
+            for h, (not_before, _) in self._commanded.items()
+            if not_before <= now and h in data and data[h].is_head
+        ]
         for head_id in hot[:POST_COMMAND_REFRESH_MAX_HEADS]:
             try:
                 fresh = await self.client.async_get_device_dps(head_id)
