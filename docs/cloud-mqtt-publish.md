@@ -7,11 +7,12 @@ no write to a head. A real publish needs Rémi's explicit go-ahead (see §6). Dr
 Progress 2026-11-19 (research, off the 1.1.0 critical path): §6.1 done (branch pushed, draft PR
 #71); **§6.2 DONE — broker password reverse-engineered, pure Python** (cmd 2 =
 `md5hex(md5hex(sign_key) + ecode)`, password = `[8:24]`; see §5.1); **§6.3 DONE — the decoder is
-validated on 6/6 REAL inbound frames** captured live from the gateways (§6 step 2); §6.4
-read-only connect script ready, not run (still needs a fresh session + partnerIdentity/uid — the
-captured session is expired and the config hook missed them). The scripts that touch secrets live
-**outside this repo**, in `~/dev/danfoss-ally-signing-re/` (`frida/capture_cmd2.js`,
-`frida/capture_mqtt.js` + their runners, `tools/verify_mqtt_frame.py`, `tools/mqtt_read_only.py`).
+validated on 6/6 REAL inbound frames** captured live from the gateways (§6 step 2); **§6.4 credential
+layer DONE — derived clientId/username/password/user-topic match the app byte-for-byte** (§6 step 3),
+though a live CONNACK=0 was not achieved (a borrowed app session is stale by connect time; the
+integration will use its own session). The scripts that touch secrets live **outside this repo**, in
+`~/dev/danfoss-ally-signing-re/` (`frida/capture_cmd2.js`, `frida/capture_mqtt.js`,
+`frida/capture_conn.js` + their runners, `tools/verify_mqtt_frame.py`, `tools/mqtt_read_only.py`).
 
 ## 1. Why
 
@@ -143,13 +144,22 @@ diagnostics or the repo. `mqtt_publish.py` never puts them in a repr or an error
    proves the whole shared machinery — header-as-AAD, AES-GCM, gateway localKey, nonce‖ct‖tag layout,
    and the `{cid, dps}` sub-device structure — on real bytes. Frames/keys stayed in the ignored
    `captures/` dir, never in the repo.
-3. **Connect only** (read): TLS connect with the derived credentials, subscribe
-   `smart/mb/in/<gw>` and the user topic, decode inbound frames (DP reports). No publish. Script ready
-   (not run): `~/dev/danfoss-ally-signing-re/tools/mqtt_read_only.py` (0 `publish()` calls by design).
-   Still needs a **fresh session + partnerIdentity + uid**: the captured session is expired, and the
-   `MqttConnectConfig` getter hook fired after connect so it missed them. Lower priority now that the
-   decoder is proven on real frames; mainly validates that the derived credentials are accepted by
-   the live broker.
+3. **Connect only** (read) — credential layer ✅ VALIDATED BYTE-EXACT (2026-11-19); a live CONNACK=0
+   not achieved (borrowed session goes stale). `frida/capture_conn.js` read the live session on
+   demand (`PluginManager.service(IBaseUser)` → uid/ecode/sid/partnerIdentity) and built the app's own
+   `SdkMqttCertificationInfo` to get the EXACT username + password the app uses. Checked offline
+   against the codec's derivations:
+   - `mqtt_password(sign_key, ecode)` == app password ✅ (16 chars, confirms `[8:24]`);
+   - `mqtt_username(partnerIdentity, "7kypwcaqcvw3uvr7u95a", chKey, sid, ecode)` == app username ✅
+     (all 6 segments; `app_id` = the HTTP clientId, `chKey` = the stored install chKey);
+   - user topic == `<partnerIdentity>/mb/<uid>` ✅.
+   So clientId/username/password/user-topic construction is proven correct. The actual TLS connect
+   (certifi CA, `m1.tuyaeu.com:8883`, 0 `publish()` calls) succeeded at TLS but got CONNACK **rc=5
+   (not authorised)**: the borrowed app `sid` is already invalid by connect time — the app and the MCP
+   connector share one Tuya session on the same deviceId and rotate it (see the session-conflict
+   memory). Operational takeaway: the integration must drive MQTT from **its own managed session**
+   (its distinct deviceId), not a borrowed one; a live read-only CONNACK is best validated from inside
+   the integration (fresh, auto-refreshed session) rather than a captured app session.
 4. **First write** (Rémi's go-ahead, on site): one reversible DP (e.g. 30 child lock on a test head),
    check in the app and on the head, then revert. Then extend per DP, only on
    `WRITE_VERIFIED_MODELS`, with value validation before send (CLAUDE.md write safety).
