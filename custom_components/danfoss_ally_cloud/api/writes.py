@@ -28,12 +28,18 @@ def write_allowed(dev: DanfossDevice) -> bool:
 MQTT_WRITE_DPS = frozenset({30})  # child lock, validated 2026-11-19
 # 116 window detection; 18 upper bound; 27 lower bound; 120 pause setpoint (also written with 27
 # when the pause setpoint must follow the lower bound); 118 comfort setpoint, published with 16
-# (temp_set) as the app does; 119 setback setpoint. Contract §4.2.
-MQTT_CANDIDATE_DPS = frozenset({116, 18, 27, 120, 118, 16, 119})
+# (temp_set) as the app does; 119 setback setpoint; 1 preheat (see below). Contract §4.2.
+MQTT_CANDIDATE_DPS = frozenset({116, 18, 27, 120, 118, 16, 119, 1})
+# DPs whose write the gateway's echo and the cloud read CANNOT confirm: both may answer from the
+# gateway's cache while the head has not changed. DP 1 (preheat) is the known case: over HTTP it
+# only ever changed that cache; the head's real preheat is bit 1 of Zigbee attribute 0x0025. A
+# write of such a DP is confirmed only by reading the head through the local tunnel, so a caller
+# without a tunnel read must not send it (docs/cloud-mqtt-preheat-proposal.md).
+MQTT_TUNNEL_CONFIRMED_DPS = frozenset({1})
 
 # Value rule of each DP this path knows: booleans, or tenths of °C within the product schema's
 # range for that DP (03wvrwpv), on its 0.5 °C step.
-_MQTT_BOOL_DPS = frozenset({30, 116})
+_MQTT_BOOL_DPS = frozenset({30, 116, 1})
 MQTT_TENTHS_RANGE: dict[int, tuple[int, int]] = {
     18: (200, 350),  # upper_temp: 20-35 °C
     27: (50, 200),  # lower_temp: 5-20 °C

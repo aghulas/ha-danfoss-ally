@@ -10,6 +10,10 @@ so they all follow the same rule (docs/architecture.md, "Rules for adding a rout
    that by one read of the head through the per-device cloud route;
 4. otherwise a clear error is raised. No optimistic state is ever set: entities keep showing what
    the cloud returns.
+
+Preheat (DP 1) is the exception to rule 3: the echo and the cloud read may both answer from the
+gateway's cache. ``async_mqtt_write`` refuses it; ``async_mqtt_write_preheat`` publishes it and
+accepts ONE confirmation only, the head's attribute 0x0025 read through the local tunnel.
 """
 
 from __future__ import annotations
@@ -21,10 +25,11 @@ from typing import Any
 
 from homeassistant.exceptions import HomeAssistantError
 
-from .api import CloudError, DanfossDevice, mqtt_write_value
+from .api import MQTT_TUNNEL_CONFIRMED_DPS, CloudError, DanfossDevice, mqtt_write_value
+from .api.local.manager import Head
 from .api.mqtt_client import CloudMqttLink
 from .const import DATA_MQTT_SUPERVISED_DPS, DATA_MQTT_SUPERVISED_HEAD
-from .coordinator import DanfossCoordinator
+from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +40,17 @@ MQTT_CONFIRM_TIMEOUT = 15.0
 
 CONFIRMED_BY_ECHO = "echo"
 CONFIRMED_BY_CLOUD = "cloud"
+CONFIRMED_BY_TUNNEL = "tunnel"
+UNCHANGED = "unchanged"  # the head already had the value: nothing was published
+
+DP_PREHEAT = 1
+# Preheat over cloud MQTT is confirmed by the local tunnel only. The head is read every
+# PREHEAT_CONFIRM_INTERVAL seconds until its attribute 0x0025 shows the value, for at most
+# PREHEAT_CONFIRM_TIMEOUT seconds (the stop rule of docs/first-write-procedure.md: an independent
+# source that does not show the change within about a minute is the "accepted but not applied"
+# failure). One tunnel read takes several seconds, hence the interval.
+PREHEAT_CONFIRM_TIMEOUT = 60.0
+PREHEAT_CONFIRM_INTERVAL = 10.0
 
 
 def supervised_for(entry_data: dict[str, Any], device_id: str) -> frozenset[int]:
@@ -68,6 +84,13 @@ async def async_mqtt_write(
     if not dev.node_id or not dev.mesh_id:
         raise HomeAssistantError(
             "cloud-MQTT write impossible: the head's gateway address is unknown"
+        )
+    unconfirmable = sorted(MQTT_TUNNEL_CONFIRMED_DPS.intersection(dps))
+    if unconfirmable:
+        # Never through this function: its confirmation (echo, cloud read) proves nothing for them.
+        raise HomeAssistantError(
+            f"cloud-MQTT write refused: DP {unconfirmable} can only be confirmed through the "
+            "local tunnel"
         )
     try:
         values = {dp: mqtt_write_value(dp, value, supervised) for dp, value in dps.items()}
@@ -111,3 +134,66 @@ async def async_mqtt_write(
     _LOGGER.debug("cloud-MQTT DP(s) %s confirmed by %s", sorted(required), source)
     await coordinator.async_request_refresh()
     return source
+
+
+async def async_mqtt_write_preheat(
+    local: DanfossLocalCoordinator,
+    link: CloudMqttLink,
+    dev: DanfossDevice,
+    active: bool,
+    *,
+    supervised: frozenset[int] = frozenset(),
+) -> str:
+    """Publish preheat (``{"1": active}``) to ``dev`` over cloud MQTT and confirm it through the
+    LOCAL TUNNEL only. Returns ``CONFIRMED_BY_TUNNEL``, or ``UNCHANGED`` when the head already had
+    the value (nothing is published then: an unchanged head would prove nothing).
+
+    The gateway's echo and the cloud's DP 1 are deliberately ignored: over HTTP, DP 1 only changed
+    the gateway cache while the head's real preheat (attribute 0x0025, bit 1) did not move. So:
+
+    - the head is read through the tunnel BEFORE the publish; without an answer nothing is sent,
+      since the write could not be confirmed afterwards;
+    - after the publish the head is read again until it shows the value, or a clear error is
+      raised. Every read updates the preheat switch, which therefore only ever shows what the head
+      itself said (unavailable when it did not answer)."""
+    if not dev.node_id or not dev.mesh_id:
+        raise HomeAssistantError(
+            "cloud-MQTT write impossible: the head's gateway address is unknown"
+        )
+    try:
+        value = mqtt_write_value(DP_PREHEAT, active, supervised)
+    except CloudError as err:
+        raise HomeAssistantError(f"cloud-MQTT write refused: {err}") from err
+    head = Head(dev.id, dev.node_id, dev.mesh_id)
+
+    before = await local.async_refresh_head(head)
+    if before is None:
+        raise HomeAssistantError(
+            "cloud-MQTT preheat write refused: the head does not answer through the local "
+            "tunnel, so the write could not be confirmed"
+        )
+    if before is value:
+        return UNCHANGED
+
+    try:
+        await link.publish_dp(dev.mesh_id, dev.node_id, {str(DP_PREHEAT): value})
+    except Exception as err:  # noqa: BLE001 - surface any send failure, never a blind write
+        raise HomeAssistantError(f"cloud-MQTT write failed: {err}") from err
+
+    loop = asyncio.get_running_loop()
+    sent_at = loop.time()
+    deadline = sent_at + PREHEAT_CONFIRM_TIMEOUT
+    while True:
+        await asyncio.sleep(PREHEAT_CONFIRM_INTERVAL)
+        if await local.async_refresh_head(head) is value:
+            _LOGGER.debug(
+                "cloud-MQTT preheat confirmed by the local tunnel after %.0f s",
+                loop.time() - sent_at,
+            )
+            return CONFIRMED_BY_TUNNEL
+        if loop.time() >= deadline:
+            raise HomeAssistantError(
+                "cloud-MQTT preheat write not confirmed: the head's attribute 0x0025, read "
+                "through the local tunnel, does not show the value (the gateway's echo and the "
+                "cloud are not accepted as confirmation for preheat)"
+            )

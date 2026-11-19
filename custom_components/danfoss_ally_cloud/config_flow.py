@@ -77,6 +77,7 @@ def _account_id(username: str) -> str:
 
 # Labels of the cloud-MQTT candidate DPs in the supervised-trial selector.
 _CANDIDATE_DP_LABELS = {
+    1: "1 — preheat (confirmed only by the local tunnel, attribute 0x0025: needs enable_local)",
     16: "16 — temp_set (needed with 118: the app publishes both for the comfort setpoint)",
     18: "18 — upper bound",
     27: "27 — lower bound",
