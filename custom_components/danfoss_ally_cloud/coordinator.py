@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Iterable
 from datetime import timedelta
 
 from homeassistant.core import HomeAssistant
@@ -84,7 +85,7 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         self.grouped_ids = {head_id for head_id in self._group_of if head_id in data}
         return data
 
-    def note_commanded(self, head_ids: list[str] | set[str]) -> None:
+    def note_commanded(self, head_ids: Iterable[str]) -> None:
         """Mark heads just commanded so the next polls read them via the per-device route (R-3).
 
         No-op unless the post-command refresh option is on. Called by the write paths (room
