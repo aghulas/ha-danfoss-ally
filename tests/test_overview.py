@@ -103,3 +103,66 @@ def test_overview_relays_and_totals():
         "faults": 1,
         "relays_on": 1,
     }
+
+
+class _TwoHomeCoord(_Coord):
+    """Two homes, one relay each; the relay -> room link carries Tuya *room* ids (type 4)."""
+
+    def __init__(self):
+        super().__init__()
+        d = head("d", "Refectoire #1", online=True)
+        e = head("e", "Preau #1", online=True)
+        r2 = relay("r2", "Hc2 Relay", on=True, online=False)  # offline: stale "on"
+        self.data.update({d.id: d, e.id: e, r2.id: r2})
+        self.rooms.update(
+            {
+                "g3": aggregate_room(Room("g3", "D0 Refectoire", "03wvrwpv", "h2", ("d",)), [d]),
+                "g4": aggregate_room(Room("g4", "E-0 Preau", "03wvrwpv", "h2", ("e",)), [e]),
+            }
+        )
+        self._group.update({"d": "g3", "e": "g4"})
+        self._home.update({"g3": "h2", "g4": "h2"})
+        self.holidays["h2"] = {"gid": "h2", "name": "Building 2", "active": False}
+        # Real relays list Tuya room ids, unknown to home_of(): matching must go by name.
+        self.relay_rooms = {
+            "r": [
+                {"room_id": 9001, "name": "Salle 1", "linked": True},
+                {"room_id": 9002, "name": "Salle 2", "linked": True},
+            ],
+            "r2": [
+                {"room_id": 9101, "name": "E-0 Preau", "linked": True},
+                {"room_id": 9102, "name": "D-0 Refectoire", "linked": True},  # "D0" vs "D-0"
+                {"room_id": 9103, "name": "Salle 1", "linked": False},  # not linked: no vote
+                {"room_id": 9104, "name": "Unknown room", "linked": True},  # unresolvable
+            ],
+        }
+
+
+def test_overview_relays_attached_to_their_own_home():
+    data = ops.overview_payload({DATA_COORDINATOR: _TwoHomeCoord()})
+    by_home = {h["gid"]: [r["device_id"] for r in h["relays"]] for h in data["homes"]}
+    assert by_home == {"h1": ["r"], "h2": ["r2"]}
+    r2 = data["homes"][1]["relays"][0]
+    assert r2["linked_rooms"] == 3 and r2["online"] is False
+
+
+def test_overview_offline_relay_not_counted_on():
+    data = ops.overview_payload({DATA_COORDINATOR: _TwoHomeCoord()})
+    assert data["totals"]["relays_on"] == 1  # r2 is on but offline
+
+
+def test_relay_home_majority_vote_and_ambiguity():
+    coord = _TwoHomeCoord()
+    homes = ["h1", "h2"]
+    by_name = ops._home_by_room_name(coord)
+    assert by_name["d0refectoire"] == "h2"
+    # Majority wins over a minority room of the other home.
+    coord.relay_rooms["r2"].append({"room_id": 9105, "name": "Salle 2", "linked": True})
+    assert ops._relay_home_gid(coord, coord.data["r2"], homes, by_name) == "h2"
+    # A name present in both homes is ambiguous and must not vote.
+    coord.rooms["g5"] = aggregate_room(Room("g5", "E-0 Preau", "03wvrwpv", "h1", ()), [])
+    coord._home["g5"] = "h1"
+    assert ops._home_by_room_name(coord)["e0preau"] is None
+    # No linked room at all: the listed rooms vote; nothing resolvable: first home.
+    coord.relay_rooms["r3"] = [{"room_id": 1, "name": "Preau? no", "linked": False}]
+    assert ops._relay_home_gid(coord, relay("r3"), homes, by_name) == "h1"

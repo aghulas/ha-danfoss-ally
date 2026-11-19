@@ -207,18 +207,56 @@ def _home_gids(coordinator: DanfossCoordinator) -> list[str]:
     return gids
 
 
-def _relay_home_gid(coordinator: DanfossCoordinator, relay, home_gids: list[str]) -> str | None:
-    """Best-effort home of a boiler relay. Exact for a single-home account (the common case).
+def _norm_name(name: Any) -> str:
+    """Room name key for matching: case-folded, alphanumerics only ("D-0 Réfectoire" = "D0 ...")."""
+    return "".join(ch for ch in str(name or "").casefold() if ch.isalnum())
 
-    The cloud exposes no relay -> home link directly; with one home every relay belongs to it. With
-    several, fall back to the home of a linked room when resolvable, else the first home.
+
+def _home_by_room_name(coordinator: DanfossCoordinator) -> dict[str, str | None]:
+    """Normalised room name -> home gid, from the schedule-group topology.
+
+    A name found in several homes maps to None (ambiguous: it must not vote).
+    """
+    out: dict[str, str | None] = {}
+    for group_id, room in coordinator.rooms.items():
+        key = _norm_name(room.name)
+        home = coordinator.home_of(group_id)
+        if not key or not home:
+            continue
+        out[key] = home if out.get(key, home) == home else None
+    return out
+
+
+def _relay_home_gid(
+    coordinator: DanfossCoordinator,
+    relay,
+    home_gids: list[str],
+    home_by_name: dict[str, str | None],
+) -> str | None:
+    """Home of a boiler relay, by majority vote of the rooms that drive it.
+
+    The relay -> room link (``relay_rooms``) carries Tuya *room* ids (type 4), a different id space
+    from the schedule *groups* (type 5) that ``home_of`` knows, so rooms are matched by name (the
+    same rule as group <-> room elsewhere). Names do not always match exactly ("D0" / "D-0", typos),
+    hence a vote over all the linked rooms rather than the first one. Linked rooms vote; if none is
+    linked, all listed rooms do. With a single home every relay belongs to it. Unresolvable: first
+    home (kept visible rather than dropped).
     """
     if len(home_gids) == 1:
         return home_gids[0]
-    for room in coordinator.relay_rooms.get(relay.id, []):
-        home = coordinator.home_of(str(room.get("room_id")))
+    listed = coordinator.relay_rooms.get(relay.id, [])
+    voters = [r for r in listed if r.get("linked")] or listed
+    votes: dict[str, int] = {}
+    for room in voters:
+        home = coordinator.home_of(str(room.get("room_id"))) or home_by_name.get(
+            _norm_name(room.get("name"))
+        )
         if home:
-            return home
+            votes[home] = votes.get(home, 0) + 1
+    if votes:
+        # Highest vote wins; ties go to the earlier home (stable, deterministic).
+        order = {gid: i for i, gid in enumerate(home_gids)}
+        return min(votes, key=lambda gid: (-votes[gid], order.get(gid, len(order))))
     return home_gids[0] if home_gids else None
 
 
@@ -234,6 +272,7 @@ def overview_payload(store: dict) -> dict:
     relays = [d for d in coordinator.data.values() if d.is_relay]
 
     primary = home_gids[0] if home_gids else None
+    home_by_name = _home_by_room_name(coordinator)
     homes: list[dict[str, Any]] = []
     for gid in home_gids:
         rooms = [
@@ -252,7 +291,7 @@ def overview_payload(store: dict) -> dict:
                 ),
             }
             for d in relays
-            if _relay_home_gid(coordinator, d, home_gids) == gid
+            if _relay_home_gid(coordinator, d, home_gids, home_by_name) == gid
         ]
         # Gateways have no per-home link; attribute them to the primary home (exact for a
         # single-home account, the common case), none to the others.
@@ -281,7 +320,8 @@ def overview_payload(store: dict) -> dict:
         "low_battery": sum(r["low_battery"] for h in homes for r in h["rooms"]),
         "heating": sum(1 for h in homes for r in h["rooms"] if r["heating"]),
         "faults": sum(r["faults"] for h in homes for r in h["rooms"]),
-        "relays_on": sum(1 for d in relays if d.relay_on),
+        # An offline relay's on/off is its last known (stale) state: not counted as on.
+        "relays_on": sum(1 for d in relays if d.relay_on and d.online),
     }
     return {"homes": homes, "totals": totals}
 

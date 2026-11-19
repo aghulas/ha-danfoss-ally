@@ -261,7 +261,12 @@ cached state** — no extra cloud call (added in 0.6.0, axis D).
   `low_battery` counts heads with an `E14`/`E15` fault **or** `battery` ≤ 10 %; `heating` is true if
   any member head requests heat (`heat_request`) or the aggregated room is heating; `window_open` is
   true if any member head reports an open window.
-- `totals` sums the per-home figures (building-wide health at a glance). Everything is **read only**.
+- Per relay: `linked_rooms` is the number of rooms **linked** to the relay (that drive it), not the
+  number calling for heat. A relay is listed under the home that holds the majority of its linked
+  rooms; the relay → room link carries Tuya *room* ids (type 4), so rooms are matched to homes by
+  normalised name (case-folded, alphanumerics only). With a single home every relay belongs to it.
+- `totals` sums the per-home figures (building-wide health at a glance); `relays_on` counts relays
+  that are on **and online** (an offline relay's state is stale). Everything is **read only**.
 
 ## 4. Cloud calls (`api/` layer)
 

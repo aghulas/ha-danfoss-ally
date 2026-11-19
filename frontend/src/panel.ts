@@ -148,13 +148,17 @@ export class DanfossAllyPanel extends LitElement {
   }
 
   private _renderRelay(relay: FleetRelay): TemplateResult {
-    const on = relay.on === true;
+    // An offline relay's on/off is its last known (stale) state: show it as offline, not "On".
+    const offline = relay.online === false;
+    const on = !offline && relay.on === true;
+    const state = offline ? "offline" : on ? "on" : "off";
+    const label = offline ? "relay_offline" : on ? "relay_on" : "relay_off";
     return html`
-      <div class="relay">
-        <span class="relay-dot ${on ? "on" : "off"}"></span>
+      <div class="relay ${offline ? "relay-offline" : ""}">
+        <span class="relay-dot ${state}"></span>
         <span class="relay-name">${relay.name}</span>
-        <span class="relay-state">${t(this.hass, on ? "relay_on" : "relay_off")}</span>
-        <span class="relay-rooms">${t(this.hass, "rooms_calling", { n: relay.linked_rooms })}</span>
+        <span class="relay-state">${t(this.hass, label)}</span>
+        <span class="relay-rooms">${t(this.hass, "rooms_linked", { n: relay.linked_rooms })}</span>
       </div>
     `;
   }
@@ -359,6 +363,15 @@ export class DanfossAllyPanel extends LitElement {
     }
     .relay-dot.off {
       background: var(--disabled-text-color, #9e9e9e);
+    }
+    .relay-dot.offline {
+      background: transparent;
+      border: 2px solid var(--warning-color, #ffa600);
+      box-sizing: border-box;
+    }
+    .relay-offline .relay-state {
+      color: var(--warning-color, #ffa600);
+      font-weight: 500;
     }
     .relay-rooms {
       color: var(--secondary-text-color);
