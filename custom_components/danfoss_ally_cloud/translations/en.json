@@ -35,6 +35,7 @@
           "post_command_refresh": "Refresh just-commanded heads via the per-device route (R-3: the bulk poll lags for minutes after a change). Off by default — turn on for a real-hardware validation session",
           "enable_vacation_write": "Enable vacation writes (holiday set/cancel). Off by default — turn on only for a supervised real-hardware validation",
           "enable_head_unbind": "Enable device unbind (disconnect a head, sensor or relay from the network). Destructive — off by default; turn on only for a supervised real-hardware validation",
+          "cloud_mqtt_probe": "Measure what the Tuya cloud MQTT broker pushes (listen-only, nothing is sent to the heads; aggregates in the diagnostics). Off by default — opens a broker connection on your account, closes itself after 48 h",
           "mqtt_mode": "MQTT publishing: off, discovery (auto HA entities), zigbee2mqtt (z2m-compatible topics)",
           "mqtt_source": "Source of published values: cloud or local",
           "mqtt_base_topic": "MQTT topic prefix"

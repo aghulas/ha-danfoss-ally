@@ -134,6 +134,15 @@ integration can do the same, **gated behind the `enable_cloud_mqtt` option (off 
   Tuya changes it. Leave it off unless you want to try it, and expect to validate a first write on a
   test head yourself (see `docs/first-write-procedure.md`).
 
+### Measuring what the Tuya cloud MQTT broker pushes (listen-only, off by default)
+
+The option `cloud_mqtt_probe` opens the same connection in **listen-only** mode (nothing is sent to
+the heads) and counts, per head and per DP, the reports the broker pushes. The aggregates are in the
+entry's diagnostics, with no device identifier. It exists to decide whether those pushed reports
+could later replace part of the polling; it is not needed for normal use. It opens a long-lived
+connection on your account (same caveat as above) and closes itself after 48 h. How to run and read
+it: `docs/cloud-mqtt-coverage.md`.
+
 ## Status
 
 **v0.1 — cloud read-only**: each head appears as a thermostat (temperature, setpoint); battery,

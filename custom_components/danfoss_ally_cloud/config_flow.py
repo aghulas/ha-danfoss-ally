@@ -18,6 +18,7 @@ from homeassistant.core import callback
 from .api import CloudAuthError, CloudClient, CloudError
 from .const import (
     CONF_CH_KEY,
+    CONF_CLOUD_MQTT_PROBE,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
@@ -34,6 +35,7 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SIGN_KEY,
     CONF_USERNAME,
+    DEFAULT_CLOUD_MQTT_PROBE,
     DEFAULT_DISTINCT_DEVICE_ID,
     DEFAULT_ENABLE_CLOUD_MQTT,
     DEFAULT_ENABLE_HEAD_UNBIND,
@@ -145,6 +147,10 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_ENABLE_CLOUD_MQTT,
                     default=o.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT),
+                ): bool,
+                vol.Optional(
+                    CONF_CLOUD_MQTT_PROBE,
+                    default=o.get(CONF_CLOUD_MQTT_PROBE, DEFAULT_CLOUD_MQTT_PROBE),
                 ): bool,
                 vol.Optional(
                     CONF_MQTT_MODE, default=o.get(CONF_MQTT_MODE, DEFAULT_MQTT_MODE)

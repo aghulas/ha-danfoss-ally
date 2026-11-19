@@ -25,6 +25,13 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   so the link never fails silently; reconnect uses exponential backoff and picks up a refreshed
   `sid`.
 
+- **`cloud_mqtt_probe` option (OFF by default): listen-only measure of the cloud-MQTT push.** Counts
+  the DP reports the broker pushes, per head and per DP (number, first and last instant, median and
+  longest interval, heads never seen), and serves the aggregates in the diagnostics with no device
+  identifier and no DP value. Without `enable_cloud_mqtt` the link has no send path and closes
+  itself after 48 h. Tooling for roadmap stage 3; the 24 h run on a real install is still to do
+  (docs/cloud-mqtt-coverage.md).
+
 ### Changed
 
 - Shared library **`pydanfoss-cloud` 0.3.0** (packaging only, no behaviour change for the

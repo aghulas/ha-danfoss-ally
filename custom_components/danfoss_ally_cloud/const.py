@@ -49,6 +49,7 @@ DATA_VACATION_WRITE = "vacation_write"  # bool: vacation-write gate (CONF_ENABLE
 DATA_HEAD_UNBIND = "head_unbind"  # bool: head-unbind gate (CONF_ENABLE_HEAD_UNBIND)
 DATA_CLOUD_MQTT = "cloud_mqtt"  # bool: cloud-MQTT isolated-head write gate (CONF_ENABLE_CLOUD_MQTT)
 DATA_MQTT_LINK = "cloud_mqtt_link"  # CloudMqttLink | None: live link, created only on a gated step
+DATA_MQTT_COVERAGE = "cloud_mqtt_coverage"  # CoverageStats | None: only with cloud_mqtt_probe on
 
 # LOCAL survey (Zigbee tunnel) interval: slow, ~8 s per head. Distinct from the cloud polling.
 DEFAULT_LOCAL_SCAN_INTERVAL = 900  # seconds
@@ -103,6 +104,14 @@ CONF_POST_COMMAND_REFRESH = "post_command_refresh"
 # head's child-lock / window-detection switch may route through a dedicated-session MQTT link
 # instead of being unavailable. Enable only for a supervised validation session (Rémi present).
 CONF_ENABLE_CLOUD_MQTT = "enable_cloud_mqtt"
+# Coverage measure of the Tuya cloud MQTT push (roadmap stage 3), LISTEN-ONLY. OFF by default. When
+# ON, the cloud-MQTT link is opened (listen-only unless ``enable_cloud_mqtt`` is also on: one
+# connection per session, so both share it) and every decoded inbound frame is accounted per head
+# and per DP: counts, first and last instant, intervals. Aggregates only, served by the diagnostics
+# with no identifier. It settles whether the push could become a read source (stage 4). A link that
+# is listen-only closes itself after CLOUD_MQTT_PROBE_MAX_SECONDS, so a forgotten option does not
+# keep a broker connection open on the user's account. See docs/cloud-mqtt-coverage.md.
+CONF_CLOUD_MQTT_PROBE = "cloud_mqtt_probe"
 
 # Conservative defaults: the account's quota and security come first.
 DEFAULT_SCAN_INTERVAL = 90  # seconds
@@ -111,6 +120,8 @@ DEFAULT_ENABLE_VACATION_WRITE = False
 DEFAULT_ENABLE_HEAD_UNBIND = False
 DEFAULT_POST_COMMAND_REFRESH = False
 DEFAULT_ENABLE_CLOUD_MQTT = False
+DEFAULT_CLOUD_MQTT_PROBE = False
+CLOUD_MQTT_PROBE_MAX_SECONDS = 48 * 3600  # a listen-only link closes itself after two days
 # How long a commanded head stays "hot" (refreshed via the per-device route) after a write, and the
 # cap on per-device reads per poll (so commanding a large room cannot burst the API). A hot head
 # costs one extra read per poll for at most this window, then returns to the bulk route.

@@ -92,7 +92,8 @@ A setting switch states its route in its attributes (`write_path`, `write_scope`
 
 - **Cloud MQTT as a read source.** If the pushed DP reports cover the whole fleet, they could
   replace the post-command per-device read and allow a longer polling period. To measure first:
-  which heads and DPs are reported, and how often.
+  which heads and DPs are reported, and how often. The listen-only option `cloud_mqtt_probe` does
+  that measure (`docs/cloud-mqtt-coverage.md`); its 24 h run on a real install is pending.
 - **Account exposure.** A long-lived broker connection from a client that is not the app is more
   visible than spaced HTTP polling. The channel stays opt-in, with backoff and a clean shutdown.
 - **Isolated-head setpoints.** The app publishes them over cloud MQTT; not yet attempted here.
@@ -106,7 +107,10 @@ A setting switch states its route in its attributes (`write_path`, `write_scope`
   attributes.
 - `api/writes.py` — value validation and the verified-model guard-rail before any write.
 - `api/mqtt_publish.py`, `api/mqtt_client.py` — Tuya cloud MQTT: frame codec and credential
-  derivation; the link (one connection per entry, own session, reconnect, write confirmation).
+  derivation; the link (one connection per entry, own session, reconnect, write confirmation,
+  optional listen-only mode).
+- `mqtt_coverage.py` — listen-only measure of what the cloud-MQTT broker pushes (aggregates per
+  head and per DP, served by the diagnostics).
 - `switch.py` — picks the path of a setting write (`room`, `cloud_mqtt`, `local`, `none`) per head
   and setting.
 - `coordinator.py` — conservative cloud polling, per-device overlay for recently commanded heads,

@@ -132,6 +132,14 @@ class CloudMqttLink:
     # Optional: returns fresh credentials (e.g. after the integration refreshed the sid). Used on
     # reconnect so a rotated session is picked up instead of retrying stale credentials.
     creds_provider: Callable[[], MqttCredentials] | None = None
+    # Listen-only link (coverage measure): subscribes and decodes, and has NO send path —
+    # ``can_publish`` is False, ``plan_dp`` and ``publish_dp`` raise. Set once, at construction.
+    listen_only: bool = False
+    # Plain counters, updated on the MQTT client's thread and read for the diagnostics.
+    received: int = 0  # messages received on the inbound topics
+    decoded: int = 0  # of which decoded and authenticated
+    connects: int = 0  # accepted connections (1 + the reconnections)
+    disconnects: int = 0
     _seq: dict[str, mp.SeqOrigin] = field(default_factory=dict)
     _connected: bool = False
     _client: Any = None
@@ -185,11 +193,13 @@ class CloudMqttLink:
     def can_publish(self, gateway_id: str) -> bool:
         """True only if the link is connected and that gateway's crypto material is known.
         Callers use this for entity availability — never assume a path that cannot actually send."""
-        return self._connected and gateway_id in self.gateways
+        return self._connected and not self.listen_only and gateway_id in self.gateways
 
     def plan_dp(self, gateway_id: str, node_id: str, dps: dict[str | int, Any]) -> mp.PublishPlan:
         """Build the publish plan for a head (node_id) behind ``gateway_id``. Raises if the gateway
-        is unknown. Does NOT send."""
+        is unknown or the link is listen-only. Does NOT send."""
+        if self.listen_only:
+            raise mp.FrameError("listen-only link: no publish")
         gw = self.gateways.get(gateway_id)
         if gw is None:
             raise mp.FrameError(f"unknown gateway {gateway_id}")
@@ -222,7 +232,8 @@ class CloudMqttLink:
     def start(self, *, ca_certs: str | None = None) -> None:
         """Open the live connection (paho, TLS), subscribe to every gateway's inbound topic, and
         dispatch decoded frames to ``on_frame``. Non-blocking (loop in a thread). The connection is
-        read+write capable, but ``publish_dp`` is reached only behind the opt-in write gate."""
+        read+write capable, but ``publish_dp`` is reached only behind the opt-in write gate, and
+        refuses outright on a ``listen_only`` link."""
         import ssl
 
         import paho.mqtt.client as mqtt
@@ -241,15 +252,20 @@ class CloudMqttLink:
             _LOGGER.warning("cloud-mqtt link: CONNACK rc=%s (%s)", rc, mqtt.connack_string(rc))
             self._connected = rc == 0
             if rc == 0:
+                self.connects += 1
                 for topic in self.inbound_topics():
                     client.subscribe(topic, qos=1)
 
         def on_message(_client: Any, _u: Any, msg: Any) -> None:
+            self.received += 1
             dec = self.decode_inbound(str(msg.topic), bytes(msg.payload))
             if dec is not None:
+                self.decoded += 1
                 self._on_inbound(*dec)
 
         def on_disconnect(client: Any, _u: Any, rc: int) -> None:
+            if self._connected:
+                self.disconnects += 1
             self._connected = False
             # Refresh credentials before paho auto-reconnects, so a rotated sid is picked up rather
             # than retried stale. Best-effort on the loop thread.
@@ -293,8 +309,11 @@ class CloudMqttLink:
         self, gateway_id: str, node_id: str, dps: dict[str | int, Any]
     ) -> mp.PublishPlan:
         """Publish a head DP over the live connection. GATED: a caller reaches this only behind the
-        opt-in option and a real write request; raises if not connected. Returns the plan sent.
-        ``async`` for the caller's convenience; the paho publish itself is non-blocking."""
+        opt-in option and a real write request; raises if not connected or if the link is
+        listen-only. Returns the plan sent. ``async`` for the caller's convenience; the paho publish
+        itself is non-blocking."""
+        if self.listen_only:
+            raise mp.FrameError("listen-only link: no publish")
         if not self._connected or self._client is None:
             raise mp.FrameError("MQTT link not connected")
         plan = self.plan_dp(gateway_id, node_id, dps)
