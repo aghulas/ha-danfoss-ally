@@ -35,7 +35,7 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -162,6 +162,36 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
         self._cloud_mqtt_enabled = cloud_mqtt_enabled
         self._supervised_dps = supervised_dps
         self._attr_unique_id = f"{device_id}_{description.key}"
+        # What the last written state showed (availability, write path): the local coordinator's
+        # updates only rewrite the state when it changes (see ``_handle_local_update``).
+        self._shown: tuple[bool, str] | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # An isolated head's write path depends on the LOCAL survey (``_local_head``): listen to
+        # the local coordinator too, so the switch follows a head as soon as it is read locally
+        # instead of waiting for the next cloud poll. Removed with the entity (no leak on unload).
+        if self.entity_description.local_setting is not None and self._local is not None:
+            self.async_on_remove(self._local.async_add_listener(self._handle_local_update))
+        self._shown = self._shown_key()  # the platform writes the first state right after this
+
+    def _shown_key(self) -> tuple[bool, str]:
+        return (self.available, self._write_path(self.device))
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._shown = self._shown_key()
+        super()._handle_coordinator_update()
+
+    @callback
+    def _handle_local_update(self) -> None:
+        """A local survey published a head (or finished): rewrite the state only if this switch's
+        availability or write path changed. A survey publishes every head of the site one by one;
+        rewriting every window switch on each of them would multiply identical state writes."""
+        shown = self._shown_key()
+        if shown != self._shown:
+            self._shown = shown
+            self.async_write_ha_state()
 
     def _mqtt_ready(self, dev: DanfossDevice) -> bool:
         """True if an isolated head can be written through the dedicated-session cloud-MQTT link
