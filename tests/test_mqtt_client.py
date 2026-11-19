@@ -248,3 +248,29 @@ async def test_await_confirmation_ignores_other_cid_or_value():
     task = asyncio.ensure_future(feed())
     assert await link.await_confirmation("node-9", 30, True, timeout_s=0.1) is False
     await task
+
+
+def test_new_paho_client_supports_paho1_and_paho2():
+    """paho 1.6.1 (no CallbackAPIVersion) vs paho 2.x: pass VERSION1 only when the enum exists."""
+    import types
+
+    captured: dict = {}
+
+    class _Client:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+    # paho 1.6.1: no CallbackAPIVersion -> no callback_api_version kwarg
+    m1 = types.SimpleNamespace(Client=_Client, MQTTv311=4)
+    mc._new_paho_client(m1, "cid")
+    assert captured["client_id"] == "cid" and "callback_api_version" not in captured
+
+    captured.clear()
+
+    # paho 2.x: CallbackAPIVersion.VERSION1 is passed (keeps the v1 callback signatures)
+    class _CB:
+        VERSION1 = "v1"
+
+    m2 = types.SimpleNamespace(Client=_Client, MQTTv311=4, CallbackAPIVersion=_CB)
+    mc._new_paho_client(m2, "cid")
+    assert captured["callback_api_version"] == "v1"

@@ -46,6 +46,21 @@ RD_DEVICE_ID_MARKER = "mqttrd"
 DEFAULT_APP_ID = "7kypwcaqcvw3uvr7u95a"
 
 
+def _new_paho_client(mqtt: Any, client_id: str) -> Any:
+    """Create a paho ``Client`` compatible with both paho-mqtt 1.6.x and 2.x. On 2.x the callback
+    API version must be chosen explicitly; we keep the v1 callback signatures used below, so we pass
+    ``CallbackAPIVersion.VERSION1`` when that enum exists (paho 2) and nothing on paho 1.6.1."""
+    kwargs: dict[str, Any] = {
+        "client_id": client_id,
+        "clean_session": True,
+        "protocol": mqtt.MQTTv311,
+    }
+    cb = getattr(mqtt, "CallbackAPIVersion", None)
+    if cb is not None:
+        kwargs["callback_api_version"] = cb.VERSION1
+    return mqtt.Client(**kwargs)
+
+
 def region_host(region: str | None) -> str:
     """Broker host for a datacenter code; falls back to EU for an unknown/empty region."""
     return REGION_MQTT_HOST.get((region or DEFAULT_REGION).lower(), REGION_MQTT_HOST["eu"])
@@ -248,7 +263,7 @@ class CloudMqttLink:
                         "cloud-mqtt link: credential refresh failed: %s", type(err).__name__
                     )
 
-        client = mqtt.Client(client_id=c.client_id, clean_session=True, protocol=mqtt.MQTTv311)
+        client = _new_paho_client(mqtt, c.client_id)
         client.on_connect = on_connect
         client.on_message = on_message
         client.on_disconnect = on_disconnect

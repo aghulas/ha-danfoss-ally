@@ -129,7 +129,7 @@ integration can do the same, **gated behind the `enable_cloud_mqtt` option (off 
   value it did not confirm.
 - **Scope**: child lock (DP 30) only for now, validated on real hardware (2026-11-19). Other settings
   will be added one at a time after their own supervised validation.
-- **Requirement**: the path uses `paho-mqtt` (declared in the integration's `manifest.json`, the same MQTT client Home Assistant's own MQTT integration uses); Home Assistant installs it automatically.
+- **Requirement**: the path uses `paho-mqtt` (declared in `manifest.json` as `>=1.6.1,<3`, the MQTT client Home Assistant's own MQTT integration already ships — HA pins the exact version); Home Assistant installs it automatically. No manual step.
 - **Risks**: this is an unofficial path that rides the app's Tuya authentication; it can break if
   Tuya changes it. Leave it off unless you want to try it, and expect to validate a first write on a
   test head yourself (see `docs/first-write-procedure.md`).
