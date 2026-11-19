@@ -144,4 +144,8 @@ class DanfossRoomSetpoint(CoordinatorEntity[DanfossCoordinator], NumberEntity):
             await self.coordinator.client.async_set_group_setpoint(self._group_id, room.pid, dps)
         except CloudError as err:
             raise HomeAssistantError(f"setpoint write refused: {err}") from err
+        # R-3: same write as the room climate's set_temperature, so same post-command freshening of
+        # the room's heads (missing here until the 2026-11-19 real-hardware run, where this path
+        # was the only room-setpoint write left to the bulk-route lag).
+        self.coordinator.note_commanded(self.coordinator.room_members(self._group_id))
         await self.coordinator.async_request_refresh()

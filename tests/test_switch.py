@@ -5,8 +5,10 @@ harness and are covered elsewhere; here we test the state logic and the guarded 
 """
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.danfoss_ally_cloud import switch as switch_mod
+from custom_components.danfoss_ally_cloud.api.local import tunnel
 from custom_components.danfoss_ally_cloud.switch import (
     SWITCHES,
     DanfossPreheat,
@@ -275,3 +277,79 @@ async def test_preheat_write_without_device_does_nothing():
     local = _FakeLocalCoord({})
     ph = DanfossPreheat(local, cloud, "absent")
     await ph.async_turn_on()  # garde-fou : dev None -> return
+
+
+class _PreheatManager:
+    def __init__(self, accepted=True, fail=None, readback=None):
+        self.accepted = accepted
+        self.fail = fail
+        self.readback = readback
+        self.writes: list = []
+
+    def write_preheat(self, head, active):
+        if self.fail:
+            raise self.fail
+        self.writes.append((head.dev_id, active))
+        return self.accepted
+
+
+class _PreheatLocalCoord(_FakeLocalCoord):
+    def __init__(self, data, manager):
+        super().__init__(data, manager)
+        self.refreshed_heads: list = []
+        self.full_refresh = False
+
+    async def async_refresh_head(self, head):
+        self.refreshed_heads.append(head.dev_id)
+        self.data = {**self.data, head.dev_id: self.manager.readback}
+        return self.manager.readback
+
+    async def async_request_refresh(self):
+        self.full_refresh = True
+
+
+def _preheat(manager, data=None):
+    dev = head(mesh_id="gw-1", node_id="node-1")
+    cloud = _FakeCloudCoord({dev.id: dev})
+    local = _PreheatLocalCoord(data if data is not None else {dev.id: False}, manager)
+    ph = DanfossPreheat(local, cloud, dev.id)
+    ph.hass = _FakeHass()
+    return ph, local, dev
+
+
+async def test_preheat_write_reads_back_the_head_only():
+    # Regression (real hardware 2026-11-19): after a validated 0x0025 write the switch followed
+    # only at the next full survey (~13 min). Now the head is read back right away.
+    ph, local, dev = _preheat(_PreheatManager(readback=True))
+    await ph.async_turn_on()
+    assert local.manager.writes == [(dev.id, True)]
+    assert local.refreshed_heads == [dev.id]
+    assert local.full_refresh is False  # no whole-site survey
+    assert ph.is_on is True
+
+
+async def test_preheat_state_is_the_read_back_not_the_written_value():
+    # The head says False after the write: shown as False, never optimistic.
+    ph, local, _ = _preheat(_PreheatManager(readback=False))
+    await ph.async_turn_on()
+    assert ph.is_on is False
+
+
+async def test_preheat_unanswered_read_back_makes_switch_unavailable():
+    ph, _, _ = _preheat(_PreheatManager(readback=None))
+    await ph.async_turn_off()
+    assert ph.available is False
+
+
+async def test_preheat_write_rejected_raises_after_read_back():
+    ph, local, dev = _preheat(_PreheatManager(accepted=False, readback=False))
+    with pytest.raises(HomeAssistantError):
+        await ph.async_turn_on()
+    assert local.refreshed_heads == [dev.id]
+
+
+async def test_preheat_tunnel_failure_raises():
+    ph, local, _ = _preheat(_PreheatManager(fail=tunnel.LocalUnavailable("gw down")))
+    with pytest.raises(HomeAssistantError):
+        await ph.async_turn_on()
+    assert local.refreshed_heads == []

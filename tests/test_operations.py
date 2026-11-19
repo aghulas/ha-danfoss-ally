@@ -256,6 +256,9 @@ async def test_set_override_ok():
     res = await ops.set_override(_FakeHass(), store, _DEVICE, 20.0)
     assert res["setpoint"] == 20.0 and res["published_raw"] == 2000
     assert local.manager.calls == [("override", "a", 20.0)]
+    # R-3 (real hardware 2026-11-19: HA/MQTT took ~3 min): the head reports the tunnel write to
+    # the cloud, so it is marked for the per-device read
+    assert store[DATA_COORDINATOR].commanded == ["a"]
 
 
 async def test_set_override_out_of_range():
@@ -264,6 +267,7 @@ async def test_set_override_out_of_range():
     with pytest.raises(ops.OperationError) as exc:
         await ops.set_override(_FakeHass(), store, _DEVICE, 40.0)
     assert exc.value.code == "invalid_setpoint"
+    assert store[DATA_COORDINATOR].commanded == []  # nothing written, nothing marked
 
 
 async def test_set_override_bad_step():
@@ -284,6 +288,7 @@ async def test_clear_override_ok():
     res = await ops.clear_override(_FakeHass(), store, _DEVICE)
     assert res["restored_setpoint"] == 18.5
     assert local.manager.calls == [("override", "a", 18.5)]
+    assert store[DATA_COORDINATOR].commanded == ["a"]  # R-3
 
 
 async def test_clear_override_no_schedule():
@@ -304,6 +309,7 @@ async def test_set_window_detection_ok():
     res = await ops.set_window_detection(_FakeHass(), store, _DEVICE, True)
     assert res["window_detection"] is True and res["published"] is True
     assert local.manager.calls == [("window", "a", True)]
+    assert store[DATA_COORDINATOR].commanded == ["a"]  # R-3, as the window switch's local path
 
 
 async def test_set_window_detection_disabled():

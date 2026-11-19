@@ -41,14 +41,19 @@ async def test_get_vacation_present_and_absent():
 
 
 async def test_list_holidays_per_home_and_degrades():
+    running = {"startDate": "20261201", "isRunning": True, "vacationType": 3}
+    planned = {"startDate": "20261205", "isRunning": False, "vacationType": 3}
+    no_flag = {"start": "A", "end": "B"}
+    details = {"1": running, "3": planned, "4": no_flag, "5": {}}
+
     def detail(body, _):
         if body["homeId"] == "2":
             raise TuyaApiError("CLOUD_BOOM", "x", {})
-        return {"start": "A", "end": "B"}
+        return details[body["homeId"]]
 
     fake = FakeHttp(
         {
-            "tuya.m.location.list": [{"groupId": 1, "name": "H1"}, {"groupId": 2, "name": "H2"}],
+            "tuya.m.location.list": [{"groupId": i, "name": f"H{i}"} for i in (1, 2, 3, 4, 5)],
             "tuya.m.solution.wkf.vacation.detail": detail,
         }
     )
@@ -58,10 +63,18 @@ async def test_list_holidays_per_home_and_degrades():
         "gid": "1",
         "name": "H1",
         "active": True,
-        "detail": {"start": "A", "end": "B"},
+        "scheduled": False,
+        "detail": running,
     }
-    # a per-home failure degrades to inactive, never raises for the whole set
-    assert hol[1] == {"gid": "2", "name": "H2", "active": False, "detail": None}
+    # a per-home failure degrades to no holiday, never raises for the whole set
+    assert hol[1] == {"gid": "2", "name": "H2", "active": False, "scheduled": False, "detail": None}
+    # regression (real hardware 2026-11-19): a *planned* holiday is on record with
+    # isRunning false -> not active, flagged scheduled
+    assert hol[2]["active"] is False and hol[2]["scheduled"] is True
+    assert hol[2]["detail"] == planned
+    # a record without isRunning: unknown rather than guessed
+    assert hol[3]["active"] is None and hol[3]["scheduled"] is None
+    assert hol[4] == {"gid": "5", "name": "H5", "active": False, "scheduled": False, "detail": None}
 
 
 async def test_list_relays_filters_category_kg():

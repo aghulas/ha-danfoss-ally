@@ -118,8 +118,9 @@ class DanfossSensor(DanfossEntity, SensorEntity):
 class DanfossHolidaySetpoint(DanfossHomeEntity, SensorEntity):
     """Holiday setpoint of a home (read only, contract §4.5).
 
-    Value from the cloud's holiday record (``None`` while no holiday is active or when the record
-    carries no recognised temperature field; the raw record is on the holiday binary_sensor).
+    Temperature of the holiday on record, in progress **or planned** (the holiday binary_sensor
+    tells which, its ``scheduled`` attribute flags a planned one). ``None`` when no holiday is on
+    record or the record carries no recognised temperature field.
     """
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
@@ -134,9 +135,9 @@ class DanfossHolidaySetpoint(DanfossHomeEntity, SensorEntity):
     @property
     def native_value(self) -> float | None:
         holiday = self.holiday
-        if not holiday or not holiday.get("active"):
+        if not holiday or not holiday.get("detail"):
             return None
-        return holiday_temperature(holiday.get("detail"))
+        return holiday_temperature(holiday["detail"])
 
 
 class DanfossRelayRooms(DanfossEntity, SensorEntity):
