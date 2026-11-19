@@ -21,12 +21,15 @@ it only behind the gated option AND a real connection; there is no optimistic st
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from . import mqtt_publish as mp
 from .client import derive_distinct_device_id
+
+_LOGGER = logging.getLogger(__name__)
 
 # Region -> MQTT broker host (mirrors the HTTP datacenter; the SDK uses the same m1.<region> host).
 REGION_MQTT_HOST = {
@@ -310,6 +313,8 @@ class CloudMqttListener:
         def on_connect(client: Any, _u: Any, _f: Any, rc: int) -> None:
             self.stats.connack_rc = rc
             self.stats.connack_text = mqtt.connack_string(rc)
+            # Logged (non-secret) so the verdict is readable from the HA log without diagnostics.
+            _LOGGER.warning("cloud-mqtt probe: CONNACK rc=%s (%s)", rc, self.stats.connack_text)
             if rc == 0:
                 self.stats.connected_at = time.time()
                 for topic in self.inbound_topics():
@@ -339,6 +344,15 @@ class CloudMqttListener:
 
     def stop(self, reason: str = "stopped") -> None:
         self.stats.stopped_reason = reason
+        # Non-secret summary to the HA log: the verdict counts, readable via the admin connector.
+        _LOGGER.warning(
+            "cloud-mqtt probe stopped (%s): connack_rc=%s received=%s decoded=%s last_error=%s",
+            reason,
+            self.stats.connack_rc,
+            sum(self.stats.received.values()),
+            sum(self.stats.decoded.values()),
+            self.stats.last_error,
+        )
         client = self._client
         self._client = None
         if client is not None:
