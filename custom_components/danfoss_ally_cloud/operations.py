@@ -334,7 +334,8 @@ def holidays_payload(store: dict) -> dict:
             {
                 "home": h.get("name"),
                 "gid": gid,
-                "active": bool(h.get("active")),
+                "active": h.get("active"),
+                "scheduled": h.get("scheduled"),
                 "detail": h.get("detail"),
             }
             for gid, h in coordinator.holidays.items()
@@ -960,6 +961,19 @@ async def _run_tunnel(hass: HomeAssistant, func, *args) -> Any:
         raise OperationError("local_write_failed", str(err)) from err
 
 
+def _note_tunnel_write(coordinator: DanfossCoordinator, head: Head) -> None:
+    """R-3 after a local-tunnel write that the head then reports to the cloud.
+
+    The write itself does not go through the cloud, but the head reports the new value (DP 171
+    setpoint, DP 116 window detection) to the cloud in under a minute, where the per-device route
+    sees it while the bulk route lags: on real hardware (2026-11-19) HA and MQTT took ~2.5-3 min to
+    follow. Marking the head makes the next polls (90 s) read it per device for the R-3 window, so
+    the change shows up one poll after the cloud has it. Cost: a few per-device reads of one head.
+    No-op unless the post-command refresh option is on; never optimistic.
+    """
+    coordinator.note_commanded([head.dev_id])
+
+
 def _scheduled_setpoint_now(schedule_days: dict[str, list[dict]], now: datetime) -> float | None:
     """The setpoint the weekly schedule prescribes at ``now`` (used to end an override).
 
@@ -998,6 +1012,7 @@ async def set_override(hass: HomeAssistant, store: dict, target: dict, temperatu
     if not (low <= temp <= high) or round(temp * 2) != temp * 2:
         raise OperationError("invalid_setpoint", f"setpoint out of range ({low}-{high} °C, by 0.5)")
     raw = await _run_tunnel(hass, local.manager.set_override, head, temp)
+    _note_tunnel_write(coordinator, head)
     return {"target": target, "setpoint": temp, "published_raw": raw}
 
 
@@ -1017,6 +1032,7 @@ async def clear_override(hass: HomeAssistant, store: dict, target: dict) -> dict
             "no_schedule", "no schedule to return to; the override lapses at the next change"
         )
     raw = await _run_tunnel(hass, local.manager.set_override, head, setpoint)
+    _note_tunnel_write(store[DATA_COORDINATOR], head)
     return {"target": target, "restored_setpoint": setpoint, "published_raw": raw}
 
 
@@ -1031,6 +1047,7 @@ async def set_window_detection(
     local = _require_local(store)
     head = _tunnel_head(store[DATA_COORDINATOR], local, target)
     published = await _run_tunnel(hass, local.manager.write_window_detection, head, bool(enabled))
+    _note_tunnel_write(store[DATA_COORDINATOR], head)
     return {"target": target, "window_detection": bool(enabled), "published": published}
 
 

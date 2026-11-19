@@ -99,10 +99,13 @@ class DanfossRelay(DanfossEntity, BinarySensorEntity):
 
 
 class DanfossHoliday(DanfossHomeEntity, BinarySensorEntity):
-    """Holiday active on a home (read only, contract §4.5).
+    """Holiday *in progress* on a home (read only, contract §4.5).
 
-    The holiday *set/exit* routes are uncaptured, so there is no write counterpart. The full holiday
-    record is exposed as an attribute (``detail``).
+    ``vacation.detail`` also returns a *planned* holiday, so the state follows the record's
+    ``isRunning`` flag, not its presence (a planned holiday two weeks ahead read ``on`` before,
+    measured 2026-11-19). Unknown when a record lacks the flag. Attributes: ``scheduled`` (a
+    holiday is on record but not started yet) and the full record as ``detail``. Writes go through
+    the gated vacation services, not this entity.
     """
 
     _attr_translation_key = "holiday"
@@ -115,10 +118,17 @@ class DanfossHoliday(DanfossHomeEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         holiday = self.holiday
-        return bool(holiday["active"]) if holiday else None
+        if not holiday:
+            return None
+        active = holiday.get("active")
+        return bool(active) if active is not None else None
 
     @property
     def extra_state_attributes(self) -> dict | None:
         holiday = self.holiday
-        detail = holiday.get("detail") if holiday else None
-        return {"detail": detail} if detail else None
+        if not holiday:
+            return None
+        attrs: dict = {"scheduled": holiday.get("scheduled")}
+        if holiday.get("detail"):
+            attrs["detail"] = holiday["detail"]
+        return attrs

@@ -203,3 +203,24 @@ def test_write_unreadable_mode(monkeypatch):
     with pytest.raises(tunnel.LocalError):
         mgr.write_preheat(Head("dev1", "node1", "gw1"), True)
     assert link.closed is True  # closed even on failure (finally)
+
+
+def test_read_preheat_one_head(monkeypatch):
+    calls = []
+
+    def fake_read(link, dev_id, node_id, **kw):
+        calls.append((dev_id, node_id))
+        return True
+
+    monkeypatch.setattr(tunnel, "read_preheat", fake_read)
+    link = _RWFakeLink("node1", 0x03)
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: link)
+    assert mgr.read_preheat(Head("dev1", "node1", "gw1")) is True
+    assert calls == [("dev1", "node1")]
+    assert link.closed is True
+
+
+def test_read_preheat_unknown_gateway():
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: None)
+    with pytest.raises(tunnel.LocalUnavailable):
+        mgr.read_preheat(Head("devX", "nodeX", "gw-inconnue"))

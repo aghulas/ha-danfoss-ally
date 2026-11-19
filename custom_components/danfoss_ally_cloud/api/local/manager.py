@@ -92,6 +92,21 @@ class LocalTunnelManager:
         raw = tunnel.survey(self._gateways, heads)
         return {dev_id: tunnel.summarize_head(entry) for dev_id, entry in raw.items()}
 
+    def read_preheat(self, head: Head) -> bool | None:
+        """Read ONE head's real preheat (0x0025 bit 1) through the tunnel. None without a response.
+
+        Used right after a preheat write to reflect the head's actual state without waiting for the
+        next full survey (~8 s per head, minutes for a whole site). Raises LocalUnavailable on an
+        unknown gateway.
+        """
+        if head.gateway_id not in self._gateways:
+            raise tunnel.LocalUnavailable(f"unknown gateway: {head.gateway_id}")
+        link = self._open_link(self._gateways[head.gateway_id])
+        try:
+            return tunnel.read_preheat(link, head.dev_id, head.node_id)
+        finally:
+            link.close()
+
     def write_preheat(self, head: Head, active: bool) -> bool:
         """Enable/disable preheat (reads 0x0025, writes the bit, schedule preserved).
 

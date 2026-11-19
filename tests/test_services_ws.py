@@ -408,10 +408,20 @@ def test_holidays_payload_shape():
     from custom_components.danfoss_ally_cloud.const import DATA_COORDINATOR
 
     coord = SimpleNamespace(
-        holidays={"1": {"name": "H", "active": True, "detail": {"temp": 150}}},
+        holidays={"1": {"name": "H", "active": True, "scheduled": False, "detail": {"temp": 150}}},
     )
     out = ops.holidays_payload({DATA_COORDINATOR: coord})
-    assert out == {"holidays": [{"home": "H", "gid": "1", "active": True, "detail": {"temp": 150}}]}
+    assert out == {
+        "holidays": [
+            {
+                "home": "H",
+                "gid": "1",
+                "active": True,
+                "scheduled": False,
+                "detail": {"temp": 150},
+            }
+        ]
+    }
 
 
 async def test_service_get_holiday_and_relays(setup):

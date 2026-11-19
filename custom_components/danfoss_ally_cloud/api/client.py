@@ -21,7 +21,7 @@ from datetime import datetime
 from . import schedule
 from ._tuya.http import ENDPOINTS, TuyaApiError, TuyaHttpClient, login
 from .const import RES_TYPE_DEVICE, RES_TYPE_GROUP
-from .decode import DanfossDevice, decode_device
+from .decode import DanfossDevice, decode_device, holiday_running
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -305,7 +305,10 @@ class CloudClient:
     # --- Axis B reads (holiday, boiler relay, room map): read-only, contract §4.5-§4.7 -----------
 
     async def async_get_vacation(self, home_id: str | int) -> dict:
-        """Active holiday detail of a home (tuya.m.solution.wkf.vacation.detail). {} if none.
+        """Holiday on record for a home (tuya.m.solution.wkf.vacation.detail). {} if none.
+
+        The record covers a holiday in progress **and** a planned one (``isRunning`` tells them
+        apart, see ``holiday_running``).
 
         Read (contract §4.5). The holiday *write* routes were captured on 2026-11-18 (see the
         ``async_vacation_*`` methods below); they run through a runtime mini-program on the app but
@@ -420,10 +423,13 @@ class CloudClient:
         )
 
     async def async_list_holidays(self) -> list[dict]:
-        """Per-home holiday state of the account: [{gid, name, active, detail}]. Read-only.
+        """Per-home holiday state: [{gid, name, active, scheduled, detail}]. Read-only.
 
-        A non-empty ``vacation.detail`` means a holiday is in force; its fields are passed through
-        unmodified. A per-home read failure degrades to ``active=False`` (never raises for the set).
+        ``vacation.detail`` holds the holiday on record, *in progress or planned* (validated on real
+        hardware 2026-11-19: a planned holiday comes back with ``isRunning: false``). ``active`` is
+        the ``isRunning`` flag (``None`` if the record lacks it), ``scheduled`` its complement for a
+        non-empty record; the record itself is passed through unmodified as ``detail``. A per-home
+        read failure degrades to no holiday (never raises for the set).
         """
         out: list[dict] = []
         for home in await self.async_get_homes():
@@ -431,11 +437,13 @@ class CloudClient:
                 detail = await self.async_get_vacation(home["gid"])
             except CloudError:
                 detail = {}
+            running = holiday_running(detail)
             out.append(
                 {
                     "gid": str(home["gid"]),
                     "name": home.get("name"),
-                    "active": bool(detail),
+                    "active": running,
+                    "scheduled": (bool(detail) and not running) if running is not None else None,
                     "detail": detail or None,
                 }
             )

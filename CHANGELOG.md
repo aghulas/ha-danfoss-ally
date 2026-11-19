@@ -27,6 +27,20 @@ below).
   rooms, matched by normalised name. An **offline** relay now shows *Offline* instead of a stale
   *On* and no longer counts in *Relays on*; the per-relay count is relabelled *N linked rooms* (it
   was shown as "calling for heat"). Validated on real hardware.
+- **Holiday sensor `on` for a *planned* holiday.** `vacation.detail` also returns a holiday that has
+  not started yet (`isRunning: false`, measured on real hardware with a holiday two weeks ahead), and
+  the *Holiday active* sensor treated any record as active. It now follows `isRunning` (unknown if
+  the record lacks it) and gains a `scheduled` attribute; `get_holiday` / the `holiday` WebSocket
+  command return `scheduled` too. The *holiday setpoint* sensor shows the temperature of the holiday
+  on record, in progress or planned.
+- **Post-command refresh (R-3) missing on some writes.** The room comfort/setback `number` entities
+  (same write as the room climate) and the local-tunnel services `set_override`, `clear_override`
+  and `set_window_detection` now mark the written heads for the per-device read: the head reports a
+  tunnel write to the cloud in under a minute, but HA and MQTT took ~2.5–3 min to follow.
+- **Preheat switch lagging ~13 min after a write.** After a write of attribute 0x0025 (validated on
+  real hardware) the state only followed at the next full local survey. The head is now read back
+  through the tunnel right after the write (only that head), never assumed: an unanswered read makes
+  the switch unavailable until the next survey. A rejected or failed write now raises an error.
 
 ### Added
 
@@ -111,8 +125,9 @@ below).
 Validated on real hardware (2026-11-18/19): R-1, R-2 (open-window detection), R-3, setpoint writes
 (comfort, setback, override and back to schedule, weekly schedule intact), window detection through
 the local tunnel, MQTT availability following `online`, preheat read on the morning curves, relays
-per building. Still **gated** and not validated through HA: head unbind (`enable_head_unbind`) and
-vacation writes (`enable_vacation_write`). Pending for the final 1.1.0: the W-3 routing above, and
+per building, vacation `plan.leave` + `cancel` (through HA, option turned back off after). Still
+**gated**: head unbind (`enable_head_unbind`, not validated through HA) and vacation writes
+(`enable_vacation_write`; `plan.athome` and `leave.now` not validated). Pending for the final 1.1.0: the W-3 routing above, and
 the preheat **write** trial.
 
 

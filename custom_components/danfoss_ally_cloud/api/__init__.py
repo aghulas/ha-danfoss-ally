@@ -30,6 +30,7 @@ from .decode import (
     decode_device,
     decode_operation,
     head_state,
+    holiday_running,
     holiday_temperature,
 )
 from .keys import GatewayKey, async_fetch_gateway_keys
@@ -54,6 +55,7 @@ __all__ = [
     "derive_distinct_device_id",
     "encode_setpoint",
     "head_state",
+    "holiday_running",
     "holiday_temperature",
     "schedule",
     "validate_days",

@@ -175,10 +175,14 @@ All times are `HH:MM` strings over 24 h, from `00:00` to `23:59`. Days are named
   "home": "Home",
   "gid": "13000000",
   "active": true,
-  "detail": { "start": "…", "end": "…", "temp": 15.0 }
+  "scheduled": false,
+  "detail": { "startDate": "…", "endDate": "…", "temperature": 150, "isRunning": true }
 }
 ```
-- `active`: a holiday period is in force (`vacation.detail` non-empty).
+- `active`: a holiday is **in progress** — the record's `isRunning` flag. `vacation.detail` also
+  returns a **planned** holiday (real hardware 2026-11-19), so a non-empty record is **not** enough.
+  `null` if a record lacks a readable `isRunning` (unknown rather than guessed).
+- `scheduled`: a holiday is on record but not started yet (`detail` non-empty, `isRunning` false).
 - `detail`: the cloud's holiday record, passed through unmodified (fields vary; may be `null`).
 
 ### 3.4c Boiler relay (`Relay`)
@@ -314,10 +318,18 @@ write is **not** proven and must not be reintroduced blindly.
 | Use | `dps` | Real effect |
 |---|---|---|
 | Comfort setpoint | `{"118": 210}` (tenths of °C) | applied; then R3 |
-| Setback setpoint | `{"109": 140, "119": 140}` (both together, like the app) | accepted; then R3 |
+| Setback setpoint | `{"109": 140, "119": 140}` (both together, like the app) | accepted; then R3. ⚠ also applies `v` **at once** as the current setpoint, see below |
 | Manual mode | `{"2": "manual"}` | applied, **erases the schedule** (R4) |
 | End of return to schedule | `{"2": "at_home"}` | display only (R4, R5) |
 | Room settings | `{"1": bool}` preheat, `{"30": bool}` lock, `{"116": bool}` window, `{"18": 210}` upper bound | applied in 5 to 10 min |
+
+**Setback publish side effect (real hardware, 2026-11-19, E-2 Circulation, setback 14 → 13.5).**
+Publishing `{"109": v, "119": v}` makes the heads apply `v` **immediately** as their current setpoint
+(`OccupiedSetpoint` = `v`, `SetpointChangeSource` = `Externally`), **even in a comfort slot**. The
+schedule rewrite that follows (R3) brings the slot's setpoint back 1 to 3 min later (`Schedule`
+source). No thermal effect was observed over that window, but a setback edit in a comfort slot
+does dip the setpoint briefly. Working hypothesis: DP 109 = the "now" setpoint, DP 119 = the setback
+setting proper (to confirm before publishing DP 119 alone).
 
 Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware result W-3
 (2026-11-19)**:
@@ -325,6 +337,8 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
 - **Grouped head**: set through its **room** with the group publish above (`{"30": bool}` /
   `{"116": bool}`), the proven path. ⚠ The setting applies to **every head of the room**; the
   integration's switch says so (`write_path: room`, `write_scope: room`, `room_head_count`).
+  Measured 2026-11-19 (DP 30, a two-head room): applied on **both** heads in the cloud at
+  T0 + ~15 s, well under the 5–10 min of R7.
 - **Isolated head**: `tuya.m.custom.wkf.settings.change` (resType 1) is **accepted but never
   applied** for DP 30 / DP 116: C-1 stayed locked more than 10 min, with `gwId = meshId` (the
   integration) and with `gwId = devId` (the MCP connector) alike — **addressing is not the cause**.
@@ -357,6 +371,9 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   MQTT publish: that HTTP call alone is not the write to the head.
 - Hence, on an isolated head: window detection is written through the **local tunnel** (§4.4,
   W-4 ✅) when it is active and the head answers locally; otherwise the switch is **unavailable**.
+  Measured 2026-11-19 (DP 116): the tunnel write is **immediate** (read back from the head at
+  T0 + ~20 s), and the head reports it to the cloud in under a minute (per-device route); the
+  integration marks the head for the post-command per-device read (R-3) so HA follows one poll later.
   The child lock has no proven isolated-head path (the local read does not expose it): **unavailable**.
 - `async_write_setting` remains only for the back-to-schedule `at_home` label of an isolated head
   (display only, R5).
@@ -398,15 +415,23 @@ Read routes (replayed read-only by the MCP connector `vacances`):
 
 | Operation | API | Version | Body | Returns |
 |---|---|---|---|---|
-| Active holiday of a home | `tuya.m.solution.wkf.vacation.detail` | 1.0 | `{"homeId": "<gid>"}` | detail dict, `{}` if none |
+| Holiday on record for a home (in progress **or planned**) | `tuya.m.solution.wkf.vacation.detail` | 1.0 | `{"homeId": "<gid>"}` | detail dict, `{}` if none |
 | Rooms covered by the holiday | `tuya.m.solution.wkf.vacation.rooms.list` | 1.0 | `{"homeId": "<gid>"}` | list of rooms (optional) |
 
-A non-empty `vacation.detail` means a holiday is active; its fields (start/end, setpoint) are passed
-through as read by the cloud (no re-interpretation). DP 121 (`holiday_setting`) is the per-head
+A non-empty `vacation.detail` means a holiday is **on record**, in progress **or planned**: measured
+2026-11-19, a holiday planned two weeks ahead came back as `{startDate, startTime, endDate, endTime,
+temperature: 145, roomList, isRunning: false, vacationType: 3}`. **`isRunning`** tells them apart
+(§3.4b `active` / `scheduled`). The fields are otherwise passed through as read by the cloud (no
+re-interpretation). DP 121 (`holiday_setting`) is the per-head
 holiday setpoint, decoded already (§4.3, `setpoints.holiday`).
 
-Write routes (captured 2026-11-18; **GATED** — see §5.2, `enable_vacation_write`, off by default —
-and pending a real-hardware validation). Two modes (DP 2 `holiday` vs `holiday_sat`):
+Write routes (captured 2026-11-18; **GATED** — see §5.2, `enable_vacation_write`, off by default).
+Two modes (DP 2 `holiday` vs `holiday_sat`). Real-hardware status (2026-11-19):
+
+- `plan.leave` ✅ and `cancel` ✅ — a holiday planned on **one room** (`roomIds` = that room only),
+  `vacationType` 3, shown at once in `vacation.detail` (and in the app, dates and temperature as
+  sent); `cancel` cleared it for the whole **home** (it takes no room list).
+- `plan.athome` and `leave.now` — **not validated** on real hardware yet.
 
 | Operation | API | Version | Body |
 |---|---|---|---|
@@ -493,8 +518,10 @@ by the MCP connector (`smartlife.m.*` family; the APK also exposes the `thing.m.
   proven on real hardware 2026-11-16, PR #10). Outside these modes, or for an ungrouped head, the
   write fails cleanly (an error rather than a misleading value). The room's `number` entities offer
   the same setting, per room; the thermostat remains the per-head access.
-- **Holiday (read only)**: per home, a `binary_sensor` "holiday active" and a `sensor` "holiday
-  setpoint" (the holiday record's temperature, `null` if none). No holiday *write* entity (§4.5, §7).
+- **Holiday (read only)**: per home, a `binary_sensor` "holiday active" (on only while a holiday is
+  **in progress**, `isRunning`; attribute `scheduled` for a planned one, `detail` the raw record)
+  and a `sensor` "holiday setpoint" (the temperature of the holiday on record, in progress or
+  planned, `null` if none). No holiday *write* entity (§4.5, §7).
 - **Boiler relay (read only)**: per relay device (`category` `kg`), a `binary_sensor` "boiler relay"
   (DP `1`) and a `sensor` "rooms calling for heat" (count of linked rooms). No relay on/off *switch*
   (the device-level write is uncaptured, §4.6, §7); the room ↔ relay link is changed via
@@ -609,8 +636,8 @@ stable.
 
 Axis B (0.5.0) brought holiday **read** (§4.5), the boiler relay **read** + room↔relay **link**
 (§4.6), and room management (§4.7) into the contract. Axis A (toward 1.0) brought the holiday
-**write** (§4.5) in, **gated** behind `enable_vacation_write` (off by default) and pending a
-real-hardware validation. What stays out:
+**write** (§4.5) in, **gated** behind `enable_vacation_write` (off by default); `plan.leave` and
+`cancel` are validated on real hardware, `plan.athome` and `leave.now` not yet. What stays out:
 
 - **Direct boiler-relay on/off (DP `1`, device level).** Confirmed 2026-11-18: the app has **no**
   manual relay on/off — the relay is server-driven from the heat demand of the linked rooms, so there

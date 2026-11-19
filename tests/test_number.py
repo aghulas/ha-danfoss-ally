@@ -28,6 +28,14 @@ class _FakeCoord:
         self.client = client
         self.last_update_success = True
         self.refreshed = False
+        self.commanded: list[str] = []
+        self.members = {"77": ("h1", "h2")}
+
+    def room_members(self, group_id):
+        return self.members.get(group_id, ())
+
+    def note_commanded(self, head_ids):
+        self.commanded.extend(head_ids)
 
     async def async_request_refresh(self):
         self.refreshed = True
@@ -103,6 +111,18 @@ async def test_ecrit_les_bons_dp_et_rafraichit(key, dps):
     await ent.async_set_native_value(6.5)
     assert client.calls == [("77", "03wvrwpv", dps, True)]
     assert coord.refreshed is True
+    # R-3 (regression, real hardware 2026-11-19): the room's heads are marked commanded, like the
+    # room climate's set_temperature, so the round-trip is not left to the bulk-route lag
+    assert coord.commanded == ["h1", "h2"]
+
+
+async def test_ecriture_refusee_ne_marque_pas_r3():
+    from custom_components.danfoss_ally_cloud.api.client import CloudError
+
+    ent, coord = _num("comfort_setpoint", client=_FakeClient(exc=CloudError("refused")))
+    with pytest.raises(HomeAssistantError):
+        await ent.async_set_native_value(6.5)
+    assert coord.commanded == []
 
 
 async def test_refuse_produit_non_verifie():

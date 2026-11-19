@@ -201,7 +201,8 @@ class DanfossPreheat(CoordinatorEntity[DanfossLocalCoordinator], SwitchEntity):
     """Real preheat (Zigbee attribute 0x0025) via the local tunnel.
 
     State and write go through the tunnel; unavailable if the head does not answer locally (rather
-    than lying). ⚠ Writing 0x0025 is not confirmed on real hardware: to validate on the install.
+    than lying). Writing 0x0025 is validated on real hardware (2026-11-19). After a write the head
+    itself is read back (not the whole site, which took ~13 min), never an optimistic state.
     """
 
     _attr_has_entity_name = True
@@ -252,8 +253,16 @@ class DanfossPreheat(CoordinatorEntity[DanfossLocalCoordinator], SwitchEntity):
         if dev is None or not dev.node_id or not dev.mesh_id:
             return
         head = Head(dev.id, dev.node_id, dev.mesh_id)
-        await self.hass.async_add_executor_job(self.coordinator.manager.write_preheat, head, active)
-        await self.coordinator.async_request_refresh()
+        try:
+            accepted = await self.hass.async_add_executor_job(
+                self.coordinator.manager.write_preheat, head, active
+            )
+        except (tunnel.LocalUnavailable, tunnel.LocalError) as err:
+            raise HomeAssistantError(f"local preheat write failed: {err}") from err
+        # Read this head back (whatever the write status): the state shown is what the head says.
+        await self.coordinator.async_refresh_head(head)
+        if not accepted:
+            raise HomeAssistantError("local preheat write rejected by the head")
 
     async def async_turn_on(self, **kwargs) -> None:
         await self._async_write(True)

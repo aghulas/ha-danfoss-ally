@@ -293,6 +293,26 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
             if d.is_head and d.node_id and d.mesh_id and d.mesh_id in gws
         ]
 
+    async def async_refresh_head(self, head: Head) -> bool | None:
+        """Re-read ONE head's preheat through the tunnel and update its entry in ``data``.
+
+        Called after a preheat write: the full survey reads every head (~8 s each), so a write was
+        only reflected ~13 min later on a site-sized install (real hardware, 2026-11-19). This reads
+        back the head itself, never assumes the written value: an unanswered read stores ``None``,
+        which makes the switch unavailable until the next survey (rather than lying). The survey
+        schedule is left untouched (listeners are notified directly).
+        """
+        try:
+            value = await self.hass.async_add_executor_job(self.manager.read_preheat, head)
+        except Exception as err:  # noqa: BLE001 - best-effort, as the survey
+            _LOGGER.debug("local preheat read-back failed (%s)", type(err).__name__)
+            value = None
+        data = dict(self.data or {})
+        data[head.dev_id] = value
+        self.data = data
+        self.async_update_listeners()
+        return value
+
     async def _async_update_data(self) -> dict[str, bool | None]:
         heads = self.heads()
         if not heads:

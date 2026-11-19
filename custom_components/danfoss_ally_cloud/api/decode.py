@@ -118,6 +118,20 @@ def _bool(v: Any) -> bool | None:
 _HOLIDAY_TEMP_KEYS = ("temp", "temperature", "tempSet", "holidayTemp", "setTemp", "value")
 
 
+def holiday_running(detail: dict[str, Any] | None) -> bool | None:
+    """Whether a ``vacation.detail`` record is a holiday *in progress* (contract §4.5).
+
+    ``vacation.detail`` also returns *planned* holidays (measured 2026-11-19: a record with
+    ``isRunning: false`` for a holiday two weeks ahead), so a non-empty record is not "active".
+    ``isRunning`` tells them apart. Returns ``False`` for an empty record (no holiday), the parsed
+    flag when present, and ``None`` (unknown) for a record without a readable ``isRunning`` rather
+    than guessing.
+    """
+    if not isinstance(detail, dict) or not detail:
+        return False
+    return _bool(detail.get("isRunning"))
+
+
 def holiday_temperature(detail: dict[str, Any] | None) -> float | None:
     """Best-effort holiday setpoint (°C) from a ``vacation.detail`` record.
 
