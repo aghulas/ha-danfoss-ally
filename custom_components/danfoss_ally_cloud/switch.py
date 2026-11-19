@@ -17,7 +17,8 @@ merely accepts the call:
      to read the result back;
   2. the LOCAL TUNNEL when the setting has a proven tunnel write and the head answers locally
      (window detection, W-4 ✅): a write that reaches the head directly, with no cloud involved;
-  3. cloud MQTT for a DP PROVEN on it (child lock), when the option is on and the link connected;
+  3. cloud MQTT for a DP PROVEN on it (child lock; window detection when the tunnel of step 2 is
+     not available), when the option is on and the link connected;
   4. otherwise the switch is UNAVAILABLE rather than lying.
 
 Preheat: writing DP 1 on the cloud only changes the gateway cache; the real lever is the Zigbee

@@ -16,8 +16,8 @@ go-ahead, at the keyboard, with physical access to the test head.**
 | Anything else | — | Never sent on this channel |
 
 A trial is confined to **one designated head**. Ticking a DP opens it on that head and nowhere
-else: every other head keeps its normal routing (for window detection, the local tunnel), so an
-automation or a click on another head can never go out through the channel under trial. With no
+else: every other head keeps its normal routing, so an automation or a click on another head can
+never go out through the channel under trial. With no
 head designated, nothing is open, whatever is ticked.
 
 While a candidate is open, the entity that writes it — on the trial head — shows `write_path: cloud_mqtt`,
@@ -34,7 +34,13 @@ Otherwise the call raises a clear error. Nothing is ever shown that was not read
 
 Preconditions:
 
-- an **isolated** test head (in no room) on a verified model, `online`, with nobody relying on it;
+- an **isolated** test head (in no room) on a verified model, `online`, with nobody relying on it,
+  and **already in the state the sheet requires** (for a setpoint: following a schedule, in a
+  comfort slot). Read its real state through the local tunnel first: the cloud can show a mode and
+  setpoints the head does not hold;
+- **one driver of the live install**: no other session or person restarts Home Assistant, changes
+  its options or deploys a build while a DP is armed (on 2026-11-19 two restarts fell between a
+  write and its restore; the queued calls ran afterwards, but nothing guarantees that);
 - the Danfoss app open on that head's page (to observe, and to check the app is not logged out);
 - physical access to the head;
 - the independent read-back source of the DP's sheet below, working **before** the write;
@@ -74,62 +80,86 @@ Written on an isolated test head, confirmed in the cloud, in the app and physica
 other head or setting affected. No tunnel read exists for this setting: the head itself (its lock)
 was the independent source.
 
-### DP 116 — open-window detection (candidate)
+### DP 116 — open-window detection ✅ proven (2026-11-19)
 
-- **Entity**: the head's "window detection" switch.
-- **Routing**: outside a trial, an isolated head's window detection is written through the **local
-  tunnel** when it is enabled and the head answers locally (proven, immediate), and cloud MQTT will
-  only be the fallback when the tunnel is not available. **During the trial**, DP 116 takes cloud
-  MQTT even with the tunnel up, so the tunnel stays free as the read-back source.
-- **Trial value**: the opposite of `V0` (a boolean). No thermal effect: the setting only changes
-  what the head does if it detects an open window, so do it with the room's window closed.
-- **Independent read-back**: the head's window-detection setting read through the **local tunnel**
-  (the same local read that validated the tunnel write, W-4), which does not go through the cloud.
-- **Restore**: toggle back to `V0`.
-- **What it decides**: if proven, DP 116 moves to `MQTT_WRITE_DPS` and an isolated head without a
-  usable tunnel gets a window-detection write. The tunnel stays the first choice when available.
-- **To observe in passing — the confirmation fallback.** When the gateway's echo does not come
-  within 15 s, the write is now confirmed by one read of the head through the **per-device** cloud
-  route; it used the bulk list before. This also changed for DP 30, a path already proven, and the
-  2026-11-19 validation did not exercise it (that write was confirmed by the echo, in under a
-  second). During this trial, note for each write which source confirmed it (debug log line
-  "confirmed by echo" / "confirmed by cloud"). If a write is ever confirmed "by cloud", check that
-  the head really holds the value; if one fails as "not confirmed" while the head did apply it,
-  record how long the per-device route took to show the value.
+Written on an isolated test head (off → on → off), each step read back through the **local tunnel**
+(the head's own window-detection setting, the read that validated the tunnel write, W-4), in the
+cloud (per-device route) and in the app. No other setting of the head changed. Both calls returned
+in under a second.
 
-### DP 18 — upper setpoint bound (candidate)
+- **Routing now**: an isolated head's window detection is written through the **local tunnel** when
+  it is enabled and the head answers locally (proven, immediate); cloud MQTT is the fallback when
+  the tunnel is not available. The tunnel stays the first choice.
+- The "on" write ran on 1.2.0-rc1 and the "off" write on 1.2.0-rc2 (Home Assistant was restarted
+  for an update between the two); the cloud-MQTT write code is identical in both.
+- **Not observed — the confirmation fallback.** When the gateway's echo does not come within 15 s,
+  a write is confirmed by one read of the head through the **per-device** cloud route. None of the
+  2026-11-19 writes exercised it: every call returned in under a second, which is consistent with
+  the echo, and the debug log line naming the confirmation source ("confirmed by echo" /
+  "confirmed by cloud") was not read. If a write is ever confirmed "by cloud", check that the head
+  really holds the value; if one fails as "not confirmed" while the head did apply it, record how
+  long the per-device route took to show the value.
 
-- **Entity**: the test head's "upper setpoint bound" number. It exists only while DP 18 is open on
-  that head (the head chosen in `cloud_mqtt_supervised_head`, `18` ticked in
-  `cloud_mqtt_supervised_dps`), and is removed again when the trial is disarmed.
-- **Trial value**: `V0 − 0.5 °C` (or `V0 + 0.5 °C` if that stays within 20–35 °C), keeping it above
-  the head's comfort setpoint. The integration refuses a bound that would exclude the comfort or
-  setback setpoint. No thermal effect: the bound only limits what can be set.
-- **Independent read-back**: the head's maximum setpoint through the **local tunnel** (thermostat
-  attribute `0x0016`, part of the local head read), then the app's settings screen.
-- **Restore**: write `V0` back.
+### DP 18 — upper setpoint bound ✅ proven (2026-11-19)
 
-### DP 27 — lower setpoint bound, with DP 120 (candidate)
+Written on the same isolated test head (35 → 34.5 → 35 °C), each step read back as the head's
+maximum setpoint through the **local tunnel** (thermostat attribute `0x0016`), in the cloud and in
+the app's settings screen. No other setting changed; no thermal effect (the bound only limits what
+can be set).
 
-- **Entity**: the head's "lower setpoint bound" number (tick `27`, and `120` too — see below).
+- **Entity**: the head's "upper setpoint bound" number, present for every isolated head while
+  `enable_cloud_mqtt` is on. The integration refuses a bound that would exclude the comfort or
+  setback setpoint.
+
+### DP 27 — lower setpoint bound, with DP 120 ✅ proven (2026-11-19)
+
+Written on the same head in two steps, each read back as the head's minimum setpoint through the
+**local tunnel** (thermostat attribute `0x0015`), in the cloud and in the app:
+
+1. `{"27": 55}` alone, with the pause setpoint already at 5.5 °C — the bound moved to 5.5 °C, the
+   pause setpoint did not;
+2. `{"27": 60, "120": 60}` in one frame — the bound moved to 6 °C and the pause setpoint followed
+   to 6 °C (read in the cloud and in the app).
+
+Restored with `{"27": 50}` then `{"120": 50}`.
+
 - **What is sent**: `{"27": v}`; and `{"27": v, "120": v}` in one frame when the new bound is
-  **above the head's pause setpoint**. The app publishes DP 120 with DP 27 "when the pause setpoint
-  must follow" (contract §4.2); the rule retained here — raise the pause setpoint to the new bound
-  when it would fall under it — is this project's reading of that capture, **to confirm during the
-  trial** by watching what the app itself sends in the same situation. If DP 120 is needed and not
-  ticked, the write is refused with a message saying so.
-- **Trial value**, in two steps:
-  1. a value that does **not** move the pause setpoint, if the head allows one (lower bound raised
-     while still at or under the pause setpoint) — proves DP 27 alone;
-  2. `V0 + 0.5 °C` above the pause setpoint — proves the DP 27 + DP 120 frame. No thermal effect
-     unless the head is in pause mode: check its mode first.
-- **Independent read-back**: the head's minimum setpoint through the **local tunnel** (thermostat
-  attribute `0x0015`); the pause setpoint in the app.
-- **Restore**: write `V0` back. ⚠ Lowering the bound does **not** lower the pause setpoint again:
-  restore the pause setpoint in the Danfoss app (or with the pause-setpoint entity once that DP is
-  available), and read it back.
+  **above the head's pause setpoint**. That frame is applied by the head. Whether the app itself
+  publishes DP 120 in that situation was **not** observed: the rule remains this project's reading
+  of the capture (contract §4.2).
+- **The head does not re-clamp its current setpoint**: with the bound at 5.5 °C then 6 °C, the
+  head's current setpoint stayed at 5 °C (tunnel read), and its schedule kept 5 °C.
+- **Lowering the bound does not lower the pause setpoint again**: it stayed at 6 °C after the bound
+  went back to 5 °C, and was written back on its own with DP 120.
+
+### DP 120 — pause setpoint of an isolated head ✅ proven (2026-11-19), weaker proof
+
+Written on the same head (5 → 5.5 °C, later 6 °C with DP 27, then back to 5 °C), the head **not**
+in pause mode — no thermal effect.
+
+- **Read-back**: no tunnel attribute is known for the pause setpoint, so the **app's settings
+  screen** was the independent source, with the cloud (per-device route) agreeing each time. This
+  is weaker than a tunnel read: both the app and the cloud can show a value the head does not hold
+  (seen on the same head for its comfort setpoint). The pause setpoint following the lower bound
+  in the `{"27", "120"}` frame is consistent with the head handling DP 120, but is read from the
+  same two sources.
+- **What is sent**: `{"120": v}`. No settings block (DP 120 is not part of it).
+- **Entity**: the head's "pause setpoint" number, present for every isolated head while
+  `enable_cloud_mqtt` is on.
 
 ### DP 118 + 16 — comfort setpoint of an isolated head (candidate)
+
+> **Trial not run on 2026-11-19**: the test head was in manual mode and could not be put in a
+> comfort slot — HTTP schedule writes reached it more than ten minutes late. Run on an isolated
+> head already following a schedule, in a comfort slot. No DP 118, 16 or 119 frame has been sent
+> on real hardware.
+>
+> What was observed while preparing it, on an isolated head left in manual mode: a schedule write
+> (`set_schedule`) and `restore_schedule` over HTTP were both accepted and had **no effect on the
+> head within five minutes** (five tunnel reads). An effect appeared more than ten minutes after
+> the first write: the head ended in manual mode at the cloud's comfort value, with no schedule,
+> and had to be set back by hand in the app. Do not use that head state, nor the HTTP path, to
+> prepare this trial.
 
 - **Entity**: the head's "comfort setpoint" number (tick `118` **and** `16`).
 - **What is sent**, as the app does (contract §4.2): one MQTT frame `{"118": v, "16": v}`; once
@@ -152,6 +182,8 @@ was the independent source.
 
 ### DP 119 — setback setpoint of an isolated head (candidate)
 
+> **Trial not run on 2026-11-19**, for the same reason as DP 118 + 16 above.
+
 - **Entity**: the head's "setback setpoint" number (tick `119`).
 - **What is sent**: `{"119": v}` alone (no DP 109: the app does not send it for an isolated head),
   then the settings block as above.
@@ -161,15 +193,6 @@ was the independent source.
   `0x0012`) that DP 119 alone does not.
 - **Independent read-back**: the head's weekly schedule through the local tunnel (setback periods),
   same open question as for DP 118.
-- **Restore**: write `V0` back.
-
-### DP 120 — pause setpoint of an isolated head (candidate)
-
-- **Entity**: the head's "pause setpoint" number (tick `120`).
-- **What is sent**: `{"120": v}`. No settings block (DP 120 is not part of it).
-- **Trial value**: `V0 + 0.5 °C`, the head **not** in pause mode — no thermal effect.
-- **Independent read-back**: no tunnel attribute is known for the pause setpoint; the app's
-  settings screen is the independent source. Weaker than a tunnel read: say so in the record.
 - **Restore**: write `V0` back.
 
 ### DP 1 — preheat: no sheet

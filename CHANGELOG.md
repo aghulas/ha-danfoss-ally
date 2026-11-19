@@ -25,8 +25,17 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   local tunnel; otherwise unavailable — never an optimistic state. The write is **confirmed** by the
   gateway's inbound protocol-4 `{cid,dps}` echo (or a cloud re-read), with a 15 s timeout and a
   clear error if unconfirmed. **Validated 2026-11-19: DP 30 on an isolated test head, confirmed in the
-  cloud, the app and physically on the head.** DP 30 only for now (`MQTT_WRITE_DPS`); other settings
-  follow one per supervised validation.
+  cloud, the app and physically on the head.** Other settings follow one per supervised validation
+  (next entry).
+- **Window detection, setpoint bounds and pause setpoint of an isolated head over MQTT (DP 116, 18,
+  27, 120).** Each validated by its own supervised write on real hardware (2026-11-19, one isolated
+  test head, written once and restored): DP 116, 18 and 27 read back through the local tunnel and
+  in the app; DP 120 in the app and the cloud only (no tunnel read exists for it). With the option
+  on, every isolated head gets "upper setpoint bound", "lower setpoint bound" and "pause setpoint"
+  numbers, and its window-detection switch falls back to cloud MQTT when the local tunnel is not
+  available (the tunnel stays the first route). Raising the lower bound above the pause setpoint
+  sends DP 120 in the same frame. Values are checked before sending (schema range and step,
+  ordering of the bounds, no bound that excludes the comfort or setback setpoint).
 - **"Cloud MQTT link" connectivity binary sensor** (diagnostic, present only when the link exists),
   so the link never fails silently; reconnect uses exponential backoff and picks up a refreshed
   `sid`.
@@ -38,22 +47,15 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   itself after 48 h. Tooling for roadmap stage 3; the 24 h run on a real install is still to do
   (docs/cloud-mqtt-coverage.md).
 
-- **Window detection (DP 116) as a cloud-MQTT candidate, closed by default.** A DP now ships first
-  as a candidate (`MQTT_CANDIDATE_DPS`) that only the new option `cloud_mqtt_supervised_dps` (empty
-  by default) opens, for its supervised first write; the switch then shows `write_trial: true`.
-  Outside a trial, an isolated head's window detection still goes through the local tunnel first.
-  **Not validated on real hardware yet.**
-- **Setpoint bounds of an isolated head (DP 18 upper, DP 27 lower) as cloud-MQTT candidates, closed
-  by default.** Two `number` entities per isolated head, present only while their DP is open. Values
-  are checked before sending (schema range and step, ordering, no bound that excludes the comfort
-  or setback setpoint). Raising the lower bound above the pause setpoint also sends DP 120 in the
-  same frame. **Not validated on real hardware yet.**
-- **Comfort, setback and pause setpoints of an isolated head (DP 118 + 16, 119, 120) as cloud-MQTT
-  candidates, closed by default.** Three `number` entities per isolated head, present only while
-  their DPs are open. They had no path at all before. Written as the app does: MQTT publish, then
-  for comfort and setback the whole settings block over HTTP. Values are checked against the head's
-  own bounds before sending. **Not validated on real hardware yet**; the trial must also settle
-  whether a schedule rewrite is needed after the publish.
+- **Candidate DPs and the supervised-trial options.** A DP ships first as a candidate
+  (`MQTT_CANDIDATE_DPS`) that only the option `cloud_mqtt_supervised_dps` (empty by default) opens,
+  for its supervised first write; its entity then shows `write_trial: true`.
+- **Comfort and setback setpoints of an isolated head (DP 118 + 16, DP 119) as cloud-MQTT
+  candidates, closed by default.** Two `number` entities, present only while their DPs are open
+  for a trial. Written as the app does: MQTT publish, then the whole settings block over HTTP.
+  Values are checked against the head's own bounds before sending. **Not validated on real
+  hardware yet**: their supervised write was not run (it needs an isolated head in a comfort
+  slot), and it must also settle whether a schedule rewrite is needed after the publish.
 - The cloud-MQTT write confirmation falls back to one read of the head through the per-device
   route when the gateway's echo does not come (it used the bulk list, which lags for minutes).
 

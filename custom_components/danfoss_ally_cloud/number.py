@@ -13,8 +13,9 @@ Per ISOLATED head, ``number`` entities set the **upper bound** (DP 18) and the *
 (DP 27) of its setpoint, and its **comfort** (DP 118 + 16), **setback** (DP 119) and **pause**
 (DP 120) setpoints, over the Tuya cloud MQTT channel — the only path the app itself uses for them
 (contract §4.2). They exist only when the cloud-MQTT write option is on and their DPs are open on
-that channel (proven, or candidates listed for their supervised trial): with no proven path there
-is no entity rather than a lying one.
+that channel: the bounds and the pause setpoint are proven (2026-11-19) and exist for every
+isolated head; comfort and setback are candidates, present only on the head designated for their
+supervised trial. With no proven path there is no entity rather than a lying one.
 """
 
 from __future__ import annotations
@@ -278,9 +279,10 @@ def bound_write_dps(
       first.
 
     Lower bound and pause setpoint: the app publishes DP 120 together with DP 27 "when the pause
-    setpoint must follow" (contract §4.2). Reading retained here, to confirm in the supervised
-    trial: when the new lower bound is above the head's pause setpoint, the pause setpoint is
-    raised to it in the same frame.
+    setpoint must follow" (contract §4.2). Reading retained here: when the new lower bound is above
+    the head's pause setpoint, the pause setpoint is raised to it in the same frame. That frame was
+    applied on real hardware (2026-11-19: the bound moved and the pause setpoint followed);
+    whether the app itself sends DP 120 in that situation has not been observed.
     """
     low, high = (x / 10 for x in MQTT_TENTHS_RANGE[desc.dp])
     try:

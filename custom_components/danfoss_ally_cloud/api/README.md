@@ -56,7 +56,9 @@ pip install -e '.[local,mqtt]'         # development install from the repository
   `writes.MQTT_TENTHS_RANGE` and the setpoint bounds as candidates (DP 18 upper, DP 27 lower,
   DP 120 pause setpoint, tenths of °C within the product schema's range); `const.DP_LOWER_TEMP`.
   The isolated-head setpoints as candidates too: DP 118 (comfort) with its companion DP 16,
-  DP 119 (setback).
+  DP 119 (setback). After their supervised writes on real hardware (2026-11-19), DP 116, 18, 27
+  and 120 moved from `MQTT_CANDIDATE_DPS` to `MQTT_WRITE_DPS`: they pass `mqtt_write_value()`
+  without `supervised`; DP 118, 16 and 119 remain candidates.
 - **0.3.0** — `gw_id` on `async_write_setting` (the head's gateway; it defaulted to the head
   itself); distinct `deviceId` (`derive_distinct_device_id`, `CloudClient(distinct_device_id=…)`);
   `mqtt_publish` and `mqtt_client` (extra `mqtt`); holiday, room, relay and unbind calls; active

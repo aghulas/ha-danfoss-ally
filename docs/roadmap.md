@@ -99,7 +99,7 @@ off by default (extra reads on the user's account).
 Background and routing: `docs/architecture.md`. The app writes an isolated head's settings with a DP
 publish over Tuya cloud MQTT, the only path found that applies them (contract §4.2).
 
-1. **Write, child lock only — shipped on `main`.** Option off by default; a link-state diagnostic entity; confirmation
+1. **Write, child lock first — shipped on `main`.** Option off by default; a link-state diagnostic entity; confirmation
    by the gateway's echo or a cloud re-read, never optimistic. Validated on real hardware
    2026-11-19 (session coexists with the phone app; write applied on the head).
 2. **More DPs, one at a time**, each after its own supervised write read back from an independent
@@ -107,12 +107,17 @@ publish over Tuya cloud MQTT, the only path found that applies them (contract §
    Preheat last, read back as attribute 0x0025 (cloud DP 1 over HTTP only changed the gateway cache).
    A DP ships first as a **candidate**, closed unless listed in `cloud_mqtt_supervised_dps`, and is
    promoted after its supervised write (`docs/first-write-procedure.md`).
-   - Window detection (DP 116): candidate, code shipped, **supervised write pending**.
-   - Bounds (DP 18 upper, DP 27 lower with DP 120 when the pause setpoint must follow): candidates,
-     code shipped as `number` entities of an isolated head, **supervised writes pending**.
-   - Isolated-head setpoints (DP 118 + 16 comfort, DP 119 setback, DP 120 pause): candidates, code
-     shipped, **supervised writes pending**. The trial must also settle whether a schedule rewrite
-     is needed after the publish, as for rooms (R3).
+   - Window detection (DP 116): **proven 2026-11-19**, read back through the local tunnel and in
+     the app. The tunnel stays the first route; cloud MQTT is the fallback.
+   - Bounds (DP 18 upper, DP 27 lower, alone and with DP 120 in one frame): **proven 2026-11-19**,
+     read back through the local tunnel and in the app.
+   - Pause setpoint (DP 120): **proven 2026-11-19**, read back in the app and the cloud only (no
+     tunnel read exists for it).
+   - Comfort and setback setpoints (DP 118 + 16, DP 119): candidates, code shipped, **supervised
+     writes pending**. Not run on 2026-11-19: the test head was in manual mode and could not be
+     put in a comfort slot. To run on an isolated head that already follows a schedule, in a
+     comfort slot. The trial must also settle whether a schedule rewrite is needed after the
+     publish, as for rooms (R3).
    - Preheat (DP 1): **not implemented**. Written proposal, with the observation to make before
      any code and an assessment (probably not worth a second route):
      `docs/cloud-mqtt-preheat-proposal.md`.

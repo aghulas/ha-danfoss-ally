@@ -28,7 +28,8 @@ from custom_components.danfoss_ally_cloud.diagnostics import (
     async_get_config_entry_diagnostics,
 )
 from custom_components.danfoss_ally_cloud.mqtt_write import supervised_for
-from custom_components.danfoss_ally_cloud.switch import PATH_MQTT, PATH_NONE, DanfossSwitch
+from custom_components.danfoss_ally_cloud.number import DanfossHeadSetpoint
+from custom_components.danfoss_ally_cloud.switch import PATH_MQTT, DanfossSwitch
 
 from .common import ENTRY_DATA, FakeCloudClient, head
 from .test_mqtt_client import _FakePaho
@@ -89,16 +90,28 @@ def _window_switch(hass, device_id):
     )
 
 
+def _setback_number(hass, device_id):
+    """The head's setback-setpoint number (DP 119, a candidate), or None when it is not provided."""
+    return next(
+        (
+            e
+            for e in hass.data["entity_components"]["number"].entities
+            if isinstance(e, DanfossHeadSetpoint) and e.unique_id == f"{device_id}_setback_setpoint"
+        ),
+        None,
+    )
+
+
 def test_supervised_for_gives_the_trial_set_to_the_designated_head_only():
     data = {
-        DATA_MQTT_SUPERVISED_DPS: frozenset({116}),
+        DATA_MQTT_SUPERVISED_DPS: frozenset({119}),
         DATA_MQTT_SUPERVISED_HEAD: "trial-head-id",
     }
-    assert supervised_for(data, "trial-head-id") == frozenset({116})
+    assert supervised_for(data, "trial-head-id") == frozenset({119})
     assert supervised_for(data, "other-head-id") == frozenset()
     # No head designated: nothing opens anywhere, whatever is ticked.
     assert (
-        supervised_for({DATA_MQTT_SUPERVISED_DPS: frozenset({116})}, "trial-head-id") == frozenset()
+        supervised_for({DATA_MQTT_SUPERVISED_DPS: frozenset({119})}, "trial-head-id") == frozenset()
     )
     assert supervised_for({**data, DATA_MQTT_SUPERVISED_HEAD: None}, "trial-head-id") == frozenset()
     assert supervised_for({}, "trial-head-id") == frozenset()
@@ -109,19 +122,19 @@ async def test_trial_opens_on_the_designated_head_and_nowhere_else(hass: HomeAss
         hass,
         {
             CONF_ENABLE_CLOUD_MQTT: True,
-            CONF_CLOUD_MQTT_SUPERVISED_DPS: ["116"],
+            CONF_CLOUD_MQTT_SUPERVISED_DPS: ["119"],
             CONF_CLOUD_MQTT_SUPERVISED_HEAD: "trial-head-id",
         },
     )
-    trial = _window_switch(hass, "trial-head-id")
-    assert trial._write_path(trial.device) == PATH_MQTT
+    trial = _setback_number(hass, "trial-head-id")
+    assert trial is not None and trial._write_path(trial.device) == PATH_MQTT
     assert trial.extra_state_attributes["write_trial"] is True
-    # The other isolated head keeps its normal routing: DP 116 is not proven on cloud MQTT and no
-    # tunnel is configured here, so it has no route. It must NOT go through the channel on trial.
+    # The other isolated head gets no entity for the DP under trial: nothing of it can go out
+    # through the channel on trial.
+    assert _setback_number(hass, "other-head-id") is None
+    # Its proven settings keep their normal routing and carry no trial marker.
     other = _window_switch(hass, "other-head-id")
-    assert other._write_path(other.device) == PATH_NONE
-    assert other.extra_state_attributes == {"write_path": "none"}
-    await other.async_turn_off()
+    assert other.extra_state_attributes == {"write_path": PATH_MQTT, "write_scope": "head"}
     assert fake_paho.instances[-1].published == []
 
 
@@ -129,10 +142,9 @@ async def test_ticked_dp_without_a_designated_head_opens_nothing(
     hass: HomeAssistant, fake_paho, caplog
 ):
     caplog.set_level(logging.WARNING)
-    await _setup(hass, {CONF_ENABLE_CLOUD_MQTT: True, CONF_CLOUD_MQTT_SUPERVISED_DPS: ["116"]})
+    await _setup(hass, {CONF_ENABLE_CLOUD_MQTT: True, CONF_CLOUD_MQTT_SUPERVISED_DPS: ["119"]})
     for device_id in ("trial-head-id", "other-head-id"):
-        sw = _window_switch(hass, device_id)
-        assert sw._write_path(sw.device) == PATH_NONE
+        assert _setback_number(hass, device_id) is None
     assert "no trial head is designated" in caplog.text
 
 
@@ -144,7 +156,7 @@ async def test_trial_head_is_never_logged_and_is_redacted_in_the_diagnostics(
         hass,
         {
             CONF_ENABLE_CLOUD_MQTT: True,
-            CONF_CLOUD_MQTT_SUPERVISED_DPS: ["116"],
+            CONF_CLOUD_MQTT_SUPERVISED_DPS: ["119"],
             CONF_CLOUD_MQTT_SUPERVISED_HEAD: "trial-head-id",
         },
     )
@@ -177,7 +189,7 @@ async def test_options_form_offers_only_isolated_verified_heads(hass: HomeAssist
             result["flow_id"],
             user_input={
                 CONF_ENABLE_CLOUD_MQTT: True,
-                CONF_CLOUD_MQTT_SUPERVISED_DPS: ["116"],
+                CONF_CLOUD_MQTT_SUPERVISED_DPS: ["119"],
                 CONF_CLOUD_MQTT_SUPERVISED_HEAD: "trial-head-id",
             },
         )

@@ -64,9 +64,9 @@ accepted (`CONNACK rc=0`) while the phone app stays connected.
 ## Write and confirmation
 
 `CloudMqttLink.publish_dp` sends the frame and `await_confirmation` waits for the gateway's inbound
-protocol-4 `{cid, dps}` echo (matched on `cid` + the written DP/value) within a timeout; the switch
+protocol-4 `{cid, dps}` echo (matched on `cid` + the written DP/value) within a timeout; the entity
 then falls back to a cloud re-read, and raises a clear error if still unconfirmed — never an
-optimistic state. A link that is down makes the dependent switches unavailable.
+optimistic state. A link that is down makes the dependent switches and numbers unavailable.
 
 ## Link lifecycle (hardening)
 
@@ -109,11 +109,18 @@ above), but the 5-refusal limit has only been exercised with a faked client.
   `rc=0`, inbound frames decoded, the phone app not evicted.
 - **First write**: DP 30 (child lock) on an isolated test head (2026-11-19), confirmed in the cloud,
   in the app and physically on the head; no other head or setting affected.
-- **Scope today**: the MQTT write path carries **DP 30 only** as proven
-  (`api.writes.MQTT_WRITE_DPS`). DP 116 (window detection), DP 18 and DP 27 (bounds), DP 118 + 16,
-  DP 119 and DP 120 (setpoints) are implemented as **candidates** (`MQTT_CANDIDATE_DPS`), closed
-  until their supervised write. Other DPs (133/101 mounting/orientation, 1 preheat) are added one
-  at a time,
+- **Supervised writes of 2026-11-19 (evening)**, each on one isolated test head, written once and
+  restored: DP 116 (window detection), DP 18 (upper bound), DP 27 (lower bound, alone and in one
+  frame with DP 120) — read back through the local tunnel and in the app; DP 120 (pause setpoint)
+  — read back in the app and the cloud only, since no tunnel read exists for it (a weaker proof).
+  Every call returned in under a second, which is consistent with the gateway's echo; the
+  confirmation source itself was not read from the debug log. No other setting of the head
+  changed. The DP 116 "on" write ran on 1.2.0-rc1 and all the others on 1.2.0-rc2, whose
+  cloud-MQTT write code is identical.
+- **Scope today**: the MQTT write path carries **DP 30, 116, 18, 27 and 120** as proven
+  (`api.writes.MQTT_WRITE_DPS`). DP 118 + 16 (comfort setpoint) and DP 119 (setback setpoint) are
+  implemented as **candidates** (`MQTT_CANDIDATE_DPS`), closed until their supervised write, which
+  has not been run. Other DPs (133/101 mounting/orientation, 1 preheat) are added one at a time,
   each as a candidate first (docs/first-write-procedure.md).
 
 ## Provenance

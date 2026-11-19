@@ -418,7 +418,8 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   `settings.change` with the whole block (cloud-side store of the workflow), in addition to the
   MQTT publish: that HTTP call alone is not the write to the head.
 - Hence, on an isolated head: window detection is written through the **local tunnel** (§4.4,
-  W-4 ✅) when it is active and the head answers locally; otherwise the switch is **unavailable**.
+  W-4 ✅) when it is active and the head answers locally; otherwise through cloud MQTT when that
+  channel is enabled and connected (below), and failing both the switch is **unavailable**.
   Measured 2026-11-19 (DP 116): the tunnel write is **immediate** (read back from the head at
   T0 + ~20 s), and the head reports it to the cloud in under a minute (per-device route); the
   integration marks the head for the post-command per-device read (R-3) so HA follows one poll later.
@@ -430,7 +431,8 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   session** (distinct deviceId — coexists with the app, proven 2026-11-19). The write is **confirmed**
   by the gateway's inbound protocol-4 `{cid,dps}` echo on `smart/mb/in/<gw>` (or a cloud re-read),
   with a timeout and a clear error — never optimistic. **Validated on real hardware 2026-11-19: DP 30
-  (child lock) on an isolated test head, confirmed in the cloud, the app and on the head.** When the
+  (child lock) on an isolated test head, confirmed in the cloud, the app and on the head; then
+  DP 116, 18, 27 and 120, each by its own supervised write (table below).** When the
   echo does not come, the write is confirmed by one read of the head through the per-device route,
   else it fails. (Protocol details: docs/cloud-mqtt-publish.md.)
 
@@ -439,14 +441,21 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   | DP | Setting | Status | Value check before sending |
   |---|---|---|---|
   | 30 | Child lock | **Proven** (`MQTT_WRITE_DPS`) | boolean |
-  | 116 | Open-window detection | **Candidate** (`MQTT_CANDIDATE_DPS`): closed unless listed in `cloud_mqtt_supervised_dps` for its supervised write | boolean |
-  | 18 | Upper setpoint bound | **Candidate** | tenths of °C, 20–35 °C, 0.5 step; not under the lower bound; must not exclude the comfort or setback setpoint |
-  | 27 | Lower setpoint bound | **Candidate** | tenths of °C, 5–20 °C, 0.5 step; not above the upper bound; must not exclude the comfort or setback setpoint |
-  | 120 | Pause setpoint | **Candidate** | tenths of °C, 5–35 °C, 0.5 step. For now only sent with DP 27, in the same frame, when the new lower bound is above the pause setpoint (reading of the app capture, to confirm in the trial) |
+  | 116 | Open-window detection | **Proven** (2026-11-19, read back through the local tunnel and in the app). The fallback of the tunnel route, see the routing below | boolean |
+  | 18 | Upper setpoint bound | **Proven** (2026-11-19, tunnel and app) | tenths of °C, 20–35 °C, 0.5 step; not under the lower bound; must not exclude the comfort or setback setpoint |
+  | 27 | Lower setpoint bound | **Proven** (2026-11-19, tunnel and app), alone and in one frame with DP 120 | tenths of °C, 5–20 °C, 0.5 step; not above the upper bound; must not exclude the comfort or setback setpoint |
+  | 120 | Pause setpoint | **Proven** (2026-11-19, read back in the app and the cloud only: no tunnel read exists) | tenths of °C, 5–35 °C, 0.5 step. Also sent with DP 27, in the same frame, when the new lower bound is above the pause setpoint |
 
-  | 118 + 16 | Comfort setpoint | **Candidate** | tenths of °C within the head's own bounds, 0.5 step. `{"118": v, "16": v}` in one frame; only DP 118's confirmation is required |
+  | 118 + 16 | Comfort setpoint | **Candidate** (`MQTT_CANDIDATE_DPS`): closed unless listed in `cloud_mqtt_supervised_dps` for its supervised write | tenths of °C within the head's own bounds, 0.5 step. `{"118": v, "16": v}` in one frame; only DP 118's confirmation is required |
   | 119 | Setback setpoint | **Candidate** | same check. `{"119": v}` alone (no DP 109) |
-  | 120 | Pause setpoint | **Candidate** | same check. `{"120": v}` |
+  | 120 | Pause setpoint | **Proven** (see above) | same check. `{"120": v}` |
+
+  Observed during the 2026-11-19 writes, on an isolated head: raising the lower bound above the
+  head's current setpoint does **not** move that setpoint (the head kept 5 °C under a 6 °C bound);
+  lowering the bound again does **not** lower the pause setpoint that followed it up — it has to
+  be written back on its own. The `{"27", "120"}` frame was applied (the bound moved and the pause
+  setpoint followed); whether the app itself sends DP 120 in that situation was not observed, so
+  the rule stays this project's reading of the capture.
 
   Comfort and setback belong to the app's settings block: after the MQTT publish is confirmed, the
   integration posts the **whole** block `{"1", "118", "119", "121"}` through
@@ -455,19 +464,21 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   refused after a confirmed publish raises an error that says the head has the new value and the
   cloud store may not.
 
-  **Open for the trial**: whether an isolated head's schedule takes a new setpoint without a
-  schedule rewrite (R3 is established for rooms only), and what DP 16 does to the current setpoint
-  outside a comfort slot. See docs/first-write-procedure.md.
+  **Open for the trial** (not run on 2026-11-19): whether an isolated head's schedule takes a new
+  comfort or setback setpoint without a schedule rewrite (R3 is established for rooms only), and
+  what DP 16 does to the current setpoint outside a comfort slot. See
+  docs/first-write-procedure.md.
 
   The setpoints are `number` entities of an **isolated** head ("comfort setpoint", "setback
-  setpoint", "pause setpoint"), present only while their DPs are open on this path for that head
-  (during a trial: the designated trial head only), and removed from the registry when they close
-  again, like the bounds below.
+  setpoint", "pause setpoint"), present only while their DPs are open on this path for that head:
+  the pause setpoint for every isolated head as soon as `enable_cloud_mqtt` is on; comfort and
+  setback during a trial, on the designated trial head only. They are removed from the registry
+  when they close again, like the bounds below.
 
   The bounds are `number` entities of an **isolated** head ("upper setpoint bound", "lower setpoint
-  bound"), present only while their DP is open on this path for that head — during a supervised
-  trial, on the designated trial head only. When the DP closes again (trial disarmed or moved to
-  another head, `enable_cloud_mqtt` off, head grouped), the entity is no longer provided **and its
+  bound"), present for every isolated head on a verified model while `enable_cloud_mqtt` is on.
+  When a number's DP is closed (`enable_cloud_mqtt` off, head grouped, or for a candidate: trial
+  disarmed or moved to another head), the entity is no longer provided **and its
   registry entry is removed**, so nothing lingers as restored and unavailable. If the link merely
   failed to start, the entry is kept. A grouped head has no bound entity (no proven path here).
 
@@ -478,8 +489,9 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
 
   Routing of an isolated head's setting: a DP under supervised trial → cloud MQTT; else the local
   tunnel when it has a proven write for the setting and the head answers locally (window
-  detection); else cloud MQTT for a proven DP (child lock); else unavailable. So window detection
-  keeps the tunnel as its first route, and cloud MQTT is only its fallback once proven.
+  detection); else cloud MQTT for a proven DP (child lock, window detection); else unavailable. So
+  window detection keeps the tunnel as its first route, and cloud MQTT is its fallback when the
+  tunnel is not enabled or the head does not answer locally.
 - `async_write_setting` remains only for the back-to-schedule `at_home` label of an isolated head
   (display only, R5).
 

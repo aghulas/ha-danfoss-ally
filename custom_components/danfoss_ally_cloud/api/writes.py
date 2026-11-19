@@ -25,11 +25,14 @@ def write_allowed(dev: DanfossDevice) -> bool:
 #   is explicitly listed for a supervised trial (the ``supervised`` argument below, fed by the
 #   integration's ``cloud_mqtt_supervised_dps`` option). After its supervised write succeeds, a DP
 #   moves from the second set to the first in a change of its own.
-MQTT_WRITE_DPS = frozenset({30})  # child lock, validated 2026-11-19
-# 116 window detection; 18 upper bound; 27 lower bound; 120 pause setpoint (also written with 27
-# when the pause setpoint must follow the lower bound); 118 comfort setpoint, published with 16
-# (temp_set) as the app does; 119 setback setpoint. Contract §4.2.
-MQTT_CANDIDATE_DPS = frozenset({116, 18, 27, 120, 118, 16, 119})
+# All validated on real hardware on 2026-11-19 (docs/first-write-procedure.md): 30 child lock;
+# 116 window detection, 18 upper bound and 27 lower bound, each read back through the local
+# tunnel and in the app; 120 pause setpoint (also written with 27, in one frame, when the lower
+# bound rises above it), read back in the app and the cloud only — no tunnel read exists for it.
+MQTT_WRITE_DPS = frozenset({30, 116, 18, 27, 120})
+# 118 comfort setpoint, published with 16 (temp_set) as the app does; 119 setback setpoint.
+# Contract §4.2. Their supervised trial has not been run yet.
+MQTT_CANDIDATE_DPS = frozenset({118, 16, 119})
 
 # Value rule of each DP this path knows: booleans, or tenths of °C within the product schema's
 # range for that DP (03wvrwpv), on its 0.5 °C step.
