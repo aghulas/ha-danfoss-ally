@@ -69,12 +69,21 @@ class _FakeClient:
     def __init__(self):
         self.calls = []  # settings.change (must stay empty for the setting switches)
         self.group_calls = []
+        self.device_dps = {}  # per-device route: {dev_id: {dp: value}} or an exception
+        self.device_reads = []
 
     async def async_write_setting(self, dev_id, pid, dps, *, gw_id=None):
         self.calls.append((dev_id, pid, dps, gw_id))
 
     async def async_group_publish(self, group_id, dps):
         self.group_calls.append((group_id, dps))
+
+    async def async_get_device_dps(self, dev_id):
+        self.device_reads.append(dev_id)
+        got = self.device_dps.get(dev_id)
+        if isinstance(got, Exception):
+            raise got
+        return got
 
 
 def _verrou_desc():
@@ -109,9 +118,19 @@ class _FakeMqttLink:
         return self.confirm
 
 
-def _switch(desc, dev, *, client=None, groups=None, local=None, mqtt=None, cloud_mqtt=False):
-    coord = _FakeCloudCoord({dev.id: dev}, client=client, groups=groups)
-    sw = DanfossSwitch(coord, dev.id, desc, local, mqtt, cloud_mqtt)
+def _switch(
+    desc,
+    dev,
+    *,
+    client=None,
+    groups=None,
+    local=None,
+    mqtt=None,
+    cloud_mqtt=False,
+    supervised=frozenset(),
+):
+    coord = _FakeCloudCoord({dev.id: dev}, client=client or _FakeClient(), groups=groups)
+    sw = DanfossSwitch(coord, dev.id, desc, local, mqtt, cloud_mqtt, supervised)
     sw.hass = _FakeHass()
     return sw, coord
 
@@ -402,13 +421,129 @@ async def test_isolated_head_cloud_mqtt_write_publishes_and_confirms():
     assert coord.refreshed is True
 
 
-async def test_cloud_mqtt_window_dp116_not_routed_via_mqtt():
-    """Only DP 30 uses the MQTT path for now; DP 116 (window) falls through (here: unavailable)."""
+async def test_window_dp116_is_closed_on_cloud_mqtt_by_default():
+    """DP 116 is a candidate, not proven: with the option on and the link connected it still does
+    not route through MQTT until it is listed for a supervised trial (here: unavailable)."""
     dev = head(window_detection=True)  # isolated, no tunnel -> no path
     link = _FakeMqttLink(connected=True)
     sw, _ = _switch(_fenetre_desc(), dev, mqtt=link, cloud_mqtt=True)
-    assert sw.extra_state_attributes["write_path"] == "none"
+    assert sw.extra_state_attributes == {"write_path": "none"}
     assert sw.available is False
+
+
+async def test_window_dp116_supervised_trial_routes_and_writes_via_cloud_mqtt():
+    dev = head(window_detection=True)
+    link = _FakeMqttLink(confirm=True)
+    sw, coord = _switch(
+        _fenetre_desc(), dev, mqtt=link, cloud_mqtt=True, supervised=frozenset({116})
+    )
+    assert sw.available is True
+    assert sw.extra_state_attributes == {
+        "write_path": "cloud_mqtt",
+        "write_scope": "head",
+        "write_trial": True,
+    }
+    await sw.async_turn_off()
+    assert link.published == [("gw-1", "node-1", {"116": False})]
+    assert link.confirmations == [("node-1", 116, False)]
+    assert coord.commanded == [dev.id] and coord.refreshed is True
+
+
+async def test_window_dp116_trial_takes_cloud_mqtt_even_when_the_tunnel_is_up():
+    """During the supervised trial the DP goes through the channel under test; the tunnel stays
+    free to read the result back."""
+    dev = head(window_detection=True)
+    mgr = _FakeManager()
+    local = _FakeLocalCoord({dev.id: False}, manager=mgr)
+    link = _FakeMqttLink(confirm=True)
+    sw, _ = _switch(
+        _fenetre_desc(),
+        dev,
+        local=local,
+        mqtt=link,
+        cloud_mqtt=True,
+        supervised=frozenset({116}),
+    )
+    assert sw.extra_state_attributes["write_path"] == "cloud_mqtt"
+    await sw.async_turn_off()
+    assert link.published and mgr.window_writes == []
+
+
+async def test_window_dp116_outside_a_trial_keeps_the_tunnel_first():
+    """Not listed for a trial: the proven tunnel write stays the route, MQTT is not used."""
+    dev = head(window_detection=True)
+    mgr = _FakeManager()
+    local = _FakeLocalCoord({dev.id: False}, manager=mgr)
+    link = _FakeMqttLink(confirm=True)
+    sw, _ = _switch(_fenetre_desc(), dev, local=local, mqtt=link, cloud_mqtt=True)
+    assert sw.extra_state_attributes == {"write_path": "local", "write_scope": "head"}
+    await sw.async_turn_off()
+    assert link.published == [] and len(mgr.window_writes) == 1
+
+
+async def test_supervised_trial_needs_the_cloud_mqtt_option():
+    dev = head(window_detection=True)
+    link = _FakeMqttLink(confirm=True)
+    sw, _ = _switch(_fenetre_desc(), dev, mqtt=link, cloud_mqtt=False, supervised=frozenset({116}))
+    assert sw.available is False and sw.extra_state_attributes == {"write_path": "none"}
+
+
+async def test_proven_dp_is_not_marked_as_trial_even_if_listed():
+    dev = head(child_lock=True)
+    link = _FakeMqttLink()
+    sw, _ = _switch(
+        _verrou_desc(), dev, mqtt=link, cloud_mqtt=True, supervised=frozenset({30, 116})
+    )
+    assert sw.extra_state_attributes == {"write_path": "cloud_mqtt", "write_scope": "head"}
+
+
+async def test_cloud_mqtt_write_without_echo_is_confirmed_by_the_per_device_read():
+    dev = head(child_lock=False)
+    client = _FakeClient()
+    client.device_dps = {dev.id: {"30": True, "116": True}}
+    link = _FakeMqttLink(confirm=False)
+    sw, coord = _switch(_verrou_desc(), dev, client=client, mqtt=link, cloud_mqtt=True)
+    await sw.async_turn_on()  # no error: the head's own route shows the written value
+    assert client.device_reads == [dev.id]
+    assert coord.refreshed is True
+
+
+async def test_cloud_mqtt_write_without_echo_and_unreadable_head_raises():
+    from custom_components.danfoss_ally_cloud.api import CloudError
+
+    dev = head(child_lock=False)
+    client = _FakeClient()
+    client.device_dps = {dev.id: CloudError("synthetic")}
+    link = _FakeMqttLink(confirm=False)
+    sw, _ = _switch(_verrou_desc(), dev, client=client, mqtt=link, cloud_mqtt=True)
+    with pytest.raises(HomeAssistantError, match="not confirmed"):
+        await sw.async_turn_on()
+
+
+async def test_cloud_mqtt_write_on_a_head_without_gateway_address_raises():
+    from custom_components.danfoss_ally_cloud.mqtt_write import async_mqtt_write
+
+    dev = head(child_lock=False, node_id=None)
+    coord = _FakeCloudCoord({dev.id: dev}, client=_FakeClient())
+    link = _FakeMqttLink()
+    with pytest.raises(HomeAssistantError, match="gateway address"):
+        await async_mqtt_write(coord, link, dev, {30: True})
+    assert link.published == []
+
+
+async def test_cloud_mqtt_write_refuses_a_closed_or_invalid_value_before_sending():
+    from custom_components.danfoss_ally_cloud.mqtt_write import async_mqtt_write
+
+    dev = head()
+    coord = _FakeCloudCoord({dev.id: dev}, client=_FakeClient())
+    link = _FakeMqttLink()
+    with pytest.raises(HomeAssistantError, match="supervised first write"):
+        await async_mqtt_write(coord, link, dev, {116: True})  # candidate, not opened
+    with pytest.raises(HomeAssistantError, match="not enabled"):
+        await async_mqtt_write(coord, link, dev, {2: "manual"}, supervised=frozenset({2}))
+    with pytest.raises(HomeAssistantError, match="boolean"):
+        await async_mqtt_write(coord, link, dev, {30: 1})
+    assert link.published == [] and link.confirmations == []
 
 
 async def test_cloud_mqtt_write_unconfirmed_and_cloud_still_differs_raises():
@@ -461,3 +596,39 @@ async def test_cloud_mqtt_write_failure_raises_homeassistanterror():
     sw, _ = _switch(_verrou_desc(), dev, mqtt=link, cloud_mqtt=True)
     with pytest.raises(HomeAssistantError):
         await sw.async_turn_on()
+
+
+# --- routing with the non-blocking tunnel start: a head is known locally only once read ----------
+
+
+async def test_window_routing_before_and_after_the_first_local_read():
+    """The local survey now runs in the background and ``data`` starts empty. Until the head has
+    been read there is no tunnel route: unavailable outside a trial (DP 116 is not proven on cloud
+    MQTT), cloud MQTT inside one. Once read, the tunnel is the route again outside a trial."""
+    dev = head(window_detection=True)
+    mgr = _FakeManager()
+    local = _FakeLocalCoord({}, manager=mgr)  # survey running, nothing read yet
+    link = _FakeMqttLink(confirm=True)
+
+    plain, _ = _switch(_fenetre_desc(), dev, local=local, mqtt=link, cloud_mqtt=True)
+    assert plain.available is False and plain.extra_state_attributes == {"write_path": "none"}
+    await plain.async_turn_off()  # no route: nothing is sent anywhere
+    assert link.published == [] and mgr.window_writes == []
+
+    trial, _ = _switch(
+        _fenetre_desc(), dev, local=local, mqtt=link, cloud_mqtt=True, supervised=frozenset({116})
+    )
+    assert trial.extra_state_attributes["write_path"] == "cloud_mqtt"
+
+    local.data = {dev.id: False}  # the survey has read this head
+    assert plain.available is True
+    assert plain.extra_state_attributes == {"write_path": "local", "write_scope": "head"}
+    assert trial.extra_state_attributes["write_path"] == "cloud_mqtt"  # the trial keeps MQTT
+
+
+async def test_child_lock_on_cloud_mqtt_does_not_wait_for_the_local_survey():
+    """A DP proven on cloud MQTT with no tunnel write (child lock) is routable at once."""
+    dev = head(child_lock=False)
+    local = _FakeLocalCoord({}, manager=_FakeManager())
+    sw, _ = _switch(_verrou_desc(), dev, local=local, mqtt=_FakeMqttLink(), cloud_mqtt=True)
+    assert sw.extra_state_attributes == {"write_path": "cloud_mqtt", "write_scope": "head"}

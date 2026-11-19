@@ -1,16 +1,23 @@
 """Switches: child lock (DP 30), window detection (DP 116), preheat (local).
 
 Child lock / window detection, for guard-rail products (WRITE_VERIFIED_PRODUCTS), unavailable while
-offline. The write path depends on the head (real-hardware result W-3, 2026-11-19):
+offline. Each write goes to the channel proven for it (docs/architecture.md), never to one that
+merely accepts the call:
 
 - head GROUPED into a room: the setting is published on the ROOM (``s.m.dev.group.dp.publish``,
   contract §4.2), the proven path. ⚠ It applies to EVERY head of that room (exposed in the
   ``write_scope`` / ``room_head_count`` attributes);
 - ISOLATED head: ``tuya.m.custom.wkf.settings.change`` is accepted but NEVER applied for DP 30/116
-  (W-3, whatever the ``gwId``), and an app capture showed the app does not use it for these DPs (it
-  publishes the DP over Tuya cloud MQTT, not implemented here). So: window detection goes through
-  the LOCAL TUNNEL when it is active and the head answers locally (W-4 ✅); otherwise, and always
-  the child lock (not exposed by the local path), the switch is UNAVAILABLE rather than lying.
+  (W-3, whatever the ``gwId``); the app publishes the DP over Tuya cloud MQTT instead. Routing, in
+  this order (``DanfossSwitch._write_path``):
+
+  1. a DP under SUPERVISED TRIAL on cloud MQTT (``cloud_mqtt_supervised_dps``) goes through cloud
+     MQTT, so the trial exercises the channel it is meant to prove, the local tunnel staying free
+     to read the result back;
+  2. the LOCAL TUNNEL when the setting has a proven tunnel write and the head answers locally
+     (window detection, W-4 ✅): a write that reaches the head directly, with no cloud involved;
+  3. cloud MQTT for a DP PROVEN on it (child lock), when the option is on and the link connected;
+  4. otherwise the switch is UNAVAILABLE rather than lying.
 
 Preheat: writing DP 1 on the cloud only changes the gateway cache; the real lever is the Zigbee
 attribute 0x0025, via the LOCAL TUNNEL. The preheat switch therefore exists only if the
@@ -33,13 +40,27 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import MQTT_WRITE_DPS, CloudError, DanfossDevice, mqtt_write_value, write_allowed
+from .api import (
+    MQTT_CANDIDATE_DPS,
+    CloudError,
+    DanfossDevice,
+    mqtt_dp_open,
+    write_allowed,
+)
 from .api.local import tunnel
 from .api.local.manager import Head
 from .api.mqtt_client import CloudMqttLink
-from .const import DATA_CLOUD_MQTT, DATA_COORDINATOR, DATA_LOCAL, DATA_MQTT_LINK, DOMAIN
+from .const import (
+    DATA_CLOUD_MQTT,
+    DATA_COORDINATOR,
+    DATA_LOCAL,
+    DATA_MQTT_LINK,
+    DATA_MQTT_SUPERVISED_DPS,
+    DOMAIN,
+)
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 from .entity import DanfossEntity
+from .mqtt_write import MQTT_CONFIRM_TIMEOUT, async_mqtt_write  # noqa: F401 - timeout re-exported
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,10 +69,6 @@ PATH_ROOM = "room"  # group publish on the head's room: affects every head of th
 PATH_MQTT = "cloud_mqtt"  # isolated head via dedicated-session Tuya cloud MQTT (gated, this head)
 PATH_LOCAL = "local"  # local Zigbee tunnel, this head only
 PATH_NONE = "none"  # no proven path: the switch is unavailable
-
-# How long to wait for the gateway's inbound protocol-4 confirmation after a cloud-MQTT write,
-# before falling back to a cloud re-read (and then a clear error if still unconfirmed).
-MQTT_CONFIRM_TIMEOUT = 15.0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -94,9 +111,10 @@ async def async_setup_entry(
     local: DanfossLocalCoordinator | None = data.get(DATA_LOCAL)
     mqtt_link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
     cloud_mqtt_enabled: bool = bool(data.get(DATA_CLOUD_MQTT, False))
+    supervised: frozenset[int] = data.get(DATA_MQTT_SUPERVISED_DPS) or frozenset()
 
     entities: list[SwitchEntity] = [
-        DanfossSwitch(coordinator, dev.id, desc, local, mqtt_link, cloud_mqtt_enabled)
+        DanfossSwitch(coordinator, dev.id, desc, local, mqtt_link, cloud_mqtt_enabled, supervised)
         for dev in coordinator.data.values()
         if dev.is_head and write_allowed(dev)
         for desc in SWITCHES
@@ -124,22 +142,25 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
         local: DanfossLocalCoordinator | None = None,
         mqtt: CloudMqttLink | None = None,
         cloud_mqtt_enabled: bool = False,
+        supervised_dps: frozenset[int] = frozenset(),
     ) -> None:
         super().__init__(coordinator, device_id)
         self.entity_description = description
         self._local = local
         self._mqtt = mqtt
         self._cloud_mqtt_enabled = cloud_mqtt_enabled
+        self._supervised_dps = supervised_dps
         self._attr_unique_id = f"{device_id}_{description.key}"
 
     def _mqtt_ready(self, dev: DanfossDevice) -> bool:
         """True if an isolated head can be written through the dedicated-session cloud-MQTT link
         right now: the gate is on, a connected link exists, and it knows this head's gateway. Never
-        optimistic — a link that is absent or not connected makes this path unusable. Only the DPs
-        enabled on the MQTT path (DP 30 at first) use it; others fall through to tunnel/none."""
+        optimistic — a link that is absent or not connected makes this path unusable. Only a DP
+        open on the MQTT path uses it (proven, or a candidate listed for a supervised trial);
+        others fall through to tunnel/none."""
         if not (self._cloud_mqtt_enabled and self._mqtt is not None):
             return False
-        if self.entity_description.dp not in MQTT_WRITE_DPS:
+        if not mqtt_dp_open(self.entity_description.dp, self._supervised_dps):
             return False
         if not dev.node_id or not dev.mesh_id:
             return False
@@ -166,12 +187,21 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
             return PATH_NONE
         if self.coordinator.group_of(dev.id) is not None:
             return PATH_ROOM
-        # Isolated head: dedicated-session cloud MQTT (gated), else local tunnel, else none.
-        if self._mqtt_ready(dev):
-            return PATH_MQTT
+        # Isolated head (order explained in the module docstring).
+        mqtt_ready = self._mqtt_ready(dev)
+        if mqtt_ready and self._on_trial:
+            return PATH_MQTT  # supervised trial of this DP on cloud MQTT
         if self._local_head(dev) is not None:
-            return PATH_LOCAL
+            return PATH_LOCAL  # proven tunnel write, the head answers locally
+        if mqtt_ready:
+            return PATH_MQTT  # DP proven on cloud MQTT
         return PATH_NONE
+
+    @property
+    def _on_trial(self) -> bool:
+        """This switch's DP is a cloud-MQTT candidate opened for a supervised trial."""
+        dp = self.entity_description.dp
+        return dp in MQTT_CANDIDATE_DPS and dp in self._supervised_dps
 
     @property
     def available(self) -> bool:
@@ -193,6 +223,9 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
             attrs["room_head_count"] = len(self.coordinator.room_members(group_id or ""))
         elif path in (PATH_LOCAL, PATH_MQTT):
             attrs["write_scope"] = "head"
+            if path == PATH_MQTT and self._on_trial:
+                # Not proven on this channel yet: the write is part of a supervised trial.
+                attrs["write_trial"] = True
         return attrs
 
     async def _async_write(self, state: bool) -> None:
@@ -209,33 +242,18 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
                 raise HomeAssistantError(f"room setting write refused: {err}") from err
             self.coordinator.note_commanded(self.coordinator.room_members(group_id) or [dev.id])
         elif path == PATH_MQTT:
-            # Isolated head, dedicated-session cloud MQTT. Gate + a live link required; the option
-            # is OFF by default and a first real publish needs an explicit supervised go-ahead.
-            if self._mqtt is None or not dev.node_id or not dev.mesh_id:
+            # Isolated head, dedicated-session cloud MQTT. Gate + a live link required; validated,
+            # published and confirmed by ``async_mqtt_write`` (a clear error, never optimistic).
+            if self._mqtt is None:
                 return
-            # Validate the value before sending (DP-30-only / boolean) — a clear error, never a
-            # blind send. Then publish and wait for a confirmation (no optimistic success).
-            value = mqtt_write_value(self.entity_description.dp, state)
-            try:
-                await self._mqtt.publish_dp(dev.mesh_id, dev.node_id, {dp: value})
-                confirmed = await self._mqtt.await_confirmation(
-                    dev.node_id, self.entity_description.dp, value, timeout_s=MQTT_CONFIRM_TIMEOUT
-                )
-            except Exception as err:  # noqa: BLE001 - surface any send failure, never a blind write
-                raise HomeAssistantError(f"cloud-MQTT setting write failed: {err}") from err
-            self.coordinator.note_commanded([dev.id])
-            if confirmed:
-                _LOGGER.debug("cloud-MQTT DP %s confirmed by inbound echo frame", dp)
-            else:
-                # Fall back to a cloud re-read; if still unconfirmed, say so (do not claim success).
-                await self.coordinator.async_request_refresh()
-                dev2 = self.device
-                if dev2 is None or self.entity_description.value(dev2) != value:
-                    raise HomeAssistantError(
-                        "cloud-MQTT write not confirmed (no inbound frame, cloud still differs)"
-                    )
-                _LOGGER.debug("cloud-MQTT DP %s confirmed by cloud re-read (no echo frame)", dp)
-                return
+            await async_mqtt_write(
+                self.coordinator,
+                self._mqtt,
+                dev,
+                {self.entity_description.dp: state},
+                supervised=self._supervised_dps,
+            )
+            return
         else:
             head = self._local_head(dev)
             if head is None or self._local is None:

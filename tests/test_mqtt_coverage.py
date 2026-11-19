@@ -344,3 +344,51 @@ async def test_link_diagnostics_and_sensor_state(hass: HomeAssistant, fake_paho)
     assert sensor.extra_state_attributes == {"state": "connecting", "listen_only": False}
     c.on_connect(c, None, None, 0)
     assert sensor.is_on is True and sensor.extra_state_attributes["state"] == "connected"
+
+
+# --- supervised trial of a candidate DP (option cloud_mqtt_supervised_dps) -----------------------
+
+
+async def test_supervised_option_opens_only_real_candidates(hass: HomeAssistant, fake_paho):
+    from custom_components.danfoss_ally_cloud.const import (
+        CONF_CLOUD_MQTT_SUPERVISED_DPS,
+        DATA_MQTT_SUPERVISED_DPS,
+    )
+    from custom_components.danfoss_ally_cloud.switch import PATH_MQTT, PATH_NONE, DanfossSwitch
+
+    entry = await _setup(hass, {CONF_ENABLE_CLOUD_MQTT: True})
+    assert hass.data[DOMAIN][entry.entry_id][DATA_MQTT_SUPERVISED_DPS] == frozenset()
+    c = fake_paho.instances[-1]
+    c.on_connect(c, None, None, 0)
+
+    def window_switch():
+        return next(
+            e
+            for e in hass.data["entity_components"]["switch"].entities
+            if isinstance(e, DanfossSwitch) and e.entity_description.key == "window_detection"
+        )
+
+    assert window_switch()._write_path(window_switch().device) == PATH_NONE  # closed by default
+
+    with (
+        patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=FakeCloudClient()),
+        patch(
+            "custom_components.danfoss_ally_cloud.async_fetch_gateway_keys",
+            AsyncMock(return_value=_GW),
+        ),
+    ):
+        hass.config_entries.async_update_entry(
+            entry,
+            options={
+                CONF_ENABLE_CLOUD_MQTT: True,
+                # 30 is proven (not a candidate), 2 and "x" are not candidates: all ignored.
+                CONF_CLOUD_MQTT_SUPERVISED_DPS: ["116", "30", "2", "x"],
+            },
+        )
+        await hass.async_block_till_done()
+    assert hass.data[DOMAIN][entry.entry_id][DATA_MQTT_SUPERVISED_DPS] == frozenset({116})
+    c = fake_paho.instances[-1]
+    c.on_connect(c, None, None, 0)
+    sw = window_switch()
+    assert sw._write_path(sw.device) == PATH_MQTT
+    assert sw.extra_state_attributes["write_trial"] is True

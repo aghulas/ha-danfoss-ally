@@ -14,11 +14,13 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
+from homeassistant.helpers import config_validation as cv
 
-from .api import CloudAuthError, CloudClient, CloudError
+from .api import MQTT_CANDIDATE_DPS, CloudAuthError, CloudClient, CloudError
 from .const import (
     CONF_CH_KEY,
     CONF_CLOUD_MQTT_PROBE,
+    CONF_CLOUD_MQTT_SUPERVISED_DPS,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
@@ -58,6 +60,13 @@ def _schema(schema: vol.Schema) -> Any:
 
 
 _REGIONS = ["eu", "us", "cn", "in"]
+
+# Labels of the cloud-MQTT candidate DPs in the supervised-trial selector.
+_CANDIDATE_DP_LABELS = {116: "116 — window detection"}
+
+
+def _candidate_dp_choices() -> dict[str, str]:
+    return {str(dp): _CANDIDATE_DP_LABELS.get(dp, str(dp)) for dp in sorted(MQTT_CANDIDATE_DPS)}
 
 
 class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -121,6 +130,8 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
         o = self.config_entry.options
+        choices = _candidate_dp_choices()
+        supervised = [dp for dp in o.get(CONF_CLOUD_MQTT_SUPERVISED_DPS) or [] if dp in choices]
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -148,6 +159,9 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
                     CONF_ENABLE_CLOUD_MQTT,
                     default=o.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT),
                 ): bool,
+                vol.Optional(CONF_CLOUD_MQTT_SUPERVISED_DPS, default=supervised): cv.multi_select(
+                    choices
+                ),
                 vol.Optional(
                     CONF_CLOUD_MQTT_PROBE,
                     default=o.get(CONF_CLOUD_MQTT_PROBE, DEFAULT_CLOUD_MQTT_PROBE),

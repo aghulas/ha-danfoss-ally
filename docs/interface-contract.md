@@ -382,10 +382,24 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   session** (distinct deviceId — coexists with the app, proven 2026-11-19). The write is **confirmed**
   by the gateway's inbound protocol-4 `{cid,dps}` echo on `smart/mb/in/<gw>` (or a cloud re-read),
   with a timeout and a clear error — never optimistic. **Validated on real hardware 2026-11-19: DP 30
-  (child lock) on an isolated test head, confirmed in the cloud, the app and on the head.** For now the MQTT
-  path carries **DP 30 only** (`MQTT_WRITE_DPS`); other DPs are added one at a time after a supervised
-  write. When the option is on and the link connected, an isolated head's child-lock switch routes
-  here; otherwise the tunnel; otherwise unavailable. (Protocol details: docs/cloud-mqtt-publish.md.)
+  (child lock) on an isolated test head, confirmed in the cloud, the app and on the head.** When the
+  echo does not come, the write is confirmed by one read of the head through the per-device route,
+  else it fails. (Protocol details: docs/cloud-mqtt-publish.md.)
+
+  Status of each DP on this path (`api/writes.py`):
+
+  | DP | Setting | Status | Value check before sending |
+  |---|---|---|---|
+  | 30 | Child lock | **Proven** (`MQTT_WRITE_DPS`) | boolean |
+  | 116 | Open-window detection | **Candidate** (`MQTT_CANDIDATE_DPS`): closed unless listed in `cloud_mqtt_supervised_dps` for its supervised write | boolean |
+
+  A candidate is implemented but not proven; it opens only for a supervised trial
+  (docs/first-write-procedure.md), and the entity then carries `write_trial: true`.
+
+  Routing of an isolated head's setting: a DP under supervised trial → cloud MQTT; else the local
+  tunnel when it has a proven write for the setting and the head answers locally (window
+  detection); else cloud MQTT for a proven DP (child lock); else unavailable. So window detection
+  keeps the tunnel as its first route, and cloud MQTT is only its fallback once proven.
 - `async_write_setting` remains only for the back-to-schedule `at_home` label of an isolated head
   (display only, R5).
 

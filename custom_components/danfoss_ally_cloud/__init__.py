@@ -15,7 +15,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.typing import ConfigType
 
-from .api import CloudClient, async_fetch_gateway_keys
+from .api import MQTT_CANDIDATE_DPS, CloudClient, async_fetch_gateway_keys
 from .api.local.manager import LocalTunnelManager
 from .api.mqtt_client import (
     CloudMqttLink,
@@ -27,6 +27,7 @@ from .const import (
     CLOUD_MQTT_PROBE_MAX_SECONDS,
     CONF_CH_KEY,
     CONF_CLOUD_MQTT_PROBE,
+    CONF_CLOUD_MQTT_SUPERVISED_DPS,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
@@ -51,6 +52,7 @@ from .const import (
     DATA_MQTT,
     DATA_MQTT_COVERAGE,
     DATA_MQTT_LINK,
+    DATA_MQTT_SUPERVISED_DPS,
     DATA_SCHEDULES,
     DATA_VACATION_WRITE,
     DEFAULT_CLOUD_MQTT_PROBE,
@@ -147,6 +149,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # by default). The switches treat None as "no cloud-MQTT path", and a listen-only link
         # (probe without the write option) refuses every publish.
         DATA_MQTT_LINK: mqtt_link,
+        DATA_MQTT_SUPERVISED_DPS: _supervised_dps(entry),
         DATA_MQTT_COVERAGE: mqtt_coverage,
     }
     await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
@@ -163,6 +166,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(coordinator.async_add_listener(_relink_heads))
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
     return True
+
+
+def _supervised_dps(entry: ConfigEntry) -> frozenset[int]:
+    """Candidate DPs opened on the cloud-MQTT write path for a supervised trial (option
+    ``cloud_mqtt_supervised_dps``, empty by default). Only real candidates are kept: an unknown
+    entry, or a DP since promoted to proven, is ignored. Nothing opens unless ``enable_cloud_mqtt``
+    is on as well (the switches and numbers check both)."""
+    chosen: set[int] = set()
+    for raw in entry.options.get(CONF_CLOUD_MQTT_SUPERVISED_DPS) or ():
+        try:
+            chosen.add(int(raw))
+        except (TypeError, ValueError):
+            continue
+    opened = frozenset(chosen & MQTT_CANDIDATE_DPS)
+    if opened and entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT):
+        _LOGGER.warning(
+            "Cloud-MQTT supervised trial open for DP(s) %s: not validated on real hardware yet, "
+            "each first write must be supervised (docs/first-write-procedure.md).",
+            ", ".join(str(dp) for dp in sorted(opened)),
+        )
+    return opened
 
 
 async def _async_setup_mqtt(
