@@ -110,9 +110,10 @@ above), but the 5-refusal limit has only been exercised with a faked client.
 - **First write**: DP 30 (child lock) on an isolated test head (2026-11-19), confirmed in the cloud,
   in the app and physically on the head; no other head or setting affected.
 - **Scope today**: the MQTT write path carries **DP 30 only** as proven
-  (`api.writes.MQTT_WRITE_DPS`). DP 116 (window detection) is implemented as a **candidate**
-  (`MQTT_CANDIDATE_DPS`), closed until its supervised write. Other DPs (133/101
-  mounting/orientation, 18/27 bounds, 118+16/119/120 setpoints, 1 preheat) are added one at a time,
+  (`api.writes.MQTT_WRITE_DPS`). DP 116 (window detection), DP 18 and DP 27 (bounds; DP 120 with
+  DP 27) are implemented as **candidates** (`MQTT_CANDIDATE_DPS`), closed until their supervised
+  write. Other DPs (133/101 mounting/orientation, 118+16/119/120 setpoints, 1 preheat) are added
+  one at a time,
   each as a candidate first (docs/first-write-procedure.md).
 
 ## Provenance

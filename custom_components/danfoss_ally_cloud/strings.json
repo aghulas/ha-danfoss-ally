@@ -92,6 +92,12 @@
       },
       "setback_setpoint": {
         "name": "Setback setpoint"
+      },
+      "upper_bound": {
+        "name": "Upper setpoint bound"
+      },
+      "lower_bound": {
+        "name": "Lower setpoint bound"
       }
     }
   },

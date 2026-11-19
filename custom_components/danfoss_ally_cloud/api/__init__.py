@@ -37,6 +37,7 @@ from .keys import GatewayKey, async_fetch_gateway_keys
 from .schedule import Schedule, count_transitions, validate_days
 from .writes import (
     MQTT_CANDIDATE_DPS,
+    MQTT_TENTHS_RANGE,
     MQTT_WRITE_DPS,
     encode_setpoint,
     mqtt_dp_open,
@@ -61,6 +62,7 @@ __all__ = [
     "decode_operation",
     "derive_distinct_device_id",
     "MQTT_CANDIDATE_DPS",
+    "MQTT_TENTHS_RANGE",
     "MQTT_WRITE_DPS",
     "encode_setpoint",
     "mqtt_dp_open",

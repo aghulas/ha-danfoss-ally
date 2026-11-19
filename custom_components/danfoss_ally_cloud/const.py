@@ -15,6 +15,7 @@ from .api.const import (  # noqa: F401 - re-export for the integration (device/p
     DP_HEAT_DEMAND,
     DP_HOLIDAY_SETPOINT,
     DP_LEAVING_HOME_SETPOINT,
+    DP_LOWER_TEMP,
     DP_MANUAL_SETPOINT,
     DP_PAUSE_SETPOINT,
     DP_PREHEAT,

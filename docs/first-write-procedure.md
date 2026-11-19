@@ -97,6 +97,37 @@ was the independent source.
   the head really holds the value; if one fails as "not confirmed" while the head did apply it,
   record how long the per-device route took to show the value.
 
+### DP 18 — upper setpoint bound (candidate)
+
+- **Entity**: the head's "upper setpoint bound" number. It exists only while DP 18 is open (tick
+  `18` in `cloud_mqtt_supervised_dps`).
+- **Trial value**: `V0 − 0.5 °C` (or `V0 + 0.5 °C` if that stays within 20–35 °C), keeping it above
+  the head's comfort setpoint. The integration refuses a bound that would exclude the comfort or
+  setback setpoint. No thermal effect: the bound only limits what can be set.
+- **Independent read-back**: the head's maximum setpoint through the **local tunnel** (thermostat
+  attribute `0x0016`, part of the local head read), then the app's settings screen.
+- **Restore**: write `V0` back.
+
+### DP 27 — lower setpoint bound, with DP 120 (candidate)
+
+- **Entity**: the head's "lower setpoint bound" number (tick `27`, and `120` too — see below).
+- **What is sent**: `{"27": v}`; and `{"27": v, "120": v}` in one frame when the new bound is
+  **above the head's pause setpoint**. The app publishes DP 120 with DP 27 "when the pause setpoint
+  must follow" (contract §4.2); the rule retained here — raise the pause setpoint to the new bound
+  when it would fall under it — is this project's reading of that capture, **to confirm during the
+  trial** by watching what the app itself sends in the same situation. If DP 120 is needed and not
+  ticked, the write is refused with a message saying so.
+- **Trial value**, in two steps:
+  1. a value that does **not** move the pause setpoint, if the head allows one (lower bound raised
+     while still at or under the pause setpoint) — proves DP 27 alone;
+  2. `V0 + 0.5 °C` above the pause setpoint — proves the DP 27 + DP 120 frame. No thermal effect
+     unless the head is in pause mode: check its mode first.
+- **Independent read-back**: the head's minimum setpoint through the **local tunnel** (thermostat
+  attribute `0x0015`); the pause setpoint in the app.
+- **Restore**: write `V0` back. ⚠ Lowering the bound does **not** lower the pause setpoint again:
+  restore the pause setpoint in the Danfoss app (or with the pause-setpoint entity once that DP is
+  available), and read it back.
+
 ## Returning to the released build
 
 Turn the options off (the link closes on reload), then redeploy the released build and restart.

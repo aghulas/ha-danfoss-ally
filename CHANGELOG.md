@@ -37,6 +37,11 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   by default) opens, for its supervised first write; the switch then shows `write_trial: true`.
   Outside a trial, an isolated head's window detection still goes through the local tunnel first.
   **Not validated on real hardware yet.**
+- **Setpoint bounds of an isolated head (DP 18 upper, DP 27 lower) as cloud-MQTT candidates, closed
+  by default.** Two `number` entities per isolated head, present only while their DP is open. Values
+  are checked before sending (schema range and step, ordering, no bound that excludes the comfort
+  or setback setpoint). Raising the lower bound above the pause setpoint also sends DP 120 in the
+  same frame. **Not validated on real hardware yet.**
 - The cloud-MQTT write confirmation falls back to one read of the head through the per-device
   route when the gateway's echo does not come (it used the bulk list, which lags for minutes).
 

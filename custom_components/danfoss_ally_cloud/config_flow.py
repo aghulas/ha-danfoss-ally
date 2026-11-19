@@ -64,7 +64,12 @@ def _schema(schema: vol.Schema) -> Any:
 _REGIONS = ["eu", "us", "cn", "in"]
 
 # Labels of the cloud-MQTT candidate DPs in the supervised-trial selector.
-_CANDIDATE_DP_LABELS = {116: "116 — window detection"}
+_CANDIDATE_DP_LABELS = {
+    18: "18 — upper bound",
+    27: "27 — lower bound",
+    116: "116 — window detection",
+    120: "120 — pause setpoint (also needed with 27 when the lower bound rises above it)",
+}
 
 
 def _candidate_dp_choices() -> dict[str, str]:

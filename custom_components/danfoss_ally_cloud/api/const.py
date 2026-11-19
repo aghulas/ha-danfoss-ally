@@ -16,6 +16,7 @@ from __future__ import annotations
 DP_TEMP_SET = 16
 DP_SETPOINT = 171
 DP_UPPER_TEMP = 18
+DP_LOWER_TEMP = 27  # lower_temp (MIN SETPOINT)
 DP_MANUAL_SETPOINT = 114  # manual_mode_fast
 DP_AT_HOME_SETPOINT = 118  # at_home_setting ("comfort" period of the schedule)
 DP_LEAVING_HOME_SETPOINT = 119  # leaving_home_setting ("setback" period)

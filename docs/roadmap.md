@@ -108,6 +108,8 @@ publish over Tuya cloud MQTT, the only path found that applies them (contract §
    A DP ships first as a **candidate**, closed unless listed in `cloud_mqtt_supervised_dps`, and is
    promoted after its supervised write (`docs/first-write-procedure.md`).
    - Window detection (DP 116): candidate, code shipped, **supervised write pending**.
+   - Bounds (DP 18 upper, DP 27 lower with DP 120 when the pause setpoint must follow): candidates,
+     code shipped as `number` entities of an isolated head, **supervised writes pending**.
 3. **Measure inbound coverage**: which heads and DPs the broker pushes, and how often, over a full
    day. **Tooling shipped**: the listen-only option `cloud_mqtt_probe` (off by default) accounts the
    pushed reports per head and per DP and serves the aggregates in the diagnostics. The 24 h run on

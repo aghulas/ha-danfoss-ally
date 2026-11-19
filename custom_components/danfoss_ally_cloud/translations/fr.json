@@ -92,6 +92,12 @@
    },
    "setback_setpoint": {
     "name": "Consigne réduit"
+   },
+   "upper_bound": {
+    "name": "Borne haute de consigne"
+   },
+   "lower_bound": {
+    "name": "Borne basse de consigne"
    }
   }
  },

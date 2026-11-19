@@ -26,10 +26,19 @@ def write_allowed(dev: DanfossDevice) -> bool:
 #   integration's ``cloud_mqtt_supervised_dps`` option). After its supervised write succeeds, a DP
 #   moves from the second set to the first in a change of its own.
 MQTT_WRITE_DPS = frozenset({30})  # child lock, validated 2026-11-19
-MQTT_CANDIDATE_DPS = frozenset({116})  # window detection
+# 116 window detection; 18 upper bound; 27 lower bound; 120 pause setpoint (written with 27 when
+# the pause setpoint must follow the lower bound, contract §4.2).
+MQTT_CANDIDATE_DPS = frozenset({116, 18, 27, 120})
 
-# Value type of each DP this path knows.
+# Value rule of each DP this path knows: booleans, or tenths of °C within the product schema's
+# range for that DP (03wvrwpv), on its 0.5 °C step.
 _MQTT_BOOL_DPS = frozenset({30, 116})
+MQTT_TENTHS_RANGE: dict[int, tuple[int, int]] = {
+    18: (200, 350),  # upper_temp: 20-35 °C
+    27: (50, 200),  # lower_temp: 5-20 °C
+    120: (50, 350),  # pause_setting: 5-35 °C
+}
+_TENTHS_STEP = 5
 
 
 def mqtt_dp_open(dp: int, supervised: frozenset[int] = frozenset()) -> bool:
@@ -39,10 +48,12 @@ def mqtt_dp_open(dp: int, supervised: frozenset[int] = frozenset()) -> bool:
     return dp in MQTT_WRITE_DPS or (dp in MQTT_CANDIDATE_DPS and dp in supervised)
 
 
-def mqtt_write_value(dp: int, value: object, supervised: frozenset[int] = frozenset()) -> bool:
+def mqtt_write_value(
+    dp: int, value: object, supervised: frozenset[int] = frozenset()
+) -> bool | int:
     """Validate a value destined for the cloud-MQTT write path and return it as it must be sent.
-    Raises CloudWriteError when the DP is not open on this path or the value is not of the DP's
-    type (a clear error, never a blind send)."""
+    Raises CloudWriteError when the DP is not open on this path, or the value is not of the DP's
+    type, range or step (a clear error, never a blind send)."""
     if not mqtt_dp_open(dp, supervised):
         if dp in MQTT_CANDIDATE_DPS:
             raise CloudWriteError(
@@ -53,6 +64,18 @@ def mqtt_write_value(dp: int, value: object, supervised: frozenset[int] = frozen
     if dp in _MQTT_BOOL_DPS:
         if not isinstance(value, bool):
             raise CloudWriteError(f"DP {dp} expects a boolean, got {type(value).__name__}")
+        return value
+    if dp in MQTT_TENTHS_RANGE:
+        low, high = MQTT_TENTHS_RANGE[dp]
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise CloudWriteError(
+                f"DP {dp} expects tenths of °C as an integer, got {type(value).__name__}"
+            )
+        if not low <= value <= high or value % _TENTHS_STEP:
+            raise CloudWriteError(
+                f"DP {dp} out of range: {value / 10} °C (expected {low / 10}-{high / 10} °C, "
+                "0.5 °C step)"
+            )
         return value
     raise CloudWriteError(f"DP {dp} has no value rule on the cloud-MQTT write path")
 

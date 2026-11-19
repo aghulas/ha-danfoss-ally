@@ -392,6 +392,13 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   |---|---|---|---|
   | 30 | Child lock | **Proven** (`MQTT_WRITE_DPS`) | boolean |
   | 116 | Open-window detection | **Candidate** (`MQTT_CANDIDATE_DPS`): closed unless listed in `cloud_mqtt_supervised_dps` for its supervised write | boolean |
+  | 18 | Upper setpoint bound | **Candidate** | tenths of °C, 20–35 °C, 0.5 step; not under the lower bound; must not exclude the comfort or setback setpoint |
+  | 27 | Lower setpoint bound | **Candidate** | tenths of °C, 5–20 °C, 0.5 step; not above the upper bound; must not exclude the comfort or setback setpoint |
+  | 120 | Pause setpoint | **Candidate** | tenths of °C, 5–35 °C, 0.5 step. For now only sent with DP 27, in the same frame, when the new lower bound is above the pause setpoint (reading of the app capture, to confirm in the trial) |
+
+  The bounds are `number` entities of an **isolated** head ("upper setpoint bound", "lower setpoint
+  bound"), present only while their DP is open on this path; a grouped head has no bound entity (no
+  proven path here).
 
   A candidate is implemented but not proven; it opens only for a supervised trial
   (docs/first-write-procedure.md), **on the one head designated in `cloud_mqtt_supervised_head`**,
