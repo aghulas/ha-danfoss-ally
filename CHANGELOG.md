@@ -32,6 +32,21 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
 - No secret or real device identifier in logs or diagnostics (the MQTT client id is kept out of the
   log thread names; diagnostics redact ids).
 
+## Unreleased — Home Assistant 2026 deprecations
+
+No functional change. Removes the deprecation warnings HA 2026.x logs for this integration, ahead of
+the removals in 2027.8 and 2027.11, while staying compatible with older HA versions.
+
+- **Climate temperature API (HA 2026.11, removal 2027.11).** Room and head climates now implement
+  `native_temperature_unit` / `native_current_temperature` / `native_target_temperature`. On an HA
+  without the native API, the legacy names are served from them. Checked against a real HA 2026.11.2:
+  no deprecation warning at load (the previous code logged one per class), values unchanged.
+- **Head → room device link (HA 2026, removal 2027.8).** `DeviceInfo.via_device` is gone. A grouped
+  head is now linked to its room device on the device registry (`via_device_id`), once the devices
+  exist and on each update, so attaching / detaching a head follows. Only links to our own room
+  devices are ever cleared. Registry lookups use `async_get_device_by_identifier` when available
+  (HA 2026 deprecates `async_get_device(identifiers=...)`).
+
 ## 1.1.0 — Real-hardware validation fixes (R-1, R-3, W-3), relays per building, gated unbind
 
 Minor release built from the real-hardware validation of 2026-11-18/19 on a large real install (about

@@ -77,8 +77,8 @@ def _room_climate(room, client=None):
 
 def test_room_lecture_agregee():
     cl, _ = _room_climate(_room())
-    assert cl.current_temperature == 19.5
-    assert cl.target_temperature == 6.0
+    assert cl.native_current_temperature == 19.5
+    assert cl.native_target_temperature == 6.0
     assert cl.hvac_action == HVACAction.HEATING
     assert cl.available is True
     assert cl.supported_features & ClimateEntityFeature.TARGET_TEMPERATURE
@@ -169,8 +169,8 @@ def test_head_climate_lecture_seule():
     cl = DanfossHeadClimate(coord, dev.id)
     # TARGET_TEMPERATURE is declared so HA publishes the active setpoint; writes are refused.
     assert cl.supported_features == ClimateEntityFeature.TARGET_TEMPERATURE
-    assert cl.current_temperature == 12.8
-    assert cl.target_temperature == 6.0
+    assert cl.native_current_temperature == 12.8
+    assert cl.native_target_temperature == 6.0
     assert cl.hvac_action == HVACAction.HEATING
     assert cl.unique_id == dev.id
 
@@ -190,7 +190,7 @@ async def test_head_climate_publishes_active_setpoint_as_target(hass):
     coord = _FakeCoord(data={dev.id: dev})
     cl = DanfossHeadClimate(coord, dev.id)
     cl.hass = hass
-    assert cl.target_temperature == 14.0
+    assert cl.native_target_temperature == 14.0
     assert cl.state_attributes[ATTR_TEMPERATURE] == 14.0
 
 

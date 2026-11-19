@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 
@@ -63,6 +63,7 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
+from .device_links import async_link_heads_to_rooms
 from .frontend import async_register_frontend, async_unregister_frontend
 from .mqtt_publisher import MqttPublisher
 from .services import async_register_services
@@ -142,6 +143,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
     _cleanup_orphaned_head_climates(hass, entry, coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Head -> room device links (via_device_id), now that the devices exist, then on each
+    # update so attach / detach follows.
+    async_link_heads_to_rooms(hass, coordinator, entry.entry_id)
+
+    @callback
+    def _relink_heads() -> None:
+        async_link_heads_to_rooms(hass, coordinator, entry.entry_id)
+
+    entry.async_on_unload(coordinator.async_add_listener(_relink_heads))
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
     return True
 
