@@ -78,6 +78,13 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
 
 ### Fixed
 
+- **The window-detection switch of an isolated head follows the local survey.** Its write path
+  (`local`) depends on the head answering the local tunnel, but the switch only listened to the
+  cloud coordinator: after the non-blocking start it stayed unavailable after its head had been
+  read locally, until the next cloud poll (up to the scan interval). It now also listens to the
+  local coordinator and comes up as soon as its head is read. Routing is unchanged; the state is
+  only rewritten when the switch's availability or write path changes (a survey publishes every
+  head one by one), and the listener goes with the entity on unload.
 - **Stale devices and entities are removed at start-up** instead of lingering as restored orphans
   that had to be deleted by hand (real-hardware finding, 2026-11-19): the device of a head, relay
   or sensor gone from the account, with its entities; the preheat switches when `enable_local` is

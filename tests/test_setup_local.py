@@ -282,3 +282,75 @@ async def test_reload_during_the_first_survey_starts_a_fresh_one(hass: HomeAssis
     assert second.calls == 1 and hass.states.get(_PREHEAT_2).state == "on"
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
+
+
+_WINDOW_1 = "switch.salon_open_window_detection"
+_WINDOW_2 = "switch.bureau_open_window_detection"
+
+
+async def test_isolated_window_switch_follows_the_first_local_read(
+    hass: HomeAssistant, mqtt_double
+):
+    """Regression: the window-detection switch of an isolated head (write path ``local``) only
+    listened to the CLOUD coordinator. After the non-blocking start it stayed unavailable after its
+    head had been read locally, until the next cloud poll (up to the scan interval). It must follow
+    the local coordinator: available as soon as ITS head is read, the other head still waiting."""
+    fake = _two_heads()
+    cloud_lists: list[int] = []
+    list_devices = fake.async_list_devices
+
+    async def counted_list_devices():
+        cloud_lists.append(1)
+        return await list_devices()
+
+    fake.async_list_devices = counted_list_devices
+    manager = GatedManager(survey={"dev-1": True, "dev-2": True})
+    entry = await _setup(hass, fake, manager, wait_survey=False)
+    await _wait(hass, manager.started)
+    cloud_polls = len(cloud_lists)
+
+    assert hass.states.get(_WINDOW_1).state == "unavailable"
+    assert hass.states.get(_WINDOW_2).state == "unavailable"
+
+    manager.gate("dev-1").set()
+    await _wait(hass, manager.was_read("dev-1"))
+    await hass.async_block_till_done()
+    state = hass.states.get(_WINDOW_1)
+    assert state.state == "on"  # cloud value of the head, now writable through the tunnel
+    assert state.attributes["write_path"] == "local"
+    assert hass.states.get(_WINDOW_2).state == "unavailable"
+    assert len(cloud_lists) == cloud_polls  # no cloud poll was needed
+
+    manager.gate("dev-2").set()
+    await _wait(hass, manager.finished)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(_WINDOW_2).state == "on"
+
+    local = hass.data[DOMAIN][entry.entry_id][DATA_LOCAL]
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert not local._listeners  # the switches' local listeners went with them
+
+
+async def test_window_switch_state_not_rewritten_by_unrelated_local_reads(
+    hass: HomeAssistant, mqtt_double
+):
+    """A survey publishes every head one by one: a window switch whose availability and write path
+    do not change must not have its state rewritten for each of them."""
+    manager = GatedManager(survey={"dev-1": True, "dev-2": True})
+    entry = await _setup(hass, _two_heads(), manager, wait_survey=False)
+    await _wait(hass, manager.started)
+    manager.gate("dev-1").set()
+    await _wait(hass, manager.was_read("dev-1"))
+    await hass.async_block_till_done()
+    before = hass.states.get(_WINDOW_1)
+
+    manager.gate("dev-2").set()  # another head read: nothing changes for dev-1's switch
+    await _wait(hass, manager.finished)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    after = hass.states.get(_WINDOW_1)
+    assert after.state == "on"
+    assert after.last_reported == before.last_reported  # not even re-reported
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
