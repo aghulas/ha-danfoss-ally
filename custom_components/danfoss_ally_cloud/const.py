@@ -47,6 +47,8 @@ DATA_JOBS = "jobs"  # in-memory queue of write jobs (WriteJob)
 DATA_SCHEDULES = "schedules"  # per-target schedule cache (read on demand)
 DATA_VACATION_WRITE = "vacation_write"  # bool: vacation-write gate (CONF_ENABLE_VACATION_WRITE)
 DATA_HEAD_UNBIND = "head_unbind"  # bool: head-unbind gate (CONF_ENABLE_HEAD_UNBIND)
+DATA_CLOUD_MQTT = "cloud_mqtt"  # bool: cloud-MQTT isolated-head write gate (CONF_ENABLE_CLOUD_MQTT)
+DATA_MQTT_LINK = "cloud_mqtt_link"  # CloudMqttLink | None: live link, created only on a gated step
 
 # LOCAL survey (Zigbee tunnel) interval: slow, ~8 s per head. Distinct from the cloud polling.
 DEFAULT_LOCAL_SCAN_INTERVAL = 900  # seconds
@@ -93,6 +95,14 @@ CONF_ENABLE_HEAD_UNBIND = "enable_head_unbind"
 # fresher than the bulk list for a head is pending a real-hardware validation (see
 # docs/roadmap.md) — enable it for that validation session.
 CONF_POST_COMMAND_REFRESH = "post_command_refresh"
+# Cloud-MQTT isolated-head WRITE path (EXPERIMENTAL, R&D). The Danfoss app writes an isolated head's
+# settings by publishing the DP over Tuya cloud MQTT (not `settings.change`, which the cloud accepts
+# but never applies — W-3). The frame codec and credential derivation are reverse-engineered and
+# validated (decoder on 6/6 real frames, credentials byte-exact vs the app; docs/cloud-mqtt-publish
+# .md), but NO publish to a real head has been validated yet. OFF by default: when ON, an isolated
+# head's child-lock / window-detection switch may route through a dedicated-session MQTT link
+# instead of being unavailable. Enable only for a supervised validation session (Rémi present).
+CONF_ENABLE_CLOUD_MQTT = "enable_cloud_mqtt"
 
 # Conservative defaults: the account's quota and security come first.
 DEFAULT_SCAN_INTERVAL = 90  # seconds
@@ -100,6 +110,7 @@ DEFAULT_DISTINCT_DEVICE_ID = True
 DEFAULT_ENABLE_VACATION_WRITE = False
 DEFAULT_ENABLE_HEAD_UNBIND = False
 DEFAULT_POST_COMMAND_REFRESH = False
+DEFAULT_ENABLE_CLOUD_MQTT = False
 # How long a commanded head stays "hot" (refreshed via the per-device route) after a write, and the
 # cap on per-device reads per poll (so commanding a large room cannot burst the API). A hot head
 # costs one extra read per poll for at most this window, then returns to the bulk route.

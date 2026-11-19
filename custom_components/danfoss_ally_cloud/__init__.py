@@ -21,6 +21,7 @@ from .const import (
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
+    CONF_ENABLE_CLOUD_MQTT,
     CONF_ENABLE_HEAD_UNBIND,
     CONF_ENABLE_LOCAL,
     CONF_ENABLE_VACATION_WRITE,
@@ -33,14 +34,17 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SIGN_KEY,
     CONF_USERNAME,
+    DATA_CLOUD_MQTT,
     DATA_COORDINATOR,
     DATA_HEAD_UNBIND,
     DATA_JOBS,
     DATA_LOCAL,
     DATA_MQTT,
+    DATA_MQTT_LINK,
     DATA_SCHEDULES,
     DATA_VACATION_WRITE,
     DEFAULT_DISTINCT_DEVICE_ID,
+    DEFAULT_ENABLE_CLOUD_MQTT,
     DEFAULT_ENABLE_HEAD_UNBIND,
     DEFAULT_ENABLE_VACATION_WRITE,
     DEFAULT_LOCAL_SCAN_INTERVAL,
@@ -119,6 +123,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             CONF_ENABLE_VACATION_WRITE, DEFAULT_ENABLE_VACATION_WRITE
         ),
         DATA_HEAD_UNBIND: entry.options.get(CONF_ENABLE_HEAD_UNBIND, DEFAULT_ENABLE_HEAD_UNBIND),
+        DATA_CLOUD_MQTT: entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT),
+        # Live MQTT link is created only during a supervised, gated connect (not wired yet); the
+        # switches treat None as "no cloud-MQTT path", so isolated heads stay as PR #69 left them.
+        DATA_MQTT_LINK: None,
     }
     await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
     _cleanup_orphaned_head_climates(hass, entry, coordinator)

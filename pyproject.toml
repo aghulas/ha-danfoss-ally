@@ -65,6 +65,7 @@ module = [
   "voluptuous.*",
   "Crypto.*",
   "tinytuya",
+  "aiomqtt",
   "requests",
   "requests.*",
 ]

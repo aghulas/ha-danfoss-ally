@@ -35,12 +35,14 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .api import CloudError, DanfossDevice, write_allowed
 from .api.local import tunnel
 from .api.local.manager import Head
-from .const import DATA_COORDINATOR, DATA_LOCAL, DOMAIN
+from .api.mqtt_client import CloudMqttLink
+from .const import DATA_CLOUD_MQTT, DATA_COORDINATOR, DATA_LOCAL, DATA_MQTT_LINK, DOMAIN
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 from .entity import DanfossEntity
 
 # Write paths of a setting switch (``write_path`` attribute).
 PATH_ROOM = "room"  # group publish on the head's room: affects every head of the room
+PATH_MQTT = "cloud_mqtt"  # isolated head via dedicated-session Tuya cloud MQTT (gated, this head)
 PATH_LOCAL = "local"  # local Zigbee tunnel, this head only
 PATH_NONE = "none"  # no proven path: the switch is unavailable
 
@@ -83,9 +85,11 @@ async def async_setup_entry(
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator: DanfossCoordinator = data[DATA_COORDINATOR]
     local: DanfossLocalCoordinator | None = data.get(DATA_LOCAL)
+    mqtt_link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
+    cloud_mqtt_enabled: bool = bool(data.get(DATA_CLOUD_MQTT, False))
 
     entities: list[SwitchEntity] = [
-        DanfossSwitch(coordinator, dev.id, desc, local)
+        DanfossSwitch(coordinator, dev.id, desc, local, mqtt_link, cloud_mqtt_enabled)
         for dev in coordinator.data.values()
         if dev.is_head and write_allowed(dev)
         for desc in SWITCHES
@@ -111,11 +115,25 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
         device_id: str,
         description: DanfossSwitchDescription,
         local: DanfossLocalCoordinator | None = None,
+        mqtt: CloudMqttLink | None = None,
+        cloud_mqtt_enabled: bool = False,
     ) -> None:
         super().__init__(coordinator, device_id)
         self.entity_description = description
         self._local = local
+        self._mqtt = mqtt
+        self._cloud_mqtt_enabled = cloud_mqtt_enabled
         self._attr_unique_id = f"{device_id}_{description.key}"
+
+    def _mqtt_ready(self, dev: DanfossDevice) -> bool:
+        """True if an isolated head can be written through the dedicated-session cloud-MQTT link
+        right now: the gate is on, a connected link exists, and it knows this head's gateway. Never
+        optimistic — a link that is absent or not connected makes this path unusable."""
+        if not (self._cloud_mqtt_enabled and self._mqtt is not None):
+            return False
+        if not dev.node_id or not dev.mesh_id:
+            return False
+        return self._mqtt.can_publish(dev.mesh_id)
 
     def _local_head(self, dev: DanfossDevice) -> Head | None:
         """The tunnel address of an isolated head, if the local path is usable right now.
@@ -138,6 +156,9 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
             return PATH_NONE
         if self.coordinator.group_of(dev.id) is not None:
             return PATH_ROOM
+        # Isolated head: dedicated-session cloud MQTT (gated), else local tunnel, else none.
+        if self._mqtt_ready(dev):
+            return PATH_MQTT
         if self._local_head(dev) is not None:
             return PATH_LOCAL
         return PATH_NONE
@@ -160,7 +181,7 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
             group_id = self.coordinator.group_of(dev.id)
             attrs["write_scope"] = "room"
             attrs["room_head_count"] = len(self.coordinator.room_members(group_id or ""))
-        elif path == PATH_LOCAL:
+        elif path in (PATH_LOCAL, PATH_MQTT):
             attrs["write_scope"] = "head"
         return attrs
 
@@ -177,6 +198,16 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
             except CloudError as err:
                 raise HomeAssistantError(f"room setting write refused: {err}") from err
             self.coordinator.note_commanded(self.coordinator.room_members(group_id) or [dev.id])
+        elif path == PATH_MQTT:
+            # Isolated head, dedicated-session cloud MQTT. Gate + a live link required; the option
+            # is OFF by default and a first real publish needs an explicit supervised go-ahead.
+            if self._mqtt is None or not dev.node_id or not dev.mesh_id:
+                return
+            try:
+                await self._mqtt.publish_dp(dev.mesh_id, dev.node_id, {dp: state})
+            except Exception as err:  # noqa: BLE001 - surface any send failure, never a blind write
+                raise HomeAssistantError(f"cloud-MQTT setting write failed: {err}") from err
+            self.coordinator.note_commanded([dev.id])
         else:
             head = self._local_head(dev)
             if head is None or self._local is None:

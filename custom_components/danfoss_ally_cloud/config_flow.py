@@ -21,6 +21,7 @@ from .const import (
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
+    CONF_ENABLE_CLOUD_MQTT,
     CONF_ENABLE_HEAD_UNBIND,
     CONF_ENABLE_LOCAL,
     CONF_ENABLE_VACATION_WRITE,
@@ -34,6 +35,7 @@ from .const import (
     CONF_SIGN_KEY,
     CONF_USERNAME,
     DEFAULT_DISTINCT_DEVICE_ID,
+    DEFAULT_ENABLE_CLOUD_MQTT,
     DEFAULT_ENABLE_HEAD_UNBIND,
     DEFAULT_ENABLE_VACATION_WRITE,
     DEFAULT_MQTT_BASE_TOPIC,
@@ -132,6 +134,10 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_ENABLE_HEAD_UNBIND,
                     default=o.get(CONF_ENABLE_HEAD_UNBIND, DEFAULT_ENABLE_HEAD_UNBIND),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_CLOUD_MQTT,
+                    default=o.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT),
                 ): bool,
                 vol.Optional(
                     CONF_MQTT_MODE, default=o.get(CONF_MQTT_MODE, DEFAULT_MQTT_MODE)

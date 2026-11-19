@@ -160,12 +160,43 @@ diagnostics or the repo. `mqtt_publish.py` never puts them in a repr or an error
    memory). Operational takeaway: the integration must drive MQTT from **its own managed session**
    (its distinct deviceId), not a borrowed one; a live read-only CONNACK is best validated from inside
    the integration (fresh, auto-refreshed session) rather than a captured app session.
-4. **First write** (Rémi's go-ahead, on site): one reversible DP (e.g. 30 child lock on a test head),
-   check in the app and on the head, then revert. Then extend per DP, only on
-   `WRITE_VERIFIED_MODELS`, with value validation before send (CLAUDE.md write safety).
-5. Then: async client (aiomqtt/paho, a new requirement), one connection per entry, `SeqOrigin` per
-   gateway for the whole session, reconnect on `sid` refresh; switches of PR #69 routed here when the
-   tunnel is down; move the codec to pydanfoss-cloud (it already lives in `api/`).
+4. **First write** (Rémi's go-ahead, on site) — procedure written: `docs/first-write-procedure.md`
+   (isolated head, reversible DP 30, observe app+head+ack, revert, stop criteria). Not executed.
+5. **Async client + routing** — ⏳ STARTED (offline, this branch). `api/mqtt_client.py`: `CloudMqttLink`
+   (one per entry, `SeqOrigin` per gateway kept for the session, subscribe `smart/mb/in/<gw>` +
+   decode, gated publish), credentials for a **dedicated R&D deviceId**. Transport **aiomqtt**
+   (justified in the module: asyncio-native, thin wrapper over the paho HA already ships, lazy-imported
+   so OFF installs never load it). Gated option `enable_cloud_mqtt` (OFF by default, like
+   `post_command_refresh`/`enable_head_unbind`). Switch routing wired (`switch.py`): grouped → room;
+   isolated → cloud MQTT if the option is on AND a connected link knows the gateway, else tunnel, else
+   unavailable — never optimistic. Synthetic tests (`tests/test_mqtt_client.py`,
+   `tests/test_switch.py`), CI green (ruff/mypy/pytest). **Not wired yet**: creating/connecting the live
+   link (that is the gated step 3 below) — until then `DATA_MQTT_LINK` is `None`, so isolated heads stay
+   exactly as PR #69 left them. Remaining: live-link lifecycle (connect on setup when the option is on,
+   reconnect on `sid` refresh, close on unload), and moving the codec to pydanfoss-cloud.
 
-Open questions: whether the broker accepts a second clientId for the same user; whether the gateway enforces `t` freshness; ack format on
-`smart/mb/in/<gw>` (protocol 4/5 DP report expected).
+### 6a. Preparing the credentials for a live connect (step 3, prepared, NOT executed)
+
+The live read-only connect must use the **integration's own session**, not a borrowed app session
+(the app/connector session rotates — that caused the rc=5 above). Path, pure Python, no emulator:
+log in via the integration's own `_tuya` client with a **deviceId dedicated to the MQTT R&D** (so it
+does not log out the Pi integration, the MCP connector or the iPhone app), which yields `uid`, `sid`,
+`ecode`; `partnerIdentity` comes from the login `User` (to be surfaced by the client — a small
+addition, since today the integration stores only `sid`/`ecode`). Then `build_credentials(...)` →
+`CloudMqttLink.run()` subscribes and decodes, **zero publish**. The derivations are already validated
+byte-exact (§6 step 3), so this needs only a valid session. **Requires Rémi's explicit OK in-session**
+before any login + connect runs.
+
+### 6b. Open questions — current best answers (static + the captures)
+
+- **Second connection for the same account?** Supported by design: the app and its panel mini-app
+  connect concurrently with **different clientIds**; our link uses a dedicated-deviceId clientId. The
+  rc=5 we saw was the stale `sid`, not a client-count limit (the app's own registered clientId got
+  rc=5 too). Live confirmation waits on a valid session (6a).
+- **Is `t` freshness enforced?** No evidence of a timestamp window. The inbound decoder's replay guard
+  is on **(seq, origin)** ("cloud command repeat", code 12003), not on `t`. So dedup = the per-gateway
+  monotonic `SeqOrigin` (kept for the whole session); `t` is epoch seconds, informational. Keep the
+  counter monotonic and never reset it mid-session.
+- **Ack format?** The gateway replies on `smart/mb/in/<gw>` with a **protocol-4** frame
+  `{"data":{"cid":…,"dps":{…}},"protocol":4,…}` echoing the changed DPs for that `cid` (validated on
+  6/6 real frames, §6 step 2). That doubles as the post-write confirmation to match against the DP sent.
