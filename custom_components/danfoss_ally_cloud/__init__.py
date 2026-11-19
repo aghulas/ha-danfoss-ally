@@ -11,6 +11,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.typing import ConfigType
@@ -154,6 +155,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
     await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
     _cleanup_orphaned_head_climates(hass, entry, coordinator)
+    _cleanup_stale_entities(hass, entry, coordinator, has_mqtt_link=mqtt_link is not None)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # Head -> room device links (via_device_id), now that the devices exist, then on each
     # update so attach / detach follows.
@@ -414,6 +416,81 @@ def _cleanup_orphaned_head_climates(
         if entity is not None and entity.config_entry_id == entry.entry_id:
             _LOGGER.debug("Removing old per-head climate %s (room %s)", ent_id, head_id)
             registry.async_remove(ent_id)
+
+
+def _live_device_keys(coordinator: DanfossCoordinator) -> set[str]:
+    """Identifier values of the devices this entry provides now: heads/relays/sensors of the last
+    cloud read, rooms (``group_<id>``) and homes (``home_<gid>``)."""
+    keys = set(coordinator.data)
+    keys |= {f"group_{group_id}" for group_id in coordinator.rooms}
+    keys |= {f"home_{gid}" for gid in coordinator.holidays}
+    return keys
+
+
+def _cleanup_stale_entities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: DanfossCoordinator,
+    *,
+    has_mqtt_link: bool = False,
+) -> None:
+    """Remove what this entry can no longer provide, instead of leaving it "restored, unavailable"
+    for the user to delete by hand (real-hardware finding, 2026-11-19: orphaned preheat switches
+    and an orphaned link sensor had to be removed manually).
+
+    Conservative, three exact cases:
+
+    1. the DEVICE of a head, relay or sensor that is gone from the account (unbound, replaced):
+       the device and all its entities. Decided on the first cloud read of this setup, which has
+       succeeded when we get here. Room and home devices are never removed here: their presence
+       depends on best-effort reads (topology, holidays) that may fail at start-up, and removing
+       them on a failed read would lose the user's customisations;
+    2. the PREHEAT switches when the local tunnel option is off: they exist only through the
+       tunnel. A tunnel that is enabled but failed to start keeps them (transient);
+    3. the cloud-MQTT LINK sensor when the cloud-MQTT option is off and no link was opened (so a
+       link opened for another reason keeps its sensor).
+    """
+    removed = 0
+    dev_reg = dr.async_get(hass)
+    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+        keys = {value for domain, value in device.identifiers if domain == DOMAIN}
+        if not keys or any(k.startswith(("group_", "home_")) for k in keys):
+            continue
+        if keys.isdisjoint(coordinator.data):
+            dev_reg.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
+            removed += 1
+
+    ent_reg = er.async_get(hass)
+    local_on = bool(entry.options.get(CONF_ENABLE_LOCAL))
+    cloud_mqtt_on = bool(entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT))
+    link_sensor_uid = f"{entry.entry_id}_cloud_mqtt_link"
+    for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        stale = (
+            not local_on and entity.domain == "switch" and entity.unique_id.endswith("_preheat")
+        ) or (
+            not cloud_mqtt_on
+            and not has_mqtt_link
+            and entity.domain == "binary_sensor"
+            and entity.unique_id == link_sensor_uid
+        )
+        if stale:
+            ent_reg.async_remove(entity.entity_id)
+            removed += 1
+    if removed:
+        _LOGGER.info("Removed %s stale device(s)/entity(ies) no longer provided.", removed)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Let the user delete a device from the UI when this entry no longer provides it (a room that
+    was dissolved, a head that left the account). A device that is still provided cannot be
+    deleted: it would come back at the next reload."""
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if not data:
+        return False
+    live = _live_device_keys(data[DATA_COORDINATOR])
+    return not any(value in live for domain, value in device_entry.identifiers if domain == DOMAIN)
 
 
 async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
