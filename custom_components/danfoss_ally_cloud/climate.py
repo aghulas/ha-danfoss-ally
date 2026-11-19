@@ -102,7 +102,7 @@ class DanfossRoomClimate(CoordinatorEntity[DanfossCoordinator], ClimateEntity):
 
     _attr_has_entity_name = True
     _attr_name = None  # main entity of the "room" device
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT]
     _attr_target_temperature_step = SETPOINT_STEP
 
@@ -139,12 +139,12 @@ class DanfossRoomClimate(CoordinatorEntity[DanfossCoordinator], ClimateEntity):
         return ClimateEntityFeature(0)
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         room = self.room
         return room.temperature if room else None
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         room = self.room
         return room.setpoint if room else None
 
@@ -228,7 +228,7 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
     """
 
     _attr_name = None
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT]
     _attr_target_temperature_step = SETPOINT_STEP
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
@@ -240,12 +240,12 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
         return self._device_id
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         dev = self.device
         return dev.temperature if dev else None
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         dev = self.device
         return dev.setpoint if dev else None
 
@@ -291,3 +291,20 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
             "head outside a room. Add it to a room in the Danfoss app to drive it from Home "
             "Assistant."
         )
+
+
+# Climate temperature API. HA 2026.11 reads `native_*` (unit-converted) and deprecates the legacy
+# `temperature_unit` / `current_temperature` / `target_temperature` (removed in 2027.11); older HA
+# only knows the legacy names. Our classes implement `native_*`; on an HA without them, the legacy
+# names are served from `native_*` here. Set dynamically (not in the class body) so a class never
+# provides both on HA 2026.11+, which would mask the native API and fail type-checking there.
+if not hasattr(ClimateEntity, "native_current_temperature"):
+    # setattr on purpose (B010): a plain assignment would be type-checked against the HA stubs.
+    _LEGACY = {
+        "temperature_unit": property(lambda self: self._attr_native_temperature_unit),
+        "current_temperature": property(lambda self: self.native_current_temperature),
+        "target_temperature": property(lambda self: self.native_target_temperature),
+    }
+    for _cls in (DanfossRoomClimate, DanfossHeadClimate):
+        for _name, _prop in _LEGACY.items():
+            setattr(_cls, _name, _prop)

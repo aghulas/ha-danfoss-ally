@@ -130,3 +130,33 @@ def test_migrate_unique_id_leaves_others_untouched():
     """Already-English or unrelated unique_ids are not migrated (idempotent)."""
     for uid in ("dev-1_temperature", "dev-1_window_detection", "13000000", "dev-1_online"):
         assert _migrate_unique_id(SimpleNamespace(unique_id=uid)) is None
+
+
+async def test_setup_links_grouped_heads_to_their_room_device(hass: HomeAssistant):
+    # End to end: after setup, a grouped head's device is a sub-device of its room device
+    # (via_device_id on the registry), with no deprecated DeviceInfo.via_device involved.
+    from homeassistant.helpers import device_registry as dr
+
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, unique_id="compte@exemple.fr")
+    entry.add_to_hass(hass)
+    fake = FakeCloudClient(
+        devices=[head("a", "A"), head("b", "B"), head("c", "C")],
+        groups=_PIECE,
+        members={"77": ["a", "b"]},
+    )
+    with patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=fake):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    from custom_components.danfoss_ally_cloud.device_links import _find
+
+    reg = dr.async_get(hass)
+    room = _find(reg, entry.entry_id, "group_77")
+    assert room is not None
+    for head_id in ("a", "b"):
+        dev = _find(reg, entry.entry_id, head_id)
+        assert dev is not None and dev.via_device_id == room.id
+    isolated = _find(reg, entry.entry_id, "c")
+    assert isolated is not None and isolated.via_device_id is None
+
+    assert await hass.config_entries.async_unload(entry.entry_id)

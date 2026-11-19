@@ -290,9 +290,8 @@ class DanfossPreheat(CoordinatorEntity[DanfossLocalCoordinator], SwitchEntity):
             manufacturer="Danfoss",
             model=(dev.product_id if dev else None),
         )
-        group_id = self._cloud.group_of(self._device_id)
-        if group_id is not None:
-            info["via_device"] = (DOMAIN, f"group_{group_id}")  # type: ignore[typeddict-unknown-key]  # deprecated in HA 2026 (removed 2027.8): move to via_device_id
+        # The head -> room link (sub-device of the room thermostat) is set on the device
+        # registry by device_links.async_link_heads_to_rooms (via_device_id).
         return info
 
     @property
