@@ -11,7 +11,8 @@ merely accepts the call:
   (W-3, whatever the ``gwId``); the app publishes the DP over Tuya cloud MQTT instead. Routing, in
   this order (``DanfossSwitch._write_path``):
 
-  1. a DP under SUPERVISED TRIAL on cloud MQTT (``cloud_mqtt_supervised_dps``) goes through cloud
+  1. on the ONE head designated for it (``cloud_mqtt_supervised_head``), a DP under SUPERVISED
+     TRIAL on cloud MQTT (``cloud_mqtt_supervised_dps``) goes through cloud
      MQTT, so the trial exercises the channel it is meant to prove, the local tunnel staying free
      to read the result back;
   2. the LOCAL TUNNEL when the setting has a proven tunnel write and the head answers locally
@@ -55,12 +56,15 @@ from .const import (
     DATA_COORDINATOR,
     DATA_LOCAL,
     DATA_MQTT_LINK,
-    DATA_MQTT_SUPERVISED_DPS,
     DOMAIN,
 )
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 from .entity import DanfossEntity
-from .mqtt_write import MQTT_CONFIRM_TIMEOUT, async_mqtt_write  # noqa: F401 - timeout re-exported
+from .mqtt_write import (  # noqa: F401 - timeout re-exported
+    MQTT_CONFIRM_TIMEOUT,
+    async_mqtt_write,
+    supervised_for,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -111,10 +115,17 @@ async def async_setup_entry(
     local: DanfossLocalCoordinator | None = data.get(DATA_LOCAL)
     mqtt_link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
     cloud_mqtt_enabled: bool = bool(data.get(DATA_CLOUD_MQTT, False))
-    supervised: frozenset[int] = data.get(DATA_MQTT_SUPERVISED_DPS) or frozenset()
 
     entities: list[SwitchEntity] = [
-        DanfossSwitch(coordinator, dev.id, desc, local, mqtt_link, cloud_mqtt_enabled, supervised)
+        DanfossSwitch(
+            coordinator,
+            dev.id,
+            desc,
+            local,
+            mqtt_link,
+            cloud_mqtt_enabled,
+            supervised_for(data, dev.id),  # the trial is confined to its designated head
+        )
         for dev in coordinator.data.values()
         if dev.is_head and write_allowed(dev)
         for desc in SWITCHES

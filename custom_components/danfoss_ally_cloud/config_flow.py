@@ -16,11 +16,12 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 
-from .api import MQTT_CANDIDATE_DPS, CloudAuthError, CloudClient, CloudError
+from .api import MQTT_CANDIDATE_DPS, CloudAuthError, CloudClient, CloudError, write_allowed
 from .const import (
     CONF_CH_KEY,
     CONF_CLOUD_MQTT_PROBE,
     CONF_CLOUD_MQTT_SUPERVISED_DPS,
+    CONF_CLOUD_MQTT_SUPERVISED_HEAD,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
@@ -37,6 +38,7 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SIGN_KEY,
     CONF_USERNAME,
+    DATA_COORDINATOR,
     DEFAULT_CLOUD_MQTT_PROBE,
     DEFAULT_DISTINCT_DEVICE_ID,
     DEFAULT_ENABLE_CLOUD_MQTT,
@@ -126,11 +128,27 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
 class DanfossAllyCloudOptionsFlow(OptionsFlow):
     """Options: interval, local tunnel, MQTT publishing mode and source."""
 
+    def _trial_head_choices(self, current: str) -> dict[str, str]:
+        """Heads a supervised trial may be confined to: the isolated heads on a verified model,
+        by name (the stored value is the device id). Always offers "none", and keeps the current
+        value selectable even when the fleet is not loaded."""
+        choices: dict[str, str] = {"": "—"}
+        data = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id) or {}
+        coordinator = data.get(DATA_COORDINATOR)
+        if coordinator is not None:
+            for dev in coordinator.data.values():
+                if dev.is_head and write_allowed(dev) and coordinator.group_of(dev.id) is None:
+                    choices[dev.id] = dev.name or "(unnamed head)"
+        if current and current not in choices:
+            choices[current] = "(head not available)"
+        return choices
+
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
         o = self.config_entry.options
         choices = _candidate_dp_choices()
+        heads = self._trial_head_choices(str(o.get(CONF_CLOUD_MQTT_SUPERVISED_HEAD) or ""))
         supervised = [dp for dp in o.get(CONF_CLOUD_MQTT_SUPERVISED_DPS) or [] if dp in choices]
         schema = vol.Schema(
             {
@@ -162,6 +180,10 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
                 vol.Optional(CONF_CLOUD_MQTT_SUPERVISED_DPS, default=supervised): cv.multi_select(
                     choices
                 ),
+                vol.Optional(
+                    CONF_CLOUD_MQTT_SUPERVISED_HEAD,
+                    default=str(o.get(CONF_CLOUD_MQTT_SUPERVISED_HEAD) or ""),
+                ): vol.In(heads),
                 vol.Optional(
                     CONF_CLOUD_MQTT_PROBE,
                     default=o.get(CONF_CLOUD_MQTT_PROBE, DEFAULT_CLOUD_MQTT_PROBE),

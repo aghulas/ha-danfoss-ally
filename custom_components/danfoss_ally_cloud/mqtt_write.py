@@ -22,6 +22,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .api import CloudError, DanfossDevice, mqtt_write_value
 from .api.mqtt_client import CloudMqttLink
+from .const import DATA_MQTT_SUPERVISED_DPS, DATA_MQTT_SUPERVISED_HEAD
 from .coordinator import DanfossCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,6 +34,17 @@ MQTT_CONFIRM_TIMEOUT = 15.0
 
 CONFIRMED_BY_ECHO = "echo"
 CONFIRMED_BY_CLOUD = "cloud"
+
+
+def supervised_for(entry_data: dict[str, Any], device_id: str) -> frozenset[int]:
+    """The candidate DPs opened for a supervised trial ON THIS HEAD: the entry's supervised set for
+    the one designated trial head, nothing for every other head. ``entry_data`` is
+    ``hass.data[DOMAIN][entry_id]``. Entities must take their supervised set from here, never from
+    the entry-wide set, so a trial stays confined to the head it was armed for."""
+    head = entry_data.get(DATA_MQTT_SUPERVISED_HEAD)
+    if not head or device_id != head:
+        return frozenset()
+    return entry_data.get(DATA_MQTT_SUPERVISED_DPS) or frozenset()
 
 
 async def async_mqtt_write(

@@ -36,6 +36,7 @@ TO_REDACT = {
     "local_key",
     "localKey",
     "uid",
+    "cloud_mqtt_supervised_head",  # option holding a real device id
 }
 # Device fields that identify the real hardware (to redact).
 DEVICE_REDACT = {"id", "node_id", "mesh_id", "dps"}

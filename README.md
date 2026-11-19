@@ -173,8 +173,9 @@ integration can do the same, **gated behind the `enable_cloud_mqtt` option (off 
   value it did not confirm.
 - **Scope**: child lock (DP 30) only for now, validated on real hardware (2026-11-19). Other settings
   are added one at a time after their own supervised validation. Until then they are present in the
-  code but **closed**: the option `cloud_mqtt_supervised_dps` (empty by default) opens one for a
-  first write done in person on a test head. Leave it empty in normal use. Window detection
+  code but **closed**: the options `cloud_mqtt_supervised_dps` (empty by default) and
+  `cloud_mqtt_supervised_head` (none by default) open one, on that one test head only, for a first
+  write done in person. Leave both empty in normal use. Window detection
   (DP 116) is in that state; on an isolated head it keeps going through the local tunnel.
 - **Requirement**: the path uses `paho-mqtt` (declared in `manifest.json` as `>=1.6.1,<3`, the MQTT client Home Assistant's own MQTT integration already ships — HA pins the exact version); Home Assistant installs it automatically. No manual step.
 - **Unofficial and optional.** Nothing in the integration needs this channel: with the option off

@@ -12,10 +12,15 @@ go-ahead, at the keyboard, with physical access to the test head.**
 | State | Where | Effect |
 |---|---|---|
 | Proven | `api.writes.MQTT_WRITE_DPS` | Open as soon as `enable_cloud_mqtt` is on |
-| Candidate | `api.writes.MQTT_CANDIDATE_DPS` | Implemented, **closed**. Opens only when listed in the option `cloud_mqtt_supervised_dps` (empty by default), with `enable_cloud_mqtt` on |
+| Candidate | `api.writes.MQTT_CANDIDATE_DPS` | Implemented, **closed**. Opens only when listed in the option `cloud_mqtt_supervised_dps` (empty by default), with `enable_cloud_mqtt` on, and **only on the one head chosen in `cloud_mqtt_supervised_head`** (none by default) |
 | Anything else | — | Never sent on this channel |
 
-While a candidate is open, the entity that writes it shows `write_path: cloud_mqtt`,
+A trial is confined to **one designated head**. Ticking a DP opens it on that head and nowhere
+else: every other head keeps its normal routing (for window detection, the local tunnel), so an
+automation or a click on another head can never go out through the channel under trial. With no
+head designated, nothing is open, whatever is ticked.
+
+While a candidate is open, the entity that writes it — on the trial head — shows `write_path: cloud_mqtt`,
 `write_scope: head` and `write_trial: true`, and Home Assistant logs one warning at start-up naming
 the DPs under trial. After a successful trial, the DP moves from the candidate set to the proven set
 in a pull request of its own, and is removed from the option.
@@ -40,9 +45,10 @@ Steps:
 
 1. **Baseline.** Read the value in Home Assistant, in the app and through the independent source.
    They must agree. Record it as `V0`.
-2. **Arm.** Turn `enable_cloud_mqtt` on and tick the DP in `cloud_mqtt_supervised_dps`. The entry
-   reloads. Check the "Cloud MQTT link" sensor is on, and the entity shows `write_path: cloud_mqtt`
-   with `write_trial: true`.
+2. **Arm.** Turn `enable_cloud_mqtt` on, choose the test head in `cloud_mqtt_supervised_head` and
+   tick the DP in `cloud_mqtt_supervised_dps`. The entry reloads. Check the "Cloud MQTT link"
+   sensor is on, that the test head's entity shows `write_path: cloud_mqtt` with
+   `write_trial: true`, and that the same entity of **another** isolated head does not.
 3. **Write** the trial value of the sheet, once.
    - The call returns without error: a confirmation was seen (echo or per-device read).
    - The call raises "not confirmed": nothing is claimed. Read the head before any retry.
@@ -51,8 +57,8 @@ Steps:
    does not is the "accepted but not applied" failure: stop.
 5. **Check the neighbours.** No other head, and no other setting of the test head, has changed.
 6. **Restore** `V0` the same way, and read it back the same way.
-7. **Disarm.** Untick the DP in `cloud_mqtt_supervised_dps` (and turn `enable_cloud_mqtt` off unless
-   it stays on for a proven DP).
+7. **Disarm.** Untick the DP in `cloud_mqtt_supervised_dps` and set `cloud_mqtt_supervised_head`
+   back to none (and turn `enable_cloud_mqtt` off unless it stays on for a proven DP).
 8. **Record** the result (model, firmware, confirmation source, delays, what each source showed) in
    the local validation notes — never real device identifiers or room names in this repository.
 

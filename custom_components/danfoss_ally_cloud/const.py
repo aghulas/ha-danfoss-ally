@@ -51,6 +51,8 @@ DATA_CLOUD_MQTT = "cloud_mqtt"  # bool: cloud-MQTT isolated-head write gate (CON
 DATA_MQTT_LINK = "cloud_mqtt_link"  # CloudMqttLink | None: live link, created only on a gated step
 # frozenset[int]: candidate DPs opened on the cloud-MQTT write path for a supervised trial.
 DATA_MQTT_SUPERVISED_DPS = "cloud_mqtt_supervised_dps"
+# str | None: device id of the ONE head the supervised trial is restricted to.
+DATA_MQTT_SUPERVISED_HEAD = "cloud_mqtt_supervised_head"
 DATA_MQTT_COVERAGE = "cloud_mqtt_coverage"  # CoverageStats | None: only with cloud_mqtt_probe on
 
 # LOCAL survey (Zigbee tunnel) interval: slow, ~8 s per head. Distinct from the cloud polling.
@@ -128,6 +130,12 @@ DEFAULT_ENABLE_CLOUD_MQTT = False
 # listed here for its supervised first write (docs/first-write-procedure.md). Entries that are not
 # candidates (unknown, or since promoted to proven) are ignored.
 CONF_CLOUD_MQTT_SUPERVISED_DPS = "cloud_mqtt_supervised_dps"
+# The ONE head a supervised trial applies to (its device id; EMPTY by default). The candidate DPs
+# listed above open on this head ONLY: every other head keeps its normal routing, so an automation
+# or a click elsewhere can never go out through the channel under trial. With no head designated
+# no candidate opens anywhere, whatever is listed. A real device identifier: redacted in the
+# diagnostics, never logged.
+CONF_CLOUD_MQTT_SUPERVISED_HEAD = "cloud_mqtt_supervised_head"
 DEFAULT_CLOUD_MQTT_PROBE = False
 CLOUD_MQTT_PROBE_MAX_SECONDS = 48 * 3600  # a listen-only link closes itself after two days
 # How long a commanded head stays "hot" (refreshed via the per-device route) after a write, and the

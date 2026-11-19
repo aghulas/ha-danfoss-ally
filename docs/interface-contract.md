@@ -394,7 +394,9 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   | 116 | Open-window detection | **Candidate** (`MQTT_CANDIDATE_DPS`): closed unless listed in `cloud_mqtt_supervised_dps` for its supervised write | boolean |
 
   A candidate is implemented but not proven; it opens only for a supervised trial
-  (docs/first-write-procedure.md), and the entity then carries `write_trial: true`.
+  (docs/first-write-procedure.md), **on the one head designated in `cloud_mqtt_supervised_head`**,
+  and that head's entity then carries `write_trial: true`. Every other head keeps its normal
+  routing; with no head designated nothing is open.
 
   Routing of an isolated head's setting: a DP under supervised trial → cloud MQTT; else the local
   tunnel when it has a proven write for the setting and the head answers locally (window
