@@ -13,6 +13,17 @@
           "device_id": "Device id (deviceId)",
           "ch_key": "Channel key (chKey)"
         }
+      },
+      "reauth_confirm": {
+        "title": "Sign in again to Danfoss Ally (Cloud)",
+        "description": "The Danfoss Ally account refused the sign-in (password changed, or installation secrets no longer valid). Enter the password of the same account. Fill in the sign key, device id or channel key only if they changed: left empty, the current value is kept.",
+        "data": {
+          "username": "Username (email)",
+          "password": "Password",
+          "sign_key": "Sign key (sign_key) — only if it changed",
+          "device_id": "Device id (deviceId) — only if it changed",
+          "ch_key": "Channel key (chKey) — only if it changed"
+        }
       }
     },
     "error": {
@@ -21,7 +32,9 @@
       "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "This account is already configured"
+      "already_configured": "This account is already configured",
+      "reauth_successful": "Re-authentication successful",
+      "wrong_account": "This is not the account of this entry: sign in with the same account, or add the other account as a new entry"
     }
   },
   "options": {

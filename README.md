@@ -41,6 +41,11 @@ mobile API; the server rejects an unknown `chKey`. The capture method is describ
 hook / network capture). These values, the password and the session material (`sid`/`ecode`) are
 **secrets**: they are never written to the logs or the diagnostics (see `diagnostics.py`).
 
+If the account later refuses the sign-in (password changed, installation secrets no longer valid),
+Home Assistant shows a **Re-authenticate** prompt for the entry: enter the new password of the same
+account, and the installation secrets only if they changed. The entry is updated and reloaded; there
+is no need to delete and re-add it.
+
 > **Coexistence with other path-1a clients.** The Tuya server keys a session on the `deviceId`
 > request parameter, not on the account or the `chKey`. The integration therefore gives itself a
 > **distinct, stable `deviceId`** derived from the captured one (same `sign_key`/`chKey`) so it
