@@ -89,6 +89,15 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   scope on purpose**, since the integration does not decode that category yet. The scope is now
   written down in the README. `zigbee2mqtt` mode is unchanged (heads only).
 
+### Changed (supervised trial)
+
+- **A supervised cloud-MQTT trial is confined to one designated head** (new option
+  `cloud_mqtt_supervised_head`, none by default). Ticking a candidate DP used to open it on every
+  isolated head: for window detection (DP 116) that moved all of them from the local tunnel to the
+  channel under trial for the duration of the trial. Now the DP opens on the designated head only;
+  with no head designated nothing is open. The option holds a device id: it is redacted in the
+  diagnostics and never logged.
+
 ### Library
 
 - **`pydanfoss-cloud` 0.3.1 prepared (not published).** Additive only: the candidate-DP gate of

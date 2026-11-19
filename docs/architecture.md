@@ -91,8 +91,9 @@ for a DP proven on it; (4) otherwise unavailable.
   value, otherwise the app and the head itself).
 - One DP at a time. A new DP on the cloud-MQTT channel does not inherit the proof of another DP.
   In code: a DP is first a **candidate** (`api.writes.MQTT_CANDIDATE_DPS`), closed unless listed in
-  the option `cloud_mqtt_supervised_dps` for its supervised write; it becomes **proven**
-  (`MQTT_WRITE_DPS`) in a change of its own (`docs/first-write-procedure.md`).
+  the option `cloud_mqtt_supervised_dps` for its supervised write, and then only on the one head
+  designated in `cloud_mqtt_supervised_head`; it becomes **proven** (`MQTT_WRITE_DPS`) in a change
+  of its own (`docs/first-write-procedure.md`).
 - Preheat is the known trap: cloud DP 1 over HTTP only changed the gateway cache. A DP 1 publish
   over cloud MQTT must be read back as attribute 0x0025 before it is trusted.
 - After a successful write, the entity shows what the channel returns (echo or re-read), with a

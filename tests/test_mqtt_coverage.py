@@ -383,6 +383,7 @@ async def test_supervised_option_opens_only_real_candidates(hass: HomeAssistant,
                 CONF_ENABLE_CLOUD_MQTT: True,
                 # 30 is proven (not a candidate), 2 and "x" are not candidates: all ignored.
                 CONF_CLOUD_MQTT_SUPERVISED_DPS: ["116", "30", "2", "x"],
+                "cloud_mqtt_supervised_head": "dev-1",  # the trial head (the fixture's only head)
             },
         )
         await hass.async_block_till_done()

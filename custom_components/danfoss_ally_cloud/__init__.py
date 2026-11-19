@@ -30,6 +30,7 @@ from .const import (
     CONF_CH_KEY,
     CONF_CLOUD_MQTT_PROBE,
     CONF_CLOUD_MQTT_SUPERVISED_DPS,
+    CONF_CLOUD_MQTT_SUPERVISED_HEAD,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
@@ -55,6 +56,7 @@ from .const import (
     DATA_MQTT_COVERAGE,
     DATA_MQTT_LINK,
     DATA_MQTT_SUPERVISED_DPS,
+    DATA_MQTT_SUPERVISED_HEAD,
     DATA_SCHEDULES,
     DATA_VACATION_WRITE,
     DEFAULT_CLOUD_MQTT_PROBE,
@@ -151,7 +153,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # by default). The switches treat None as "no cloud-MQTT path", and a listen-only link
         # (probe without the write option) refuses every publish.
         DATA_MQTT_LINK: mqtt_link,
-        DATA_MQTT_SUPERVISED_DPS: _supervised_dps(entry),
+        **_supervised_trial(entry),
         DATA_MQTT_COVERAGE: mqtt_coverage,
     }
     await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
@@ -173,11 +175,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-def _supervised_dps(entry: ConfigEntry) -> frozenset[int]:
-    """Candidate DPs opened on the cloud-MQTT write path for a supervised trial (option
-    ``cloud_mqtt_supervised_dps``, empty by default). Only real candidates are kept: an unknown
-    entry, or a DP since promoted to proven, is ignored. Nothing opens unless ``enable_cloud_mqtt``
-    is on as well (the switches and numbers check both)."""
+def _supervised_trial(entry: ConfigEntry) -> dict[str, object]:
+    """The supervised trial of this entry: the candidate DPs opened on the cloud-MQTT write path
+    (option ``cloud_mqtt_supervised_dps``, empty by default) and the ONE head they open on (option
+    ``cloud_mqtt_supervised_head``, empty by default).
+
+    Only real candidates are kept: an unknown entry, or a DP since promoted to proven, is ignored.
+    Without a designated head nothing opens anywhere; with one, the candidates open on that head
+    only (``mqtt_write.supervised_for``). Nothing opens unless ``enable_cloud_mqtt`` is on as well
+    (the switches and numbers check both). The head is never logged."""
     chosen: set[int] = set()
     for raw in entry.options.get(CONF_CLOUD_MQTT_SUPERVISED_DPS) or ():
         try:
@@ -185,13 +191,23 @@ def _supervised_dps(entry: ConfigEntry) -> frozenset[int]:
         except (TypeError, ValueError):
             continue
     opened = frozenset(chosen & MQTT_CANDIDATE_DPS)
+    head = str(entry.options.get(CONF_CLOUD_MQTT_SUPERVISED_HEAD) or "") or None
     if opened and entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT):
-        _LOGGER.warning(
-            "Cloud-MQTT supervised trial open for DP(s) %s: not validated on real hardware yet, "
-            "each first write must be supervised (docs/first-write-procedure.md).",
-            ", ".join(str(dp) for dp in sorted(opened)),
-        )
-    return opened
+        dps = ", ".join(str(dp) for dp in sorted(opened))
+        if head is None:
+            _LOGGER.warning(
+                "Cloud-MQTT supervised trial: DP(s) %s are listed but no trial head is "
+                "designated, so nothing is open.",
+                dps,
+            )
+        else:
+            _LOGGER.warning(
+                "Cloud-MQTT supervised trial open for DP(s) %s on the designated trial head "
+                "only: not validated on real hardware yet, each first write must be supervised "
+                "(docs/first-write-procedure.md).",
+                dps,
+            )
+    return {DATA_MQTT_SUPERVISED_DPS: opened, DATA_MQTT_SUPERVISED_HEAD: head}
 
 
 async def _async_setup_mqtt(
