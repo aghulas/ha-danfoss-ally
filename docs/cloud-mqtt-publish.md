@@ -197,14 +197,45 @@ Not disambiguated (the remaining test — the app's own *registered* clientId on
 kick the app, and still would not match the integration's distinct-deviceId case). No head write, no
 publish; emulator shut down after.
 
-**Implication (important, supersedes the earlier "creds proven → will authorize" expectation):** the
-cloud-MQTT write path has an unresolved **MQTT-auth / device-registration gate**. The codec and
-credential derivations are correct, but connecting with the integration's own HTTP-style distinct
-deviceId is refused by the broker. Before the feature can go live we must learn how the app's
-clientId is authorized — e.g. whether the deviceId must be registered via the Tuya activator/pairing
-flow, or whether a registered deviceId can be reused with care for the single-session constraint.
-This is the new top open question; the gated live-link lifecycle in `mqtt_client.py` stays unwired
-until it is answered.
+**Follow-up static analysis (2026-11-19) — the rc=5 is an identity collision, not a registration
+gate.** Both live attempts **borrowed the app's own session**: test 1 a stale `sid`, test 2 the
+app's `sid`/`ecode` **while the app's own MQTT was connected with that same identity**. Neither used
+the integration's own session. Decompiled Thing SDK:
+
+- The MQTT manager (`sdk.mqtt.qdpppbq`) makes **no HTTP call**: it builds the connection purely from
+  `getMqttConfigInfo()` — the login session (`IBaseUser` → uid/ecode/sid/partnerIdentity) — and
+  connects. There is **no separate "register this client/device for MQTT" step**.
+- `thing.m.device.register` / `b.m.device.register` are the **physical-pairing (activator)** path
+  (called from the bluetooth / personal-device code), i.e. adding a Zigbee/BLE device to the account,
+  **not** registering the phone client. No MQTT/push token is fetched over HTTP before connecting.
+- The broker username **encodes the session**: `…_mb_<sid><last16(md5(md5(appId)+ecode))>`. The app
+  and the integration have **different sessions** (different `sid` *and* `ecode`), hence **different
+  usernames** — distinct identities to the broker. Test 2 presented the app's own username while the
+  app held it → `rc=5` (not authorised) is consistent with the broker allowing **one active MQTT
+  auth per session/identity**, i.e. an identity collision with the live app, not a deviceId check.
+
+So the earlier "device-registration gate" framing is **refuted**: a deviceId is as "known" to the
+account as the app's simply by holding a valid HTTP session (the integration's distinct deviceId
+already does — coexistence is proven), and nothing registers a deviceId for MQTT specifically. The
+most consistent remaining explanation for rc=5 is **per-session MQTT exclusivity**, which the
+integration satisfies with **its own** session (its own `sid`/`ecode` → its own username), distinct
+from the app's.
+
+**What this means:** the lock is very likely **passable** — the integration should connect with its
+**own** session, never a borrowed one. What is still unproven (a server policy, invisible in the
+client) is one-active-MQTT-per-**session** (→ integration + app coexist, feature works) vs
+one-per-**account/uid** (→ the integration's MQTT would conflict with the app/connector, re-creating
+the session conflict that the distinct-deviceId coexistence solved). **Decisive test:** one
+read-only MQTT connect using the **integration's own live session** (which the Pi already holds) —
+not reproducible here (it needs the integration's login/session, which this session has no access
+to, and must not borrow the app's). Best run from inside the integration on the Pi, gated, with
+Rémi. Until then the live-link lifecycle in `mqtt_client.py` stays unwired.
+
+**Keep vs shelve.** Keep (all validated, no live session needed): the 2.3 frame **codec**, the
+**credential derivations** (byte-exact), and **inbound-frame decoding in listen mode** (6/6 real
+frames). Keep the gated, offline-tested async client + switch routing (dormant, OFF by default).
+Shelve until the one-per-session/uid answer: creating and connecting the live link, and therefore any
+isolated-head MQTT write.
 
 ### 6a. Preparing the credentials for a live connect (step 3, prepared, NOT executed)
 
@@ -220,10 +251,11 @@ before any login + connect runs.
 
 ### 6b. Open questions — current best answers (static + the captures)
 
-- **Second connection for the same account?** UNRESOLVED and now doubtful. A live read-only connect
-  with byte-exact app creds + a dedicated-deviceId clientId is **refused (rc=5) even with a valid
-  session** (§6.3b). The broker may allow only one MQTT session per account, or may require a
-  registered deviceId. This is the blocking open question for the write path.
+- **Second connection for the same account?** Static analysis (§6.3b) refutes a deviceId-registration
+  requirement (MQTT auth is session-based, no registration call). The live rc=5 was an identity
+  collision from borrowing the app's own session. Remaining unknown: one active MQTT per **session**
+  (→ integration coexists with the app) vs per **account** (→ conflict). Decided only by a connect
+  from the integration's **own** session (Pi, gated) — not borrowing the app's.
 - **Is `t` freshness enforced?** No evidence of a timestamp window. The inbound decoder's replay guard
   is on **(seq, origin)** ("cloud command repeat", code 12003), not on `t`. So dedup = the per-gateway
   monotonic `SeqOrigin` (kept for the whole session); `t` is epoch seconds, informational. Keep the
