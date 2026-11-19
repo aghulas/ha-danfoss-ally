@@ -302,3 +302,47 @@ async def test_get_device_dps_coerces_keys_to_str():
     fake = FakeHttp({"smartlife.m.device.get": {"dps": {170: 50}}})
     with patch(_HTTP, return_value=fake):
         assert await _client().async_get_device_dps("dev-1") == {"170": 50}
+
+
+# --- completeness of the device list (a tolerant read must say when it is partial) ---------------
+
+
+def _two_homes(second_home_answer):
+    def devices(_body, extra):
+        return [_head_raw("dev-1")] if extra["gid"] == 1 else second_home_answer
+
+    return FakeHttp(
+        {
+            "tuya.m.location.list": [{"groupId": 1, "name": "A"}, {"groupId": 2, "name": "B"}],
+            "tuya.m.my.group.device.list": devices,
+        }
+    )
+
+
+async def test_device_list_complete_when_every_home_answers_with_a_list():
+    c = _client()
+    assert c.device_list_complete is False and c.device_list_homes == {}  # before any read
+    with patch(_HTTP, return_value=_two_homes([_head_raw("dev-2")])):
+        devices = await c.async_list_devices()
+    assert [d.id for d in devices] == ["dev-1", "dev-2"]
+    assert c.device_list_complete is True and c.device_list_homes == {"1": 1, "2": 1}
+
+
+@pytest.mark.parametrize("answer", [None, {"error": "x"}, "oops"])
+async def test_device_list_incomplete_when_a_home_does_not_answer_with_a_list(answer):
+    c = _client()
+    with patch(_HTTP, return_value=_two_homes(answer)):
+        devices = await c.async_list_devices()  # still tolerant: no exception, a partial result
+    assert [d.id for d in devices] == ["dev-1"]
+    assert c.device_list_complete is False and c.device_list_homes == {"1": 1}
+
+
+async def test_device_list_empty_home_is_counted_as_zero_and_no_home_is_incomplete():
+    c = _client()
+    with patch(_HTTP, return_value=_two_homes([])):
+        await c.async_list_devices()
+    assert c.device_list_complete is True and c.device_list_homes == {"1": 1, "2": 0}
+    no_home = _client()
+    with patch(_HTTP, return_value=FakeHttp({"tuya.m.location.list": []})):
+        assert await no_home.async_list_devices() == []
+    assert no_home.device_list_complete is False and no_home.device_list_homes == {}

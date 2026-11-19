@@ -63,10 +63,21 @@ def _entity(hass, entry, domain, unique_id, device=None):
     )
 
 
+def _remember(hass_storage, entry, homes):
+    """Seed the record of a previous COMPLETE device list: {home gid: device count}."""
+    key = f"{DOMAIN}.{entry.entry_id}.homes"
+    hass_storage[key] = {"version": 1, "minor_version": 1, "key": key, "data": {"homes": homes}}
+
+
+def _recorded(hass_storage, entry):
+    return hass_storage.get(f"{DOMAIN}.{entry.entry_id}.homes", {}).get("data", {}).get("homes")
+
+
 async def test_device_of_a_head_gone_from_the_account_is_removed_with_its_entities(
-    hass: HomeAssistant,
+    hass: HomeAssistant, hass_storage
 ):
     entry = _entry(hass)
+    _remember(hass_storage, entry, {"1": 2})  # an earlier complete list is on record
     gone = _device(hass, entry, "dev-gone", "Old head")
     orphan_switch = _entity(hass, entry, "switch", "dev-gone_preheat", gone)
     orphan_sensor = _entity(hass, entry, "sensor", "dev-gone_battery", gone)
@@ -210,3 +221,144 @@ async def test_user_can_delete_only_a_device_that_is_no_longer_provided(hass: Ho
     # Entry not loaded: refuse rather than guess.
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert await async_remove_config_entry_device(hass, entry, old_room) is False
+
+
+# --- guard-rails: never remove on a list that is not confirmed complete, never in bulk -----------
+
+
+def _stale_devices(hass, entry, count, prefix="gone"):
+    return [_device(hass, entry, f"{prefix}-{i}", f"Old head {i}") for i in range(count)]
+
+
+def _remaining(hass, devices):
+    reg = dr.async_get(hass)
+    return [d for d in devices if reg.async_get(d.id) is not None]
+
+
+async def test_first_start_removes_nothing_then_the_next_confirmed_start_does(
+    hass: HomeAssistant, hass_storage
+):
+    """No earlier complete list on record: the absence cannot be confirmed, so nothing is removed;
+    the list is recorded, and the next start that shows the same picture removes."""
+    entry = _entry(hass)
+    gone = _stale_devices(hass, entry, 1)
+    fake = FakeCloudClient(devices=[head()])
+    await _setup(hass, entry, fake)
+    assert _remaining(hass, gone) == gone
+    assert _recorded(hass_storage, entry) == {"1": 1}
+
+    with patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=fake):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+    assert _remaining(hass, gone) == []
+
+
+async def test_incomplete_device_list_removes_nothing_and_keeps_the_record(
+    hass: HomeAssistant, hass_storage
+):
+    """A home answered with something that is not a list: the client flags the list incomplete."""
+    entry = _entry(hass)
+    _remember(hass_storage, entry, {"1": 1, "2": 2})
+    gone = _stale_devices(hass, entry, 2)
+    fake = FakeCloudClient(devices=[head()])
+    fake.device_list_complete = False
+    fake.list_homes = {"1": 1}  # home 2 did not answer with a list
+    await _setup(hass, entry, fake)
+    assert _remaining(hass, gone) == gone
+    assert _recorded(hass_storage, entry) == {"1": 1, "2": 2}  # an incomplete list is not recorded
+
+
+async def test_home_answering_empty_removes_nothing_until_confirmed(
+    hass: HomeAssistant, hass_storage
+):
+    """A home that held devices now answers an EMPTY list: indistinguishable from a degraded
+    answer on one read, so nothing is removed. Only a later start confirming it may remove."""
+    entry = _entry(hass)
+    _remember(hass_storage, entry, {"1": 1, "2": 2})
+    gone = _stale_devices(hass, entry, 2)
+    fake = FakeCloudClient(devices=[head()])
+    fake.list_homes = {"1": 1, "2": 0}
+    await _setup(hass, entry, fake)
+    assert _remaining(hass, gone) == gone
+    assert _recorded(hass_storage, entry) == {"1": 1, "2": 0}
+
+    with patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=fake):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+    assert _remaining(hass, gone) == []  # confirmed by a second, identical complete list
+
+
+async def test_home_missing_from_the_homes_list_removes_nothing(hass: HomeAssistant, hass_storage):
+    entry = _entry(hass)
+    _remember(hass_storage, entry, {"1": 1, "2": 2})
+    gone = _stale_devices(hass, entry, 2)
+    fake = FakeCloudClient(devices=[head()])  # reports home "1" only, as a complete list
+    await _setup(hass, entry, fake)
+    assert _remaining(hass, gone) == gone
+
+
+async def test_client_without_a_completeness_indicator_removes_nothing(
+    hass: HomeAssistant, hass_storage
+):
+    entry = _entry(hass)
+    _remember(hass_storage, entry, {"1": 2})
+    gone = _stale_devices(hass, entry, 1)
+    fake = FakeCloudClient(devices=[head()])
+    fake.device_list_complete = False
+    await _setup(hass, entry, fake)
+    assert _remaining(hass, gone) == gone
+
+
+async def test_too_many_absent_devices_removes_nothing_and_warns_without_identifiers(
+    hass: HomeAssistant, hass_storage, caplog
+):
+    """4 of 5 devices absent on a confirmed list: over the limit (3, or 5 % if more), so nothing is
+    removed. The warning carries counts only."""
+    entry = _entry(hass)
+    _remember(hass_storage, entry, {"1": 5})
+    _device(hass, entry, "dev-1", "Salon")  # the live head, registered by an earlier run
+    gone = _stale_devices(hass, entry, 4, prefix="secretid")
+    await _setup(hass, entry, FakeCloudClient(devices=[head()]))
+    assert _remaining(hass, gone) == gone
+    warning = next(r.getMessage() for r in caplog.records if "too many" in r.getMessage())
+    assert "4 of 5" in warning and "limit 3" in warning
+    assert "secretid" not in caplog.text and "Old head" not in caplog.text
+
+
+async def test_absent_devices_at_the_limit_are_removed(hass: HomeAssistant, hass_storage):
+    entry = _entry(hass)
+    _remember(hass_storage, entry, {"1": 4})
+    gone = _stale_devices(hass, entry, 3)
+    await _setup(hass, entry, FakeCloudClient(devices=[head()]))
+    assert _remaining(hass, gone) == []
+
+
+async def test_limit_follows_the_share_on_a_large_install(hass: HomeAssistant, hass_storage):
+    """100 devices: the 5 % share (5) is the limit. 6 absent are kept, 5 would be removed."""
+    live = [head(f"h{i}", f"Head {i}") for i in range(94)]
+    entry = _entry(hass)
+    _remember(hass_storage, entry, {"1": 100})
+    for dev in live:  # registered by earlier runs, as on a real install
+        _device(hass, entry, dev.id, dev.name)
+    gone = _stale_devices(hass, entry, 6)
+    await _setup(hass, entry, FakeCloudClient(devices=live))
+    assert _remaining(hass, gone) == gone  # 6 of 100 > 5
+
+    entry2 = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, unique_id="autre@exemple.fr")
+    entry2.add_to_hass(hass)
+    _remember(hass_storage, entry2, {"1": 100})
+    live2 = [head(f"k{i}", f"Other {i}") for i in range(95)]
+    for dev in live2:
+        _device(hass, entry2, dev.id, dev.name)
+    gone2 = _stale_devices(hass, entry2, 5, prefix="gone2")
+    await _setup(hass, entry2, FakeCloudClient(devices=live2))
+    assert _remaining(hass, gone2) == []  # 5 of 100 = the limit
+
+
+async def test_record_of_known_homes_is_dropped_with_the_entry(hass: HomeAssistant, hass_storage):
+    entry = _entry(hass)
+    await _setup(hass, entry, FakeCloudClient(devices=[head()]))
+    assert _recorded(hass_storage, entry) == {"1": 1}
+    assert await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert _recorded(hass_storage, entry) is None

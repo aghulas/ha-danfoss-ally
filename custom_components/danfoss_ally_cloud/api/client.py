@@ -126,6 +126,9 @@ class CloudClient:
         self._ch_key = ch_key
         self._endpoint = ENDPOINTS.get(region.lower(), ENDPOINTS["eu"])
         self._sid = sid
+        # Completeness of the last ``async_list_devices`` (see the properties below).
+        self._device_list_complete = False
+        self._device_list_homes: dict[str, int] = {}
         self._ecode = ecode
         self._uid: str | None = None
         self._partner_identity: str | None = None
@@ -227,19 +230,53 @@ class CloudClient:
         return out
 
     async def async_list_devices(self) -> list[DanfossDevice]:
-        """All heads (and other sub-devices) of the account's homes, decoded."""
+        """All heads (and other sub-devices) of the account's homes, decoded.
+
+        Tolerant on purpose: a home whose answer is not a list contributes no device and does not
+        raise, so one degraded answer does not take the whole fleet down. The price is that the
+        result can be INCOMPLETE without an error; ``device_list_complete`` and
+        ``device_list_homes`` say so, for callers that must not act on a partial list (removing
+        what is "gone", for instance).
+        """
         devices: list[DanfossDevice] = []
         seen: set[str] = set()
-        for home in await self.async_get_homes():
+        homes = await self.async_get_homes()
+        complete = bool(homes)
+        per_home: dict[str, int] = {}
+        for home in homes:
             raw = await self._request(
                 "tuya.m.my.group.device.list", "1.0", None, extra_params={"gid": home["gid"]}
             )
-            for device in raw if isinstance(raw, list) else []:
+            if not isinstance(raw, list):
+                complete = False
+                continue
+            count = 0
+            for device in raw:
                 dev = decode_device(device)
-                if dev.id and dev.id not in seen:
-                    seen.add(dev.id)
-                    devices.append(dev)
+                if dev.id:
+                    count += 1
+                    if dev.id not in seen:
+                        seen.add(dev.id)
+                        devices.append(dev)
+            per_home[str(home["gid"])] = count
+        self._device_list_complete = complete
+        self._device_list_homes = per_home
         return devices
+
+    @property
+    def device_list_complete(self) -> bool:
+        """True if, in the last ``async_list_devices``, at least one home was returned and EVERY
+        home answered its device list with a list. False before the first call, and whenever a
+        home's answer was missing or malformed (the returned devices are then a subset). It cannot
+        tell a home that is really empty from one answered as an empty list: compare
+        ``device_list_homes`` with an earlier read for that."""
+        return self._device_list_complete
+
+    @property
+    def device_list_homes(self) -> dict[str, int]:
+        """Per home gid, the number of devices its list held in the last ``async_list_devices``
+        (only the homes that answered with a list)."""
+        return dict(self._device_list_homes)
 
     async def async_list_raw(self) -> list[dict]:
         """Raw devices of all homes (devId, name, category, localKey, meshId, nodeId).

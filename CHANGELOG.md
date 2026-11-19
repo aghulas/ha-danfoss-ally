@@ -72,7 +72,13 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   or sensor gone from the account, with its entities; the preheat switches when `enable_local` is
   off; the "Cloud MQTT link" sensor when the cloud-MQTT option is off. Room and home devices are
   never removed automatically; a device that is no longer provided can be deleted from its device
-  page.
+  page. A device is removed only on a device list that is **complete and consistent with the
+  previous start** (never on a first start, a home that did not answer, or a home suddenly empty),
+  and **at most 3 devices per start, or 5 % of the entry's devices**; above that nothing is
+  removed and a warning says so.
+- `CloudClient.device_list_complete` / `device_list_homes` (library, additive): whether the last
+  `async_list_devices` had an answer from every home. The list itself is unchanged and still
+  tolerant; for a later `pydanfoss-cloud` 0.3.1.
 
 ### Added (MQTT publishing to your own broker)
 
