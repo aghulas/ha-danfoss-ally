@@ -242,11 +242,13 @@ Rémi. (This was answered on 2026-11-19 — see §6.3b: one-per-session, coexist
 **Status after the coexistence result.** Validated end to end short of a write: the 2.3 **codec**, the
 **credential derivations** (byte-exact), **inbound decoding on real frames** (6/6 + 426/426 live), and
 **an independent live connection that coexists with the app** (`rc=0`). The gated async client +
-switch routing are in place (dormant, OFF by default). **Next (write path now viable):** wire the
-live-link lifecycle in `mqtt_client.py` (connect `CloudMqttLink` from the entry's own session when
-`enable_cloud_mqtt` is on; reconnect on `sid` refresh; close on unload), then the **first supervised
-DP-30 write** (docs/first-write-procedure.md), Rémi present, before extending per DP on
-`WRITE_VERIFIED_MODELS`.
+switch routing are in place (dormant, OFF by default). The **live-link lifecycle is now wired**
+(`_async_setup_mqtt_link` in `__init__.py`): when `enable_cloud_mqtt` is on, a paho `CloudMqttLink`
+connects from the entry's own session, subscribes, and makes the isolated-head switches route via
+MQTT; it closes on unload and, if the `sid` rotates, the refused reconnect leaves the switches
+unavailable rather than lying (a session-refresh rewire is a follow-up). **Next:** the **first
+supervised DP-30 write** (docs/first-write-procedure.md), Rémi present — a switch toggle with the
+option on now publishes to a real head — before extending per DP on `WRITE_VERIFIED_MODELS`.
 
 ### 6a. Preparing the credentials for a live connect (step 3, prepared, NOT executed)
 

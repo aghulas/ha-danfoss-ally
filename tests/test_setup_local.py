@@ -192,3 +192,54 @@ async def test_cloud_mqtt_probe_setup_and_diagnostics(hass: HomeAssistant, monke
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert c.loop_stopped and c.disconnected  # stopped on unload
+
+
+async def test_cloud_mqtt_live_link_setup_routes_isolated_switch(hass: HomeAssistant, monkeypatch):
+    """enable_cloud_mqtt ON: a live link is created from the integration's own session and connects;
+    an isolated head's child-lock switch then routes via cloud MQTT. paho is faked (no network)."""
+    import paho.mqtt.client as paho
+
+    from custom_components.danfoss_ally_cloud.const import CONF_ENABLE_CLOUD_MQTT, DATA_MQTT_LINK
+
+    from .test_mqtt_client import _FakePaho
+
+    _FakePaho.instances.clear()
+    monkeypatch.setattr(paho, "Client", _FakePaho)
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=ENTRY_DATA,
+        unique_id="compte@exemple.fr",
+        options={CONF_ENABLE_CLOUD_MQTT: True},
+    )
+    entry.add_to_hass(hass)
+    with (
+        patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=FakeCloudClient()),
+        patch(
+            "custom_components.danfoss_ally_cloud.async_fetch_gateway_keys",
+            AsyncMock(return_value=_GW),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    link = hass.data[DOMAIN][entry.entry_id][DATA_MQTT_LINK]
+    assert link is not None
+    c = _FakePaho.instances[-1]
+    c.on_connect(c, None, None, 0)  # broker accepts -> link usable
+    assert link.can_publish("gw-1") is True
+
+    # The isolated head's child_lock switch now routes via cloud MQTT (default head has no group).
+    from custom_components.danfoss_ally_cloud.switch import PATH_MQTT, DanfossSwitch
+
+    sw = next(
+        e
+        for e in hass.data["entity_components"]["switch"].entities
+        if isinstance(e, DanfossSwitch) and e.entity_description.key == "child_lock"
+    )
+    assert sw._write_path(sw.device) == PATH_MQTT
+    assert sw.available is True
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert c.loop_stopped and c.disconnected  # link closed on unload

@@ -6,13 +6,11 @@ on real frames — see docs/cloud-mqtt-publish.md). This module adds the live la
 or the MCP connector), one connection per config entry, a per-gateway ``SeqOrigin`` kept for the
 whole session, subscription to ``smart/mb/in/<gw>`` and inbound-frame decoding, and a gated publish.
 
-Transport: **aiomqtt** (chosen over bare paho-mqtt), lazy-imported only when a connection is
-opened. Rationale: aiomqtt is a thin asyncio wrapper over the very paho-mqtt that Home Assistant
-already ships, so it adds no new native dependency and no second MQTT stack; it gives a native
-``async with`` client and an async message iterator, dropping straight into HA's loop with no
-bridging of a paho background thread into asyncio (that bridging is the usual source of race
-conditions and shutdown leaks). Because it is lazy-imported, installs that leave the feature OFF
-never load it.
+Transport: **paho-mqtt**, lazy-imported only when a connection is opened. Rationale: paho is already
+bundled by Home Assistant (its core MQTT integration uses it), so there is no new dependency and no
+second MQTT stack, and the real-hardware probe confirmed it connects and coexists with the app from
+the Pi. The loop runs in paho's background thread (renamed so the client id never reaches the HA
+log); callbacks only touch plain counters/flags, read back on the event loop.
 
 SAFETY: nothing here is wired to publish on its own. The publish method exists but a caller invokes
 it only behind the gated option AND a real connection; there is no optimistic state. Secrets
@@ -166,48 +164,76 @@ class CloudMqttLink:
     def inbound_topics(self) -> list[str]:
         return [mp.topic_in(gw.dev_id) for gw in self.gateways.values()]
 
-    # --- async I/O (aiomqtt, lazy-imported; exercised only on a live, gated connection) ---
+    # --- I/O (paho — bundled by HA, same transport as the probe; only on a gated connect) ---
 
-    async def run(self, ready: Callable[[], None] | None = None) -> None:
-        """Connect, subscribe to every gateway's inbound topic, and dispatch decoded frames to
-        ``on_frame`` until cancelled. READ path only; never publishes. Reconnection on ``sid``
-        refresh is handled by the caller recreating the link with fresh credentials."""
-        import aiomqtt  # lazy: only when a live connection is opened
+    def start(self, *, ca_certs: str | None = None) -> None:
+        """Open the live connection (paho, TLS), subscribe to every gateway's inbound topic, and
+        dispatch decoded frames to ``on_frame``. Non-blocking (loop in a thread). The connection is
+        read+write capable, but ``publish_dp`` is reached only behind the opt-in write gate."""
+        import ssl
+
+        import paho.mqtt.client as mqtt
+
+        if ca_certs is None:
+            try:
+                import certifi
+
+                ca_certs = certifi.where()
+            except ImportError:
+                ca_certs = None
 
         c = self.credentials
-        async with aiomqtt.Client(
-            hostname=c.host,
-            port=c.port,
-            identifier=c.client_id,
-            username=c.username,
-            password=c.password,
-            tls_params=aiomqtt.TLSParameters(),
-        ) as client:
-            self._client = client
-            self._connected = True
-            try:
+
+        def on_connect(client: Any, _u: Any, _f: Any, rc: int) -> None:
+            _LOGGER.warning("cloud-mqtt link: CONNACK rc=%s (%s)", rc, mqtt.connack_string(rc))
+            self._connected = rc == 0
+            if rc == 0:
                 for topic in self.inbound_topics():
-                    await client.subscribe(topic, qos=1)
-                if ready is not None:
-                    ready()
-                async for message in client.messages:
-                    dec = self.decode_inbound(str(message.topic), bytes(message.payload))
-                    if dec is not None and self.on_frame is not None:
-                        self.on_frame(*dec)
-            finally:
-                self._connected = False
+                    client.subscribe(topic, qos=1)
+
+        def on_message(_client: Any, _u: Any, msg: Any) -> None:
+            dec = self.decode_inbound(str(msg.topic), bytes(msg.payload))
+            if dec is not None and self.on_frame is not None:
+                self.on_frame(*dec)
+
+        def on_disconnect(_client: Any, _u: Any, rc: int) -> None:
+            self._connected = False
+
+        client = mqtt.Client(client_id=c.client_id, clean_session=True, protocol=mqtt.MQTTv311)
+        client.on_connect = on_connect
+        client.on_message = on_message
+        client.on_disconnect = on_disconnect
+        client.username_pw_set(c.username, c.password)
+        client.tls_set(ca_certs=ca_certs, cert_reqs=ssl.CERT_REQUIRED)
+        self._client = client
+        client.connect_async(c.host, c.port, keepalive=60)
+        client.loop_start()
+        # Keep the client id (it embeds the deviceId) out of the HA log's threadName.
+        thread = getattr(client, "_thread", None)
+        if thread is not None:
+            thread.name = "danfoss-cloud-mqtt-link"
+
+    def stop(self) -> None:
+        self._connected = False
+        client = self._client
+        self._client = None
+        if client is not None:
+            try:
+                client.loop_stop()
+                client.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
 
     async def publish_dp(
         self, gateway_id: str, node_id: str, dps: dict[str | int, Any]
     ) -> mp.PublishPlan:
         """Publish a head DP over the live connection. GATED: a caller reaches this only behind the
-        opt-in option and a real write request; raises if not connected. Returns the plan sent."""
+        opt-in option and a real write request; raises if not connected. Returns the plan sent.
+        ``async`` for the caller's convenience; the paho publish itself is non-blocking."""
         if not self._connected or self._client is None:
             raise mp.FrameError("MQTT link not connected")
         plan = self.plan_dp(gateway_id, node_id, dps)
-        await self._client.publish(
-            plan.topic, payload=plan.payload, qos=plan.qos, retain=plan.retain
-        )
+        self._client.publish(plan.topic, payload=plan.payload, qos=plan.qos, retain=plan.retain)
         return plan
 
 

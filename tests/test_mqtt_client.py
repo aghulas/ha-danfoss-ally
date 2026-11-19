@@ -192,6 +192,7 @@ class _FakePaho:
         self.username = self.password = None
         self.tls = None
         self.loop_started = self.loop_stopped = self.disconnected = False
+        self.published = []
         self.connected_to = None
         import types
 
@@ -218,6 +219,9 @@ class _FakePaho:
 
     def subscribe(self, topic, qos=0):
         self.subscribed.append((topic, qos))
+
+    def publish(self, topic, payload=None, qos=0, retain=False):
+        self.published.append((topic, payload, qos, retain))
 
 
 def test_listener_start_subscribes_on_connack0_and_stop_closes(monkeypatch):
@@ -253,3 +257,31 @@ def test_listener_start_records_refused(monkeypatch):
     c.on_connect(c, None, None, 5)  # not authorised
     assert lst.stats.connack_rc == 5 and c.subscribed == []
     lst.stop()
+
+
+async def test_link_start_connect_publish_and_stop(monkeypatch):
+    import paho.mqtt.client as paho
+
+    _FakePaho.instances.clear()
+    monkeypatch.setattr(paho, "Client", _FakePaho)
+    link = mc.CloudMqttLink(
+        credentials=mc.MqttCredentials(host="h", client_id="c", username="u", password="p"),
+        gateways={GW: mc.GatewayRef(dev_id=GW, local_key=KEY)},
+    )
+    link.start(ca_certs="/dev/null")
+    c = _FakePaho.instances[-1]
+    assert c.loop_started and c._thread.name == "danfoss-cloud-mqtt-link"
+    # not authorised yet -> cannot publish
+    assert link.can_publish(GW) is False
+    c.on_connect(c, None, None, 0)  # broker accepts
+    assert link.can_publish(GW) is True
+    assert c.subscribed == [(f"smart/mb/in/{GW}", 1)]
+    plan = await link.publish_dp(GW, "node-9", {"30": True})
+    assert plan.topic == f"smart/mb/out/{GW}"
+    assert c.published and c.published[-1][0] == f"smart/mb/out/{GW}"  # bytes went out
+    f = mp.decode_frame(KEY, c.published[-1][1])
+    assert f.data == {"cid": "node-9", "ctype": 0, "dps": {"30": True}}
+    c.on_disconnect(c, None, 0)
+    assert link.can_publish(GW) is False  # drop -> unavailable, never optimistic
+    link.stop()
+    assert c.loop_stopped and c.disconnected
