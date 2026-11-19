@@ -689,7 +689,8 @@ const STRINGS = {
     fleet_relays_on: "Relays on",
     holiday_active: "Holiday",
     gateway_online: "{n} online",
-    rooms_calling: "{n} calling for heat",
+    rooms_linked: "{n} linked rooms",
+    relay_offline: "Offline",
     relay_on: "On",
     relay_off: "Off",
     room_offline_n: "{n} offline",
@@ -819,7 +820,8 @@ const STRINGS = {
     fleet_relays_on: "Relais actifs",
     holiday_active: "Vacances",
     gateway_online: "{n} en ligne",
-    rooms_calling: "{n} en demande de chauffe",
+    rooms_linked: "{n} pièces liées",
+    relay_offline: "Hors ligne",
     relay_on: "Marche",
     relay_off: "Arrêt",
     room_offline_n: "{n} hors ligne",
@@ -3512,13 +3514,16 @@ let DanfossAllyPanel = class extends i {
     `;
   }
   _renderRelay(relay) {
-    const on = relay.on === true;
+    const offline = relay.online === false;
+    const on = !offline && relay.on === true;
+    const state2 = offline ? "offline" : on ? "on" : "off";
+    const label = offline ? "relay_offline" : on ? "relay_on" : "relay_off";
     return b`
-      <div class="relay">
-        <span class="relay-dot ${on ? "on" : "off"}"></span>
+      <div class="relay ${offline ? "relay-offline" : ""}">
+        <span class="relay-dot ${state2}"></span>
         <span class="relay-name">${relay.name}</span>
-        <span class="relay-state">${t(this.hass, on ? "relay_on" : "relay_off")}</span>
-        <span class="relay-rooms">${t(this.hass, "rooms_calling", { n: relay.linked_rooms })}</span>
+        <span class="relay-state">${t(this.hass, label)}</span>
+        <span class="relay-rooms">${t(this.hass, "rooms_linked", { n: relay.linked_rooms })}</span>
       </div>
     `;
   }
@@ -3723,6 +3728,15 @@ DanfossAllyPanel.styles = i$3`
     }
     .relay-dot.off {
       background: var(--disabled-text-color, #9e9e9e);
+    }
+    .relay-dot.offline {
+      background: transparent;
+      border: 2px solid var(--warning-color, #ffa600);
+      box-sizing: border-box;
+    }
+    .relay-offline .relay-state {
+      color: var(--warning-color, #ffa600);
+      font-weight: 500;
     }
     .relay-rooms {
       color: var(--secondary-text-color);
