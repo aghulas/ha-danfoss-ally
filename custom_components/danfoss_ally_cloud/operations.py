@@ -208,7 +208,7 @@ def _home_gids(coordinator: DanfossCoordinator) -> list[str]:
 
 
 def _norm_name(name: Any) -> str:
-    """Room name key for matching: case-folded, alphanumerics only ("D-0 Réfectoire" = "D0 ...")."""
+    """Room name key for matching: case-folded, alphanumerics only ("D-0 Hall" = "D0 Hall")."""
     return "".join(ch for ch in str(name or "").casefold() if ch.isalnum())
 
 

@@ -45,7 +45,7 @@ make the DP assumptions more reliable.
 
 ## Post-command freshness (R-3): per-device refresh after a write — shipped, GATED
 
-Real-hardware validation (2026-11-18, Salle ASH) found that the bulk list route
+Real-hardware validation (2026-11-18, on a test head) found that the bulk list route
 `tuya.m.my.group.device.list` — the coordinator's only path-1a source of DP state — **lags for
 several minutes after a command**, even with a forced refresh: it keeps returning the previous
 schedule's valve (`pi_heating_demand`, DP 170), `work_state` (DP 3), active setpoint and mode while

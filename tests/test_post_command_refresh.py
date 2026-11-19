@@ -168,7 +168,7 @@ async def test_empty_per_device_response_keeps_bulk(hass: HomeAssistant, clock):
 
 async def test_overlay_preserves_identity_and_topology(hass: HomeAssistant, clock):
     fake = FakeCloudClient(
-        devices=[bulk_head("h1", name="Salle ASH")],
+        devices=[bulk_head("h1", name="Room A")],
         device_get_dps={"h1": {"170": 82}},
     )
     coord = _coord(hass, fake)
@@ -176,7 +176,7 @@ async def test_overlay_preserves_identity_and_topology(hass: HomeAssistant, cloc
     clock["now"] += POST_COMMAND_SETTLE  # past the settle delay
     data = await coord._async_update_data()
     dev = data["h1"]
-    assert dev.id == "h1" and dev.name == "Salle ASH"
+    assert dev.id == "h1" and dev.name == "Room A"
     assert dev.category == "head" and dev.node_id == "node-1" and dev.mesh_id == "gw-1"
     assert dev.online is True
 
