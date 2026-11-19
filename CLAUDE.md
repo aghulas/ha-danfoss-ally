@@ -69,12 +69,23 @@ truth).
 ```
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/ruff check . && .venv/bin/ruff format --check .
+.venv/bin/mypy custom_components/danfoss_ally_cloud
 .venv/bin/pytest -q
 ```
 
-Everything green before commit. CI replays hassfest + HACS validation + ruff + pytest
-(`.github/workflows/`). Aim eventually for the level of a serious integration: high coverage, mypy,
-redacted diagnostics, dependency audit.
+If `frontend/` changed, also run (and commit the rebuilt bundle
+`custom_components/danfoss_ally_cloud/frontend/danfoss-ally-cloud.js`):
+
+```
+npm --prefix frontend ci && npm --prefix frontend run typecheck && npm --prefix frontend test
+npm --prefix frontend run build
+```
+
+Everything green before commit: these are exactly the commands CI runs (`.github/workflows/`:
+`test` = ruff + mypy + pytest with the coverage threshold, `frontend` = typecheck + vitest + build +
+"bundle up to date" check, plus `hassfest` and `hacs`). `main` is protected: those four checks are
+required, so a PR cannot merge while one is red. Aim eventually for the level of a serious
+integration: high coverage, redacted diagnostics, dependency audit.
 
 ## Publishing (HACS / Marketplace)
 
