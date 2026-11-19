@@ -10,7 +10,15 @@ longer sets heads individually. So we expose **one climate per room**:
 
 Heads stay exposed as sub-devices (sensors, switches, local preheat). An **isolated** head (outside
 a group) keeps a **read-only** climate: no proven path-1a write method outside a room (a
-non-lying entity rather than a false one).
+non-lying entity rather than a false one). It still shows its ACTIVE setpoint as
+``target_temperature`` (Home Assistant only publishes it when TARGET_TEMPERATURE is declared), and
+refuses a setpoint change with a clear error.
+
+State attributes: ``active_setpoint`` is the setpoint in force (DP 171 OccupiedSetpoint, the value
+the Danfoss app shows); ``setpoints`` holds the per-mode settings (``comfort`` = DP 118,
+``setback`` = DP 119, ``manual``, ``pause``, ``holiday``) plus ``temp_set`` (DP 16, which reports
+the comfort setpoint whatever the slot). ``setpoints.setpoint`` is a DEPRECATED alias of
+``temp_set`` kept for existing automations; it is NOT the active setpoint.
 """
 
 from __future__ import annotations
@@ -53,6 +61,24 @@ _MODES = {
 
 _MIN_TEMP = 5.0
 _MAX_TEMP = 35.0
+
+# Deprecated ``setpoints`` key: up to 1.0.1 DP 16 (temp_set) was published as ``setpoint``, a
+# misleading name since it is the comfort setpoint, not the active one. Kept as an alias of
+# ``temp_set`` so existing automations keep working; to be removed in a future release.
+_DEPRECATED_SETPOINT_ALIAS = "setpoint"
+
+
+def _setpoint_attributes(active: float | None, setpoints: dict[str, float]) -> dict:
+    """``active_setpoint`` + per-mode ``setpoints`` (with the deprecated ``setpoint`` alias)."""
+    attrs: dict = {}
+    if active is not None:
+        attrs["active_setpoint"] = active
+    if setpoints:
+        out = dict(setpoints)
+        if "temp_set" in out:
+            out[_DEPRECATED_SETPOINT_ALIAS] = out["temp_set"]
+        attrs["setpoints"] = out
+    return attrs
 
 
 async def async_setup_entry(
@@ -151,8 +177,7 @@ class DanfossRoomClimate(CoordinatorEntity[DanfossCoordinator], ClimateEntity):
         attrs: dict = {"head_count": room.head_count}
         if room.mode is not None:
             attrs["mode"] = _MODES.get(room.mode, room.mode)
-        if room.setpoints:
-            attrs["setpoints"] = room.setpoints
+        attrs.update(_setpoint_attributes(room.setpoint, room.setpoints))
         return attrs
 
     async def async_set_temperature(self, **kwargs) -> None:
@@ -195,16 +220,18 @@ class DanfossRoomClimate(CoordinatorEntity[DanfossCoordinator], ClimateEntity):
 class DanfossHeadClimate(DanfossEntity, ClimateEntity):
     """Thermostat of an ISOLATED head (outside a group), READ-ONLY.
 
-    No proven path-1a write method outside a room: we do not expose TARGET_TEMPERATURE (a non-lying
-    entity). Grouped heads are driven through their room (see ``DanfossRoomClimate``) and have no
-    climate of their own.
+    No proven path-1a write method outside a room. TARGET_TEMPERATURE is declared only so that Home
+    Assistant publishes the ACTIVE setpoint (DP 171, the one the Danfoss app shows) as the target
+    temperature, as on the room climate; ``async_set_temperature`` refuses with a clear error rather
+    than pretending to write. Grouped heads are driven through their room (see
+    ``DanfossRoomClimate``) and have no climate of their own.
     """
 
     _attr_name = None
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT]
     _attr_target_temperature_step = SETPOINT_STEP
-    _attr_supported_features = ClimateEntityFeature(0)
+    _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
     _attr_min_temp = _MIN_TEMP
     _attr_max_temp = _MAX_TEMP
 
@@ -254,6 +281,13 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
         attrs: dict = {}
         if dev.mode is not None:
             attrs["mode"] = _MODES.get(dev.mode, dev.mode)
-        if dev.setpoints:
-            attrs["setpoints"] = dev.setpoints
+        attrs.update(_setpoint_attributes(dev.setpoint, dev.setpoints))
         return attrs
+
+    async def async_set_temperature(self, **kwargs) -> None:
+        """Refuse: an isolated head has no proven path-1a setpoint write (read-only entity)."""
+        raise HomeAssistantError(
+            "Read-only: this head is not in a Danfoss room, and no setpoint write is proven for a "
+            "head outside a room. Add it to a room in the Danfoss app to drive it from Home "
+            "Assistant."
+        )

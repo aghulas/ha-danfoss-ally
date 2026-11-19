@@ -167,7 +167,8 @@ def test_head_climate_lecture_seule():
     dev = head(temperature=12.8, setpoint=6.0, valve_opening=40)
     coord = _FakeCoord(data={dev.id: dev})
     cl = DanfossHeadClimate(coord, dev.id)
-    assert cl.supported_features == ClimateEntityFeature(0)
+    # TARGET_TEMPERATURE is declared so HA publishes the active setpoint; writes are refused.
+    assert cl.supported_features == ClimateEntityFeature.TARGET_TEMPERATURE
     assert cl.current_temperature == 12.8
     assert cl.target_temperature == 6.0
     assert cl.hvac_action == HVACAction.HEATING
@@ -180,3 +181,55 @@ def test_head_climate_hvac_action_follows_work_state():
     coord = _FakeCoord(data={dev.id: dev})
     cl = DanfossHeadClimate(coord, dev.id)
     assert cl.hvac_action == HVACAction.IDLE
+
+
+async def test_head_climate_publishes_active_setpoint_as_target(hass):
+    # The active setpoint (DP 171, 14.0) is what the Danfoss app shows: HA must publish it as the
+    # climate's `temperature` attribute, which it only does when TARGET_TEMPERATURE is declared.
+    dev = head(setpoint=14.0, mode="leaving_home", setpoints={"comfort": 21.0, "setback": 14.0})
+    coord = _FakeCoord(data={dev.id: dev})
+    cl = DanfossHeadClimate(coord, dev.id)
+    cl.hass = hass
+    assert cl.target_temperature == 14.0
+    assert cl.state_attributes[ATTR_TEMPERATURE] == 14.0
+
+
+async def test_head_climate_refuses_setpoint_write():
+    dev = head(setpoint=14.0)
+    coord = _FakeCoord(data={dev.id: dev})
+    cl = DanfossHeadClimate(coord, dev.id)
+    with pytest.raises(HomeAssistantError, match="Read-only"):
+        await cl.async_set_temperature(**{ATTR_TEMPERATURE: 20.0})
+
+
+def test_head_climate_setpoint_attributes():
+    dev = head(
+        setpoint=14.0,
+        mode="leaving_home",
+        setpoints={"temp_set": 21.0, "comfort": 21.0, "setback": 14.0},
+    )
+    coord = _FakeCoord(data={dev.id: dev})
+    attrs = DanfossHeadClimate(coord, dev.id).extra_state_attributes
+    assert attrs["active_setpoint"] == 14.0
+    assert attrs["setpoints"]["comfort"] == 21.0
+    assert attrs["setpoints"]["temp_set"] == 21.0
+    # Deprecated alias kept for existing automations: DP 16, NOT the active setpoint.
+    assert attrs["setpoints"]["setpoint"] == 21.0
+    assert dev.setpoints == {"temp_set": 21.0, "comfort": 21.0, "setback": 14.0}  # not mutated
+
+
+def test_room_setpoint_attributes():
+    room = _room(setpoint=14.0, setpoints={"temp_set": 21.0, "comfort": 21.0, "setback": 14.0})
+    coord = _FakeCoord(rooms={"77": room})
+    attrs = DanfossRoomClimate(coord, "77").extra_state_attributes
+    assert attrs["active_setpoint"] == 14.0
+    assert attrs["setpoints"]["setback"] == 14.0
+    assert attrs["setpoints"]["setpoint"] == 21.0  # deprecated alias of temp_set
+
+
+def test_setpoint_attributes_without_temp_set_has_no_alias():
+    dev = head(setpoint=None, setpoints={"comfort": 21.0})
+    coord = _FakeCoord(data={dev.id: dev})
+    attrs = DanfossHeadClimate(coord, dev.id).extra_state_attributes
+    assert "active_setpoint" not in attrs
+    assert attrs["setpoints"] == {"comfort": 21.0}

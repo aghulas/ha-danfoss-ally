@@ -69,7 +69,9 @@ def decode_fault(v: Any) -> list[dict[str, Any]]:
 
 # Setpoints per mode (DP -> readable key), tenths-of-°C scale.
 _SETPOINT_DPS = {
-    "16": "setpoint",  # temp_set: current effective setpoint
+    # DP 16 temp_set: NOT the active setpoint, it reports the comfort setpoint whatever the slot
+    # (R-1). Kept under its DP name for information; the active one is ``DanfossDevice.setpoint``.
+    "16": "temp_set",
     "118": "comfort",  # at_home_setting
     "119": "setback",  # leaving_home_setting
     "114": "manual",  # manual_mode_fast
@@ -165,7 +167,7 @@ class DanfossDevice:
     mesh_id: str | None = None  # gateway
     online: bool = False
     temperature: float | None = None  # °C (DP 24)
-    setpoint: float | None = None  # °C effective (DP 16)
+    setpoint: float | None = None  # °C ACTIVE setpoint (DP 171, else mode setting, else DP 16)
     setpoints: dict[str, float] = field(default_factory=dict)
     mode: str | None = None  # DP 2
     state: str | None = None  # DP 3 work_state

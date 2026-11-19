@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — Active setpoint clarity on climates (follow-up to R-1)
+
+### Changed
+
+- **Isolated-head climate now shows its active setpoint.** `DanfossHeadClimate` (heads outside a
+  Danfoss room) already computed the active setpoint (DP 171 `OccupiedSetpoint`, the value the
+  Danfoss app shows) but declared no features, so Home Assistant never published it as the
+  climate's `temperature`. It now declares `TARGET_TEMPERATURE` so the target is visible, and a
+  setpoint change is **refused** with a clear error (still no proven path-1a write for a head
+  outside a room — the entity stays read-only, it does not pretend to write).
+- **New `active_setpoint` state attribute** on room and head climates: the setpoint in force.
+
+### Deprecated
+
+- **`setpoints.setpoint` climate attribute.** It carried DP 16 (`temp_set`), which reports the
+  **comfort** setpoint whatever the schedule slot — not the active setpoint, despite its name. The
+  value is now published as `setpoints.temp_set`; `setpoints.setpoint` stays as a deprecated alias
+  (same value) and will be removed in a future release. **Automations** reading
+  `state_attr(..., 'setpoints').setpoint` should switch to `active_setpoint` (the setpoint in force)
+  or `setpoints.comfort` / `setpoints.temp_set` (the comfort setpoint), depending on intent.
+  Internally, `DanfossDevice.setpoints` uses the key `temp_set` (no longer `setpoint`).
+
 ## Unreleased — Unbind widened to sub-devices (sensors, relays), GATED
 
 ### Changed
