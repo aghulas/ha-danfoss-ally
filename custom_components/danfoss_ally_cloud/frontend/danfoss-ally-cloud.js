@@ -1312,7 +1312,7 @@ function validateDay(ranges, day = null) {
     errors
   };
 }
-const CARD_VERSION = "1.1.0";
+const CARD_VERSION = "1.2.0";
 function needsReload(cardVersion, serverVersion) {
   if (!serverVersion) {
     return false;
