@@ -1,25 +1,11 @@
 # Changelog
 
-## Unreleased
-
-### Fixed
-
-- **Building panel: single-head rooms were missing.** A room of the app with one head has no
-  schedule-group, so the fleet overview (contract §3.6) only listed the grouped rooms and every total
-  ignored the other heads (a 99-head fleet showed 66, and a fault or low battery on a lone head was
-  invisible). Each such head is now a room of its own, `kind: "single_head"`, in its exact home
-  (per-home device list), with the same health fields; totals cover the whole fleet. Its name is the
-  app room's when one of its home has the same name (the cloud exposes no room membership), else
-  the head's own name, flagged (`name_source`). Rooms also carry `online`, `temperature` and
-  `setpoint`, shown on the tiles. Read only: one extra room-map read per home on the hourly topology
-  cadence; no write path is added (a single head keeps the isolated-head writes).
-
 ## 1.2.0 — Cloud-MQTT channel for isolated heads (gated), non-blocking local start, stale cleanup, reauth
 
 Minor release. It gathers the sections previously listed as unreleased: the gated cloud-MQTT write
 path for isolated heads, the non-blocking start of the local tunnel and the Home Assistant 2026
 deprecations, plus two fixes (window-detection switch after the first local read,
-re-authentication step). Every new option is **off by default**: an updated install behaves as
+re-authentication step, single-head rooms in the building panel). Every new option is **off by default**: an updated install behaves as
 1.1.0 until an option is turned on.
 
 Adds the write path the Danfoss app uses for **isolated** heads (those not grouped into a room),
@@ -97,6 +83,16 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   the wheel and imports the MQTT modules from it. To be published to PyPI for the MCP connector.
 
 ### Fixed
+
+- **Building panel: single-head rooms were missing.** A room of the app with one head has no
+  schedule-group, so the fleet overview (contract §3.6) only listed the grouped rooms and every total
+  ignored the other heads (a 99-head fleet showed 66, and a fault or low battery on a lone head was
+  invisible). Each such head is now a room of its own, `kind: "single_head"`, in its exact home
+  (per-home device list), with the same health fields; totals cover the whole fleet. Its name is the
+  app room's when one of its home has the same name (the cloud exposes no room membership), else
+  the head's own name, flagged (`name_source`). Rooms also carry `online`, `temperature` and
+  `setpoint`, shown on the tiles. Read only: one extra room-map read per home on the hourly topology
+  cadence; no write path is added (a single head keeps the isolated-head writes).
 
 - **Re-authentication step in the config flow.** When the account refuses the sign-in at
   runtime (password changed, installation secrets no longer valid), the coordinator raised
