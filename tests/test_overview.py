@@ -44,9 +44,14 @@ class _Coord:
             ]
         }
         self.hass = None  # no entity registry -> climate ids resolve to None
+        self.device_home = {"a": "h1", "b": "h1", "c": "h1"}
+        self.home_rooms: dict = {}
 
     def group_of(self, head_id):
         return self._group.get(head_id)
+
+    def head_home(self, dev_id):
+        return self.device_home.get(dev_id)
 
     def home_of(self, group_id):
         return self._home.get(group_id)
@@ -122,6 +127,7 @@ class _TwoHomeCoord(_Coord):
         )
         self._group.update({"d": "g3", "e": "g4"})
         self._home.update({"g3": "h2", "g4": "h2"})
+        self.device_home.update({"d": "h2", "e": "h2"})
         self.holidays["h2"] = {"gid": "h2", "name": "Building 2", "active": False}
         # Real relays list Tuya room ids, unknown to home_of(): matching must go by name.
         self.relay_rooms = {
@@ -166,3 +172,153 @@ def test_relay_home_majority_vote_and_ambiguity():
     # No linked room at all: the listed rooms vote; nothing resolvable: first home.
     coord.relay_rooms["r3"] = [{"room_id": 1, "name": "Hall? no", "linked": False}]
     assert ops._relay_home_gid(coord, relay("r3"), homes, by_name) == "h1"
+
+
+# --- Single-head rooms (a head with no schedule-group): listed and counted (§3.6) --------------
+
+
+class _FleetCoord(_Coord):
+    """Two homes, each with grouped rooms and single heads (synthetic names and ids only).
+
+    h1: group g1 (a, b) + single heads s1 (room "A-1 Office"), s2 (no matching room: fallback).
+    h2: group g7 (x, y) + single heads s3 (low battery, room "C-1 Lab"), s4 (fault, offline).
+    """
+
+    def __init__(self):
+        super().__init__()
+        x = head("x", "B-0 Hall #1", online=True, valve_opening=0)
+        y = head("y", "B-0 Hall #2", online=True, valve_opening=0)
+        s1 = head("s1", "A-1 Office", valve_opening=0, temperature=19.5, setpoint=20.0)
+        s2 = head("s2", "A-1 Sas", valve_opening=0, heat_request=True)
+        s3 = head("s3", "C-1 Lab", valve_opening=0, battery=8.0)
+        s4 = head(
+            "s4",
+            "C-0 Store",
+            online=False,
+            faults=[{"code": "E02", "bit": 1, "label": "valve fault"}],
+        )
+        for d in (x, y, s1, s2, s3, s4):
+            self.data[d.id] = d
+        # The test room g2 (one member, grouped) of the base fixture is dropped: g1 only in h1.
+        del self.rooms["g2"]
+        del self._group["c"]
+        del self.data["c"]
+        self.rooms["g7"] = aggregate_room(
+            Room("g7", "B-0 Hall", "03wvrwpv", "h2", ("x", "y")), [x, y]
+        )
+        self._group.update({"x": "g7", "y": "g7"})
+        self._home["g7"] = "h2"
+        self.holidays["h2"] = {"gid": "h2", "name": "Building 2", "active": False}
+        self.device_home = {
+            "a": "h1", "b": "h1", "s1": "h1", "s2": "h1",
+            "x": "h2", "y": "h2", "s3": "h2", "s4": "h2",
+        }  # fmt: skip
+        self.home_rooms = {
+            "h1": [
+                {"room_id": "401", "name": "Salle 1"},  # the group's room: claimed by g1
+                {"room_id": "402", "name": "A-1  office"},  # case/space differ: still matches
+                {"room_id": "403", "name": "A-1 Sas Wing"},  # not the head's name: no match
+                {"room_id": "404", "name": "C-1 Lab"},  # same name, other home: ignored
+            ],
+            "h2": [
+                {"room_id": "501", "name": "B-0 Hall"},
+                {"room_id": "502", "name": "C-1 Lab"},
+                {"room_id": "503", "name": "C-0 Store"},
+            ],
+        }
+
+
+def _fleet():
+    data = ops.overview_payload({DATA_COORDINATOR: _FleetCoord()})
+    rooms = {r["id"]: r for h in data["homes"] for r in h["rooms"]}
+    return data, rooms
+
+
+def test_single_heads_listed_in_their_home():
+    data, _ = _fleet()
+    by_home = {h["gid"]: [r["id"] for r in h["rooms"]] for h in data["homes"]}
+    # Sorted by name within each home, groups and single heads together.
+    assert by_home == {"h1": ["s1", "s2", "g1"], "h2": ["g7", "s4", "s3"]}
+
+
+def test_single_head_room_fields():
+    _, rooms = _fleet()
+    s1 = rooms["s1"]
+    assert s1["kind"] == "single_head" and s1["head_count"] == 1
+    assert s1["name"] == "A-1  office" and s1["name_source"] == "room" and s1["room_id"] == "402"
+    assert s1["head_id"] == "s1" and s1["head_name"] == "A-1 Office"
+    assert s1["online"] is True and s1["offline"] == 0
+    assert s1["temperature"] == 19.5 and s1["setpoint"] == 20.0
+    # No room of that name in its home: the head's name, flagged.
+    s2 = rooms["s2"]
+    assert s2["name"] == "A-1 Sas" and s2["name_source"] == "head" and s2["room_id"] is None
+    assert s2["heating"] is True
+    # Grouped rooms say so, and carry the same climate fields.
+    g1 = rooms["g1"]
+    assert g1["kind"] == "group" and "name_source" not in g1
+    assert set(s1) >= set(g1)
+
+
+def test_single_head_low_battery_and_fault_counted():
+    _, rooms = _fleet()
+    assert rooms["s3"]["low_battery"] == 1 and rooms["s3"]["name_source"] == "room"
+    s4 = rooms["s4"]
+    assert s4["faults"] == 1 and s4["offline"] == 1 and s4["online"] is False
+    assert s4["temperature"] is None  # an offline head's temperature is stale
+    assert s4["heating"] is False
+
+
+def test_totals_cover_the_whole_fleet():
+    data, _ = _fleet()
+    totals = data["totals"]
+    assert totals["rooms"] == 6
+    assert totals["heads"] == 8  # 2 + 2 grouped, 4 single
+    assert totals["offline"] == 2  # b (grouped) + s4 (single)
+    assert totals["low_battery"] == 1  # s3
+    assert totals["faults"] == 1  # s4
+    assert totals["heating"] == 2  # g1 (head a, valve open) + s2 (heat request)
+
+
+def test_single_head_name_match_must_be_unambiguous():
+    coord = _FleetCoord()
+    # A second single head with the same name in h2: neither takes the room.
+    coord.data["s5"] = head("s5", "C-1 Lab")
+    coord.device_home["s5"] = "h2"
+    # Two rooms of one name in h1: no match either.
+    coord.home_rooms["h1"].append({"room_id": "405", "name": "A-1 Office"})
+    data = ops.overview_payload({DATA_COORDINATOR: coord})
+    rooms = {r["id"]: r for h in data["homes"] for r in h["rooms"]}
+    assert rooms["s3"]["name_source"] == "head" and rooms["s5"]["name_source"] == "head"
+    assert rooms["s1"]["name_source"] == "head"
+
+
+def test_single_head_room_claimed_by_a_group_is_not_reused():
+    coord = _FleetCoord()
+    # A single head named like a grouped room ("<name> Group" label too) keeps its own name.
+    coord.rooms["g1"] = aggregate_room(
+        Room("g1", "A-1 Office Group", "03wvrwpv", "h1", ("a", "b")),
+        [coord.data["a"], coord.data["b"]],
+    )
+    rooms = {r["id"]: r for h in ops.overview_payload({DATA_COORDINATOR: coord})["homes"]
+             for r in h["rooms"]}  # fmt: skip
+    assert rooms["s1"]["name_source"] == "head"
+
+
+def test_single_head_of_unknown_home_goes_to_first_home():
+    coord = _FleetCoord()
+    del coord.device_home["s4"]
+    data = ops.overview_payload({DATA_COORDINATOR: coord})
+    assert "s4" in [r["id"] for r in data["homes"][0]["rooms"]]
+    assert data["totals"]["heads"] == 8
+
+
+def test_home_known_only_from_its_single_heads():
+    coord = _FleetCoord()
+    coord.holidays.pop("h2")
+    del coord.rooms["g7"]
+    for dev_id in ("x", "y"):
+        coord._group.pop(dev_id)
+    data = ops.overview_payload({DATA_COORDINATOR: coord})
+    h2 = next(h for h in data["homes"] if h["gid"] == "h2")
+    assert h2["name"] == "Home h2"
+    assert {r["kind"] for r in h2["rooms"]} == {"single_head"}

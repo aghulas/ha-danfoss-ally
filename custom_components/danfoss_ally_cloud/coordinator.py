@@ -70,6 +70,11 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         # Rooms that drive each boiler relay (read only, contract §4.6), keyed by relay devId.
         # Refreshed on the topology cadence; the relay on/off state itself is in ``data`` each poll.
         self.relay_rooms: dict[str, list[dict]] = {}
+        # Room map of each home (Tuya rooms, type 4: [{room_id, name}]), keyed by home gid. Read on
+        # the topology cadence; names the app room of a single-head room (§3.6), by name only.
+        self.home_rooms: dict[str, list[dict]] = {}
+        # Head/device id -> home gid, from the per-home device lists of the last poll (exact).
+        self.device_home: dict[str, str] = {}
         self._rooms_topology: dict[str, Room] = {}
         self._group_of: dict[str, str] = {}
         self._topology_ts: float = 0.0
@@ -84,6 +89,10 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         except CloudError as err:
             raise UpdateFailed(str(err)) from err
         data = {dev.id: dev for dev in devices}
+        homes = getattr(self.client, "device_home", None)
+        if isinstance(homes, dict):
+            # Merge: a home whose list failed this poll keeps its devices' last known home.
+            self.device_home = {**self.device_home, **homes}
         await self._overlay_commanded(data)
         await self._ensure_topology(data)
         self.rooms = {
@@ -180,6 +189,10 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         room = self._rooms_topology.get(group_id)
         return room.home_gid if room else None
 
+    def head_home(self, dev_id: str) -> str | None:
+        """The home gid a device belongs to (per-home device list), or None if unknown."""
+        return self.device_home.get(dev_id)
+
     def invalidate_topology(self) -> None:
         """Drop the topology cache so the next refresh re-reads rooms (and holidays, relay links).
 
@@ -215,6 +228,7 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         self._rooms_topology, self._group_of, self._topology_ts = rooms_topology, group_of, now
         await self._refresh_holidays()
         await self._refresh_relay_rooms(data or {})
+        await self._refresh_home_rooms()
 
     async def _refresh_relay_rooms(self, data: dict[str, DanfossDevice]) -> None:
         """Refresh, per boiler relay, the rooms that drive it.
@@ -231,6 +245,28 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
                 _LOGGER.debug("relay rooms kept for %s (read failed: %s)", dev.id, err)
                 out[dev.id] = self.relay_rooms.get(dev.id, [])
         self.relay_rooms = out
+
+    async def _refresh_home_rooms(self) -> None:
+        """Refresh each home's room map (``room.map.get``). Best-effort, read only.
+
+        A home whose read fails keeps its previous map. Used only to name single-head rooms in the
+        fleet overview: the room (type 4) membership is empty on the cloud, so the link is by name.
+        """
+        try:
+            homes = await self.client.async_get_homes()
+        except CloudError as err:
+            _LOGGER.debug("room maps kept (home list failed: %s)", err)
+            return
+        out: dict[str, list[dict]] = {}
+        for home in homes:
+            gid = str(home["gid"])
+            try:
+                out[gid] = list(await self.client.async_list_rooms(home["gid"]))
+            except CloudError as err:
+                _LOGGER.debug("room map kept for a home (read failed: %s)", err)
+                if gid in self.home_rooms:
+                    out[gid] = self.home_rooms[gid]
+        self.home_rooms = out
 
     async def _refresh_holidays(self) -> None:
         """Refresh the per-home holiday state (best-effort; keeps the previous value on failure)."""

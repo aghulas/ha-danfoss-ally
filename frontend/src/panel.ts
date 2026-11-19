@@ -4,13 +4,17 @@
  *
  * Par maison : badge vacances, passerelles et leur état, grille des pièces (santé :
  * têtes, hors ligne, batterie faible, demande de chauffe, fenêtre, incohérence,
- * défauts), relais de chaudière. Un bandeau de totaux donne la santé du bâtiment
+ * défauts, température → consigne), relais de chaudière. Les pièces d'une seule
+ * tête (sans groupe, contrat §3.6) sont dans la même grille, marquées « 1× » et
+ * « tête seule » ; le panneau ne propose aucune écriture, pour elles comme pour
+ * les autres. Un bandeau de totaux donne la santé du bâtiment
  * d'un coup d'œil. N'appelle que la commande WebSocket `overview` (§5.3), jamais le
  * cloud, et se dégrade proprement.
  */
 import { LitElement, type TemplateResult, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
+import { climateLine, headNameHint, isHealthy, isSingleHead, namedAfterHead } from "./fleet";
 import { t } from "./localize";
 import type { FleetHome, FleetOverview, FleetRelay, FleetRoom, HassLike } from "./types";
 import { CARD_VERSION } from "./version";
@@ -127,14 +131,26 @@ export class DanfossAllyPanel extends LitElement {
   }
 
   private _renderRoom(room: FleetRoom): TemplateResult {
-    const healthy =
-      room.offline === 0 && room.low_battery === 0 && room.faults === 0 && !room.window_open;
+    const healthy = isHealthy(room);
+    const single = isSingleHead(room);
+    const hint = headNameHint(room);
+    const climate = climateLine(room);
+    const title = hint ? `${room.name} — ${hint}` : room.name;
     return html`
-      <div class="room ${healthy ? "ok" : "attn"}">
+      <div class="room ${healthy ? "ok" : "attn"} ${single ? "single" : ""}">
         <div class="room-top">
-          <span class="room-name" title=${room.name}>${room.name}</span>
+          <span class="room-name" title=${title}>${room.name}</span>
           <span class="heads-count">${room.head_count}×</span>
         </div>
+        ${hint ? html`<div class="room-sub" title=${hint}>${hint}</div>` : nothing}
+        ${single
+          ? html`<div class="room-sub kind">
+              ${namedAfterHead(room)
+                ? t(this.hass, "room_named_after_head")
+                : t(this.hass, "room_single_head")}
+            </div>`
+          : nothing}
+        ${climate ? html`<div class="room-climate">${climate}</div>` : nothing}
         <div class="flags">
           ${room.heating ? html`<span class="flag hot">${t(this.hass, "room_calling")}</span>` : nothing}
           ${room.window_open ? html`<span class="flag warn">${t(this.hass, "room_window")}</span>` : nothing}
@@ -304,6 +320,25 @@ export class DanfossAllyPanel extends LitElement {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .room.single {
+      border-style: dashed;
+    }
+    .room-sub {
+      font-size: 0.72rem;
+      color: var(--secondary-text-color);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .room-sub.kind {
+      font-style: italic;
+    }
+    .room-climate {
+      font-size: 0.8rem;
+      color: var(--primary-text-color);
+      font-variant-numeric: tabular-nums;
+      margin-top: 2px;
     }
     .heads-count {
       font-size: 0.75rem;

@@ -119,6 +119,11 @@ class FakeCloudClient:
     def device_list_homes(self):
         return dict(self.list_homes) if self.list_homes is not None else {"1": len(self._devices)}
 
+    @property
+    def device_home(self):
+        # Single-home fixture: every listed device is in home "1".
+        return {d.id: "1" for d in self._devices}
+
     async def async_get_homes(self):
         return [{"gid": 1, "name": "Maison"}]
 

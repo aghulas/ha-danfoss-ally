@@ -698,7 +698,9 @@ const STRINGS = {
     room_faults_n: "{n} faults",
     room_calling: "Calling for heat",
     room_window: "Window open",
-    room_ok: "OK"
+    room_ok: "OK",
+    room_single_head: "Single head, no group",
+    room_named_after_head: "Room not found in the app: head's name"
   },
   fr: {
     card_name: "Danfoss Ally — Programme",
@@ -829,7 +831,9 @@ const STRINGS = {
     room_faults_n: "{n} défauts",
     room_calling: "Demande de chauffe",
     room_window: "Fenêtre ouverte",
-    room_ok: "OK"
+    room_ok: "OK",
+    room_single_head: "Tête seule, sans groupe",
+    room_named_after_head: "Pièce de l'app non retrouvée : nom de la tête"
   }
 };
 function lang(hass) {
@@ -3389,6 +3393,36 @@ const ICON_BATTERY = w`<svg viewBox="0 0 24 24"><path d="M16.67 4H15V2H9v2H7.33C
 const ICON_VALVE = w`<svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7.76A4 4 0 1 0 15 16a4 4 0 0 0-2-3.24V5a1 1 0 0 1 2 0h2a3 3 0 0 0-3-3z" /></svg>`;
 const ICON_WINDOW = w`<svg viewBox="0 0 24 24"><path d="M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1m7 2H5v6h6zm2 0v6h6V5zm-2 8H5v6h6zm2 0v6h6v-6z" /></svg>`;
 const ICON_LOCK = w`<svg viewBox="0 0 24 24"><path d="M12 17a2 2 0 0 0 2-2 2 2 0 0 0-2-2 2 2 0 0 0-2 2 2 2 0 0 0 2 2m6-9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h1V6a5 5 0 0 1 10 0v2zM12 3a3 3 0 0 0-3 3v2h6V6a3 3 0 0 0-3-3" /></svg>`;
+function isSingleHead(room) {
+  return room.kind === "single_head";
+}
+function isHealthy(room) {
+  return room.offline === 0 && room.low_battery === 0 && room.faults === 0 && !room.window_open;
+}
+function norm(name) {
+  return (name ?? "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+}
+function headNameHint(room) {
+  if (!isSingleHead(room) || room.name_source === "head" || !room.head_name) {
+    return null;
+  }
+  return norm(room.head_name) === norm(room.name) ? null : room.head_name;
+}
+function namedAfterHead(room) {
+  return isSingleHead(room) && room.name_source === "head";
+}
+function degrees(value) {
+  return `${Number.isInteger(value) ? value : value.toFixed(1)} °C`;
+}
+function climateLine(room) {
+  const temp = room.temperature ?? null;
+  const setpoint = room.setpoint ?? null;
+  if (temp === null && setpoint === null) {
+    return null;
+  }
+  const left = temp === null ? "–" : degrees(temp);
+  return setpoint === null ? left : `${left} → ${degrees(setpoint)}`;
+}
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __decorateClass = (decorators, target, key, kind) => {
@@ -3495,13 +3529,22 @@ let DanfossAllyPanel = class extends i {
     `;
   }
   _renderRoom(room) {
-    const healthy = room.offline === 0 && room.low_battery === 0 && room.faults === 0 && !room.window_open;
+    const healthy = isHealthy(room);
+    const single = isSingleHead(room);
+    const hint = headNameHint(room);
+    const climate = climateLine(room);
+    const title = hint ? `${room.name} — ${hint}` : room.name;
     return b`
-      <div class="room ${healthy ? "ok" : "attn"}">
+      <div class="room ${healthy ? "ok" : "attn"} ${single ? "single" : ""}">
         <div class="room-top">
-          <span class="room-name" title=${room.name}>${room.name}</span>
+          <span class="room-name" title=${title}>${room.name}</span>
           <span class="heads-count">${room.head_count}×</span>
         </div>
+        ${hint ? b`<div class="room-sub" title=${hint}>${hint}</div>` : A}
+        ${single ? b`<div class="room-sub kind">
+              ${namedAfterHead(room) ? t(this.hass, "room_named_after_head") : t(this.hass, "room_single_head")}
+            </div>` : A}
+        ${climate ? b`<div class="room-climate">${climate}</div>` : A}
         <div class="flags">
           ${room.heating ? b`<span class="flag hot">${t(this.hass, "room_calling")}</span>` : A}
           ${room.window_open ? b`<span class="flag warn">${t(this.hass, "room_window")}</span>` : A}
@@ -3669,6 +3712,25 @@ DanfossAllyPanel.styles = i$3`
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .room.single {
+      border-style: dashed;
+    }
+    .room-sub {
+      font-size: 0.72rem;
+      color: var(--secondary-text-color);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .room-sub.kind {
+      font-style: italic;
+    }
+    .room-climate {
+      font-size: 0.8rem;
+      color: var(--primary-text-color);
+      font-variant-numeric: tabular-nums;
+      margin-top: 2px;
     }
     .heads-count {
       font-size: 0.75rem;

@@ -55,6 +55,7 @@ from .writejob import (
 )
 
 if TYPE_CHECKING:
+    from .api import DanfossDevice
     from .coordinator import DanfossCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -184,18 +185,108 @@ def _room_overview(coordinator: DanfossCoordinator, group_id: str) -> dict[str, 
     return {
         "id": group_id,
         "name": rs.name,
+        "kind": "group",
         "head_count": rs.head_count,
+        "online": rs.online,
         "offline": sum(1 for h in heads if not h["online"]),
         "low_battery": sum(1 for h in heads if _low_battery_head(h)),
         "heating": bool(rs.heating) or any(h.get("heat_request") for h in heads),
         "window_open": any(h.get("window_open") for h in heads),
         "inconsistent": sum(1 for h in heads if h["inconsistent"]),
         "faults": sum(1 for h in heads if h["faults"]),
+        "temperature": rs.temperature,
+        "setpoint": rs.setpoint,
     }
 
 
+def _single_head_overview(dev: DanfossDevice, room: dict | None) -> dict[str, Any]:
+    """A single-head room (a head with no schedule-group) for the fleet overview (contract §3.6).
+
+    Same health fields as a grouped room, over its one head. ``room`` is the app room (type 4)
+    matched by name, or None: the name then falls back to the head's own name
+    (``name_source: "head"``).
+    """
+    h = head_state(dev)
+    return {
+        "id": dev.id,
+        "name": room["name"] if room else dev.name,
+        "kind": "single_head",
+        "name_source": "room" if room else "head",
+        "room_id": room["room_id"] if room else None,
+        "head_id": dev.id,
+        "head_name": dev.name,
+        "head_count": 1,
+        "online": bool(dev.online),
+        "offline": 0 if dev.online else 1,
+        "low_battery": 1 if _low_battery_head(h) else 0,
+        "heating": bool(dev.online and dev.heating) or bool(h.get("heat_request")),
+        "window_open": bool(h.get("window_open")),
+        "inconsistent": 1 if h["inconsistent"] else 0,
+        "faults": 1 if h["faults"] else 0,
+        "temperature": dev.temperature if dev.online else None,
+        "setpoint": dev.setpoint,
+    }
+
+
+def _single_head_rooms(
+    coordinator: DanfossCoordinator, home_gids: list[str]
+) -> dict[str, list[dict[str, Any]]]:
+    """Single-head rooms per home gid: every head that belongs to no schedule-group.
+
+    A room of the app with one head has no schedule-group (type 5), so it is absent from
+    ``coordinator.rooms``. Its home is exact (the per-home device list). Its app room cannot be read
+    from the cloud (the room membership is empty, contract §3.6), so it is matched **by name**: a
+    room of the same home whose normalised name equals the head's, not already claimed by a
+    schedule-group nor by another single head. Otherwise the head's name is used, flagged.
+    A head of unknown home goes to the first home (kept visible and counted rather than dropped).
+    """
+    singles = [
+        dev
+        for dev in coordinator.data.values()
+        if dev.is_head and coordinator.group_of(dev.id) is None
+    ]
+    by_home: dict[str, list[DanfossDevice]] = {}
+    for dev in singles:
+        home = coordinator.head_home(dev.id)
+        if home not in home_gids:
+            home = home_gids[0] if home_gids else None
+        if home is not None:
+            by_home.setdefault(home, []).append(dev)
+
+    out: dict[str, list[dict[str, Any]]] = {}
+    for home, devs in by_home.items():
+        # A room already named by a schedule-group of this home (with or without the " Group"
+        # label Tuya adds to an API-created room, §4.7) is not a single head's room.
+        claimed = {
+            key
+            for group_id, rs in coordinator.rooms.items()
+            if coordinator.home_of(group_id) == home
+            for key in (_norm_name(rs.name), _norm_name(rs.name.removesuffix(" Group")))
+        }
+        candidates: dict[str, list[dict]] = {}
+        for app_room in coordinator.home_rooms.get(home, []):
+            key = _norm_name(app_room.get("name"))
+            if key and key not in claimed:
+                candidates.setdefault(key, []).append(app_room)
+        wanted: dict[str, int] = {}
+        for dev in devs:
+            key = _norm_name(dev.name)
+            wanted[key] = wanted.get(key, 0) + 1
+        entries = []
+        for dev in devs:
+            key = _norm_name(dev.name)
+            match = candidates.get(key, [])
+            # Unambiguous only: one room of that name, wanted by this head alone.
+            room: dict | None = None
+            if len(match) == 1 and wanted[key] == 1:
+                room = {"room_id": str(match[0]["room_id"]), "name": match[0]["name"]}
+            entries.append(_single_head_overview(dev, room))
+        out[home] = entries
+    return out
+
+
 def _home_gids(coordinator: DanfossCoordinator) -> list[str]:
-    """Home gids present, from the room topology then the holiday reads (stable order)."""
+    """Home gids present, from the room topology, the holiday reads, then the heads' homes."""
     gids: list[str] = []
     for gid in coordinator.rooms:
         home = coordinator.home_of(gid)
@@ -204,6 +295,10 @@ def _home_gids(coordinator: DanfossCoordinator) -> list[str]:
     for gid in coordinator.holidays:
         if gid not in gids:
             gids.append(gid)
+    for dev in coordinator.data.values():
+        home = coordinator.head_home(dev.id) if dev.is_head else None
+        if home and home not in gids:
+            gids.append(home)
     return gids
 
 
@@ -273,13 +368,15 @@ def overview_payload(store: dict) -> dict:
 
     primary = home_gids[0] if home_gids else None
     home_by_name = _home_by_room_name(coordinator)
+    singles = _single_head_rooms(coordinator, home_gids)
     homes: list[dict[str, Any]] = []
     for gid in home_gids:
         rooms = [
             _room_overview(coordinator, group_id)
             for group_id in coordinator.rooms
             if coordinator.home_of(group_id) == gid
-        ]
+        ] + singles.get(gid, [])
+        rooms.sort(key=lambda r: (str(r["name"]).casefold(), r["id"]))
         home_relays = [
             {
                 "device_id": d.id,

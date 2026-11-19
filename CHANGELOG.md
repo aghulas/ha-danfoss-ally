@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Building panel: single-head rooms were missing.** A room of the app with one head has no
+  schedule-group, so the fleet overview (contract §3.6) only listed the grouped rooms and every total
+  ignored the other heads (a 99-head fleet showed 66, and a fault or low battery on a lone head was
+  invisible). Each such head is now a room of its own, `kind: "single_head"`, in its exact home
+  (per-home device list), with the same health fields; totals cover the whole fleet. Its name is the
+  app room's when one of its home has the same name (the cloud exposes no room membership), else
+  the head's own name, flagged (`name_source`). Rooms also carry `online`, `temperature` and
+  `setpoint`, shown on the tiles. Read only: one extra room-map read per home on the hourly topology
+  cadence; no write path is added (a single head keeps the isolated-head writes).
+
 ## 1.2.0 — Cloud-MQTT channel for isolated heads (gated), non-blocking local start, stale cleanup, reauth
 
 Minor release. It gathers the sections previously listed as unreleased: the gated cloud-MQTT write

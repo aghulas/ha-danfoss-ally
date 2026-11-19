@@ -141,6 +141,8 @@ const STRINGS = {
     room_calling: "Calling for heat",
     room_window: "Window open",
     room_ok: "OK",
+    room_single_head: "Single head, no group",
+    room_named_after_head: "Room not found in the app: head's name",
   },
   fr: {
     card_name: "Danfoss Ally — Programme",
@@ -277,6 +279,8 @@ const STRINGS = {
     room_calling: "Demande de chauffe",
     room_window: "Fenêtre ouverte",
     room_ok: "OK",
+    room_single_head: "Tête seule, sans groupe",
+    room_named_after_head: "Pièce de l'app non retrouvée : nom de la tête",
   },
 } satisfies Record<"en" | "fr", Dict>;
 
