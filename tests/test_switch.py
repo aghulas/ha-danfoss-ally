@@ -86,11 +86,13 @@ def _fenetre_desc():
 class _FakeMqttLink:
     """Stand-in for CloudMqttLink: records publishes, no network."""
 
-    def __init__(self, gateways=("gw-1",), connected=True, fail=None):
+    def __init__(self, gateways=("gw-1",), connected=True, fail=None, confirm=True):
         self._gw = set(gateways)
         self._connected = connected
         self.fail = fail
+        self.confirm = confirm
         self.published = []  # (mesh_id, node_id, dps)
+        self.confirmations = []  # (node_id, dp, value)
 
     def can_publish(self, gateway_id):
         return self._connected and gateway_id in self._gw
@@ -99,6 +101,10 @@ class _FakeMqttLink:
         if self.fail:
             raise self.fail
         self.published.append((gateway_id, node_id, dps))
+
+    async def await_confirmation(self, node_id, dp, value, *, timeout_s):
+        self.confirmations.append((node_id, dp, value))
+        return self.confirm
 
 
 def _switch(desc, dev, *, client=None, groups=None, local=None, mqtt=None, cloud_mqtt=False):
@@ -307,14 +313,36 @@ async def test_isolated_head_cloud_mqtt_path_when_enabled():
     assert sw.extra_state_attributes == {"write_path": "cloud_mqtt", "write_scope": "head"}
 
 
-async def test_isolated_head_cloud_mqtt_write_publishes_no_optimistic():
+async def test_isolated_head_cloud_mqtt_write_publishes_and_confirms():
     dev = head(child_lock=False)
-    link = _FakeMqttLink()
+    link = _FakeMqttLink(confirm=True)
     sw, coord = _switch(_verrou_desc(), dev, mqtt=link, cloud_mqtt=True)
     await sw.async_turn_on()
     assert link.published == [("gw-1", "node-1", {"30": True})]
+    assert link.confirmations == [("node-1", 30, True)]  # waited for the inbound confirmation
     assert coord.commanded == [dev.id]  # marked commanded (no optimistic state set)
-    assert coord.refreshed is True  # relies on the cloud refresh, not an optimistic write
+    assert coord.refreshed is True
+
+
+async def test_cloud_mqtt_window_dp116_not_routed_via_mqtt():
+    """Only DP 30 uses the MQTT path for now; DP 116 (window) falls through (here: unavailable)."""
+    dev = head(window_detection=True)  # isolated, no tunnel -> no path
+    link = _FakeMqttLink(connected=True)
+    sw, _ = _switch(_fenetre_desc(), dev, mqtt=link, cloud_mqtt=True)
+    assert sw.extra_state_attributes["write_path"] == "none"
+    assert sw.available is False
+
+
+async def test_cloud_mqtt_write_unconfirmed_and_cloud_still_differs_raises():
+    from homeassistant.exceptions import HomeAssistantError
+
+    dev = head(child_lock=False)  # cloud re-read keeps child_lock False, != commanded True
+    link = _FakeMqttLink(confirm=False)
+    sw, coord = _switch(_verrou_desc(), dev, mqtt=link, cloud_mqtt=True)
+    with pytest.raises(HomeAssistantError):
+        await sw.async_turn_on()
+    assert link.published  # it did send
+    assert coord.refreshed is True  # tried a cloud re-read before failing
 
 
 async def test_cloud_mqtt_ignored_when_option_off():

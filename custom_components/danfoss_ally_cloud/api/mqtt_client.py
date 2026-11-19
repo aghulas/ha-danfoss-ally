@@ -114,15 +114,53 @@ class CloudMqttLink:
     credentials: MqttCredentials
     gateways: dict[str, GatewayRef]
     on_frame: Callable[[str, mp.Frame], None] | None = None
+    # Optional: returns fresh credentials (e.g. after the integration refreshed the sid). Used on
+    # reconnect so a rotated session is picked up instead of retrying stale credentials.
+    creds_provider: Callable[[], MqttCredentials] | None = None
     _seq: dict[str, mp.SeqOrigin] = field(default_factory=dict)
     _connected: bool = False
     _client: Any = None
+    # Pending write confirmations: (node_id, dp_str, value, loop, future). Resolved true when an
+    # inbound frame echoes that DP for that cid (the gateway's protocol-4 report).
+    _waiters: list[tuple[str, str, Any, Any, Any]] = field(default_factory=list)
 
     # --- pure logic (unit-tested offline) ---
 
     @property
     def connected(self) -> bool:
         return self._connected
+
+    def _on_inbound(self, gateway_id: str, frame: mp.Frame) -> None:
+        """Dispatch a decoded inbound frame: resolve any matching write-confirmation waiter, then
+        call ``on_frame``. Runs on paho's thread, so futures are set via their own loop."""
+        data: dict[Any, Any] = frame.data if isinstance(frame.data, dict) else {}
+        cid = data.get("cid")
+        raw_dps = data.get("dps")
+        dps: dict[Any, Any] = raw_dps if isinstance(raw_dps, dict) else {}
+        for node_id, dp_str, value, loop, fut in list(self._waiters):
+            if cid == node_id and dp_str in dps and dps[dp_str] == value and not fut.done():
+                loop.call_soon_threadsafe(fut.set_result, True)
+        if self.on_frame is not None:
+            self.on_frame(gateway_id, frame)
+
+    async def await_confirmation(
+        self, node_id: str, dp: int, value: Any, *, timeout_s: float
+    ) -> bool:
+        """Wait up to ``timeout`` s for an inbound frame confirming ``dp==value`` on ``node_id``.
+        Returns False on timeout (the caller then falls back to a cloud re-read)."""
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        fut: Any = loop.create_future()
+        waiter = (node_id, str(dp), value, loop, fut)
+        self._waiters.append(waiter)
+        try:
+            return bool(await asyncio.wait_for(fut, timeout_s))
+        except TimeoutError:
+            return False
+        finally:
+            if waiter in self._waiters:
+                self._waiters.remove(waiter)
 
     def seq_for(self, gateway_id: str) -> mp.SeqOrigin:
         if gateway_id not in self._seq:
@@ -193,11 +231,22 @@ class CloudMqttLink:
 
         def on_message(_client: Any, _u: Any, msg: Any) -> None:
             dec = self.decode_inbound(str(msg.topic), bytes(msg.payload))
-            if dec is not None and self.on_frame is not None:
-                self.on_frame(*dec)
+            if dec is not None:
+                self._on_inbound(*dec)
 
-        def on_disconnect(_client: Any, _u: Any, rc: int) -> None:
+        def on_disconnect(client: Any, _u: Any, rc: int) -> None:
             self._connected = False
+            # Refresh credentials before paho auto-reconnects, so a rotated sid is picked up rather
+            # than retried stale. Best-effort on the loop thread.
+            if self.creds_provider is not None:
+                try:
+                    fresh = self.creds_provider()
+                    self.credentials = fresh
+                    client.username_pw_set(fresh.username, fresh.password)
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "cloud-mqtt link: credential refresh failed: %s", type(err).__name__
+                    )
 
         client = mqtt.Client(client_id=c.client_id, clean_session=True, protocol=mqtt.MQTTv311)
         client.on_connect = on_connect
@@ -205,6 +254,7 @@ class CloudMqttLink:
         client.on_disconnect = on_disconnect
         client.username_pw_set(c.username, c.password)
         client.tls_set(ca_certs=ca_certs, cert_reqs=ssl.CERT_REQUIRED)
+        client.reconnect_delay_set(min_delay=2, max_delay=60)  # exponential backoff on reconnect
         self._client = client
         client.connect_async(c.host, c.port, keepalive=60)
         client.loop_start()

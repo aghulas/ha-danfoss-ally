@@ -32,7 +32,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import CloudError, DanfossDevice, write_allowed
+from .api import MQTT_WRITE_DPS, CloudError, DanfossDevice, mqtt_write_value, write_allowed
 from .api.local import tunnel
 from .api.local.manager import Head
 from .api.mqtt_client import CloudMqttLink
@@ -45,6 +45,10 @@ PATH_ROOM = "room"  # group publish on the head's room: affects every head of th
 PATH_MQTT = "cloud_mqtt"  # isolated head via dedicated-session Tuya cloud MQTT (gated, this head)
 PATH_LOCAL = "local"  # local Zigbee tunnel, this head only
 PATH_NONE = "none"  # no proven path: the switch is unavailable
+
+# How long to wait for the gateway's inbound protocol-4 confirmation after a cloud-MQTT write,
+# before falling back to a cloud re-read (and then a clear error if still unconfirmed).
+MQTT_CONFIRM_TIMEOUT = 15.0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -128,8 +132,11 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
     def _mqtt_ready(self, dev: DanfossDevice) -> bool:
         """True if an isolated head can be written through the dedicated-session cloud-MQTT link
         right now: the gate is on, a connected link exists, and it knows this head's gateway. Never
-        optimistic — a link that is absent or not connected makes this path unusable."""
+        optimistic — a link that is absent or not connected makes this path unusable. Only the DPs
+        enabled on the MQTT path (DP 30 at first) use it; others fall through to tunnel/none."""
         if not (self._cloud_mqtt_enabled and self._mqtt is not None):
+            return False
+        if self.entity_description.dp not in MQTT_WRITE_DPS:
             return False
         if not dev.node_id or not dev.mesh_id:
             return False
@@ -203,11 +210,26 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
             # is OFF by default and a first real publish needs an explicit supervised go-ahead.
             if self._mqtt is None or not dev.node_id or not dev.mesh_id:
                 return
+            # Validate the value before sending (DP-30-only / boolean) — a clear error, never a
+            # blind send. Then publish and wait for a confirmation (no optimistic success).
+            value = mqtt_write_value(self.entity_description.dp, state)
             try:
-                await self._mqtt.publish_dp(dev.mesh_id, dev.node_id, {dp: state})
+                await self._mqtt.publish_dp(dev.mesh_id, dev.node_id, {dp: value})
+                confirmed = await self._mqtt.await_confirmation(
+                    dev.node_id, self.entity_description.dp, value, timeout_s=MQTT_CONFIRM_TIMEOUT
+                )
             except Exception as err:  # noqa: BLE001 - surface any send failure, never a blind write
                 raise HomeAssistantError(f"cloud-MQTT setting write failed: {err}") from err
             self.coordinator.note_commanded([dev.id])
+            if not confirmed:
+                # Fall back to a cloud re-read; if still unconfirmed, say so (do not claim success).
+                await self.coordinator.async_request_refresh()
+                dev2 = self.device
+                if dev2 is None or self.entity_description.value(dev2) != value:
+                    raise HomeAssistantError(
+                        "cloud-MQTT write not confirmed (no inbound frame, cloud still differs)"
+                    )
+                return
         else:
             head = self._local_head(dev)
             if head is None or self._local is None:

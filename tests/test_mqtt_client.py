@@ -205,6 +205,9 @@ class _FakePaho:
     def tls_set(self, **kw):
         self.tls = kw
 
+    def reconnect_delay_set(self, **kw):
+        self.reconnect_delay = kw
+
     def connect_async(self, host, port, keepalive=60):
         self.connected_to = (host, port)
 
@@ -285,3 +288,58 @@ async def test_link_start_connect_publish_and_stop(monkeypatch):
     assert link.can_publish(GW) is False  # drop -> unavailable, never optimistic
     link.stop()
     assert c.loop_stopped and c.disconnected
+
+
+async def test_await_confirmation_resolves_on_matching_inbound_frame():
+    import asyncio
+
+    link = mc.CloudMqttLink(
+        credentials=mc.MqttCredentials(host="h", client_id="c", username="u", password="p"),
+        gateways={GW: mc.GatewayRef(dev_id=GW, local_key=KEY)},
+    )
+
+    async def feed_after(delay):
+        await asyncio.sleep(delay)
+        # an inbound protocol-4 report echoing DP 30 = True for node-9
+        raw = mp.encode_frame(
+            KEY, {"cid": "node-9", "dps": {"30": True}}, seq=9, origin=1, protocol=4
+        )
+        link._on_inbound(*link.decode_inbound(f"smart/mb/in/{GW}", raw))
+
+    task = asyncio.ensure_future(feed_after(0.01))
+    ok = await link.await_confirmation("node-9", 30, True, timeout_s=1.0)
+    await task
+    assert ok is True
+
+
+async def test_await_confirmation_times_out_without_frame():
+    link = mc.CloudMqttLink(
+        credentials=mc.MqttCredentials(host="h", client_id="c", username="u", password="p"),
+        gateways={GW: mc.GatewayRef(dev_id=GW, local_key=KEY)},
+    )
+    assert await link.await_confirmation("node-9", 30, True, timeout_s=0.05) is False
+    assert link._waiters == []  # cleaned up
+
+
+async def test_await_confirmation_ignores_other_cid_or_value():
+    import asyncio
+
+    link = mc.CloudMqttLink(
+        credentials=mc.MqttCredentials(host="h", client_id="c", username="u", password="p"),
+        gateways={GW: mc.GatewayRef(dev_id=GW, local_key=KEY)},
+    )
+
+    async def feed():
+        await asyncio.sleep(0.01)
+        other = mp.encode_frame(
+            KEY, {"cid": "other", "dps": {"30": True}}, seq=1, origin=1, protocol=4
+        )
+        link._on_inbound(*link.decode_inbound(f"smart/mb/in/{GW}", other))
+        wrongval = mp.encode_frame(
+            KEY, {"cid": "node-9", "dps": {"30": False}}, seq=2, origin=1, protocol=4
+        )
+        link._on_inbound(*link.decode_inbound(f"smart/mb/in/{GW}", wrongval))
+
+    task = asyncio.ensure_future(feed())
+    assert await link.await_confirmation("node-9", 30, True, timeout_s=0.1) is False
+    await task

@@ -280,7 +280,24 @@ async def _async_setup_mqtt_link(
         built = await _async_mqtt_creds_and_gateways(entry, client, context="link")
         if built is None:
             return None
-        link = CloudMqttLink(credentials=built[0], gateways=built[1])
+
+        def _fresh_creds() -> MqttCredentials:
+            """Rebuild credentials from the client's current (possibly refreshed) session."""
+            ident = client.mqtt_identity
+            sess = client.session
+            data = entry.data
+            return build_credentials(
+                region=data.get(CONF_REGION, "eu"),
+                sign_key=data[CONF_SIGN_KEY],
+                sid=sess["sid"] or "",
+                ecode=sess["ecode"] or "",
+                uid=ident["uid"] or "",
+                partner_identity=ident["partner_identity"] or "",
+                device_id=data[CONF_DEVICE_ID],
+                ch_key=data[CONF_CH_KEY],
+            )
+
+        link = CloudMqttLink(credentials=built[0], gateways=built[1], creds_provider=_fresh_creds)
     except Exception as err:  # noqa: BLE001 - never break setup
         _LOGGER.warning("Cloud-MQTT link setup failed: %s", type(err).__name__)
         return None
