@@ -106,7 +106,10 @@ publish over Tuya cloud MQTT, the only path found that applies them (contract §
    source: window detection (compare with the local tunnel), bounds, isolated-head setpoints.
    Preheat last, read back as attribute 0x0025 (cloud DP 1 over HTTP only changed the gateway cache).
 3. **Measure inbound coverage**: which heads and DPs the broker pushes, and how often, over a full
-   day.
+   day. **Tooling shipped**: the listen-only option `cloud_mqtt_probe` (off by default) accounts the
+   pushed reports per head and per DP and serves the aggregates in the diagnostics. The 24 h run on
+   a real install is still to do; how to run and read it, and what it must show to start stage 4:
+   `docs/cloud-mqtt-coverage.md`.
 4. **Push as a read source**, if stage 3 shows full coverage: feed the coordinator from the pushed
    reports, drop the post-command per-device read, lengthen the polling period.
 5. **Hardening before it is on by default anywhere**: kill switch, reconnect backoff, session

@@ -12,6 +12,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.typing import ConfigType
 
 from .api import CloudClient, async_fetch_gateway_keys
@@ -23,7 +24,9 @@ from .api.mqtt_client import (
     build_credentials,
 )
 from .const import (
+    CLOUD_MQTT_PROBE_MAX_SECONDS,
     CONF_CH_KEY,
+    CONF_CLOUD_MQTT_PROBE,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
@@ -46,9 +49,11 @@ from .const import (
     DATA_JOBS,
     DATA_LOCAL,
     DATA_MQTT,
+    DATA_MQTT_COVERAGE,
     DATA_MQTT_LINK,
     DATA_SCHEDULES,
     DATA_VACATION_WRITE,
+    DEFAULT_CLOUD_MQTT_PROBE,
     DEFAULT_DISTINCT_DEVICE_ID,
     DEFAULT_ENABLE_CLOUD_MQTT,
     DEFAULT_ENABLE_HEAD_UNBIND,
@@ -65,6 +70,7 @@ from .const import (
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 from .device_links import async_link_heads_to_rooms
 from .frontend import async_register_frontend, async_unregister_frontend
+from .mqtt_coverage import CoverageStats
 from .mqtt_publisher import MqttPublisher
 from .services import async_register_services
 from .websocket_api import async_register as async_register_ws
@@ -120,10 +126,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # MQTT publishing (optional).
     publisher = await _async_setup_mqtt(hass, entry, coordinator)
 
-    # Cloud-MQTT live link (optional, EXPERIMENTAL write path for isolated heads). Best-effort;
-    # OFF by default. When on, the isolated-head switches route through it (a toggle then publishes
-    # a DP — the first such write must be supervised; see docs/first-write-procedure.md).
-    mqtt_link = await _async_setup_mqtt_link(hass, entry, client)
+    # Cloud-MQTT live link (optional, EXPERIMENTAL). Best-effort; OFF by default. Opened by
+    # ``enable_cloud_mqtt`` (write path for isolated heads: a toggle then publishes a DP — the first
+    # such write must be supervised; see docs/first-write-procedure.md) and/or by
+    # ``cloud_mqtt_probe`` (coverage measure; listen-only when the write option is off).
+    mqtt_link, mqtt_coverage = await _async_setup_mqtt_link(hass, entry, client)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         DATA_COORDINATOR: coordinator,
@@ -136,9 +143,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ),
         DATA_HEAD_UNBIND: entry.options.get(CONF_ENABLE_HEAD_UNBIND, DEFAULT_ENABLE_HEAD_UNBIND),
         DATA_CLOUD_MQTT: entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT),
-        # Live MQTT link: present only when enable_cloud_mqtt is on (OFF by default). The switches
-        # treat None as "no cloud-MQTT path", so isolated heads stay as PR #69 left them.
+        # Live MQTT link: present only when enable_cloud_mqtt or cloud_mqtt_probe is on (both OFF
+        # by default). The switches treat None as "no cloud-MQTT path", and a listen-only link
+        # (probe without the write option) refuses every publish.
         DATA_MQTT_LINK: mqtt_link,
+        DATA_MQTT_COVERAGE: mqtt_coverage,
     }
     await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
     _cleanup_orphaned_head_climates(hass, entry, coordinator)
@@ -230,19 +239,29 @@ async def _async_mqtt_creds_and_gateways(
 
 async def _async_setup_mqtt_link(
     hass: HomeAssistant, entry: ConfigEntry, client: CloudClient
-) -> CloudMqttLink | None:
-    """Open the live cloud-MQTT link if ``enable_cloud_mqtt`` is on (OFF by default). Best-effort:
-    returns None on failure, never blocks setup. Uses the integration's OWN session. The link can
-    publish, but only the isolated-head switches reach ``publish_dp`` (and only when a user toggles
-    one); the first such write must be supervised (docs/first-write-procedure.md). Closes on unload.
-    If the ``sid`` later rotates, the reconnect is refused and the switches become unavailable
-    rather than lying — a session-refresh rewire is a follow-up."""
-    if not entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT):
-        return None
+) -> tuple[CloudMqttLink | None, CoverageStats | None]:
+    """Open the live cloud-MQTT link if ``enable_cloud_mqtt`` or ``cloud_mqtt_probe`` is on (both
+    OFF by default). Best-effort: returns ``(None, None)`` on failure, never blocks setup. Uses the
+    integration's OWN session. One connection per session, so both options share the link.
+
+    - ``enable_cloud_mqtt``: the link can publish, but only the isolated-head switches reach
+      ``publish_dp`` (and only when a user toggles one); the first such write must be supervised
+      (docs/first-write-procedure.md).
+    - ``cloud_mqtt_probe``: every decoded inbound frame feeds a ``CoverageStats`` (aggregates only,
+      docs/cloud-mqtt-coverage.md). Without ``enable_cloud_mqtt`` the link is LISTEN-ONLY (no send
+      path) and closes itself after ``CLOUD_MQTT_PROBE_MAX_SECONDS``.
+
+    Closes on unload. If the ``sid`` later rotates, the reconnect is refused and the switches become
+    unavailable rather than lying — a session-refresh rewire is a follow-up."""
+    write = bool(entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT))
+    probe = bool(entry.options.get(CONF_CLOUD_MQTT_PROBE, DEFAULT_CLOUD_MQTT_PROBE))
+    if not (write or probe):
+        return None, None
+    coverage = CoverageStats() if probe else None
     try:
         built = await _async_mqtt_creds_and_gateways(entry, client, context="link")
         if built is None:
-            return None
+            return None, None
 
         def _fresh_creds() -> MqttCredentials:
             """Rebuild credentials from the client's current (possibly refreshed) session."""
@@ -260,23 +279,37 @@ async def _async_setup_mqtt_link(
                 ch_key=data[CONF_CH_KEY],
             )
 
-        link = CloudMqttLink(credentials=built[0], gateways=built[1], creds_provider=_fresh_creds)
+        link = CloudMqttLink(
+            credentials=built[0],
+            gateways=built[1],
+            creds_provider=_fresh_creds,
+            on_frame=coverage.record if coverage is not None else None,
+            listen_only=not write,
+        )
     except Exception as err:  # noqa: BLE001 - never break setup
         _LOGGER.warning("Cloud-MQTT link setup failed: %s", type(err).__name__)
-        return None
+        return None, None
 
     await hass.async_add_executor_job(link.start)
-    _LOGGER.warning(
-        "Cloud-MQTT live link started (EXPERIMENTAL): isolated-head switches may write via MQTT. "
-        "A first write must be supervised."
-    )
+    if write:
+        _LOGGER.warning(
+            "Cloud-MQTT live link started (EXPERIMENTAL): isolated-head switches may write via "
+            "MQTT. A first write must be supervised."
+        )
+    else:
+        _LOGGER.info("Cloud-MQTT link started in listen-only mode (coverage measure).")
 
-    async def _stop_link() -> None:
+    async def _stop_link(_now: object = None) -> None:
+        if coverage is not None and not write:
+            coverage.mark_stopped()
         # loop_stop() joins the paho thread: never block the event loop.
         await hass.async_add_executor_job(link.stop)
 
     entry.async_on_unload(_stop_link)
-    return link
+    if not write:
+        # A forgotten probe must not keep a broker connection open on the user's account.
+        entry.async_on_unload(async_call_later(hass, CLOUD_MQTT_PROBE_MAX_SECONDS, _stop_link))
+    return link, coverage
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
