@@ -84,6 +84,13 @@ optimistic state. A link that is down makes the dependent switches unavailable.
   credentials. After `MAX_AUTH_REFUSALS` (5) refusals in a row, about a minute, the link **stops for
   good** (state `refused`) until the entry is reloaded: it never presents refused credentials in a
   loop. Other return codes (broker unavailable…) are transient and only follow the backoff.
+  Two cases behind that refresh (`tests/test_mqtt_session_renewal.py`): a session invalidated
+  elsewhere is renewed **inside the HTTP request** (`CloudClient._request` signs in again and
+  replays), so the refresh succeeds and the link recovers; a sign-in that is itself refused
+  (password or installation secrets no longer valid) raises `ConfigEntryAuthFailed`, nothing can
+  renew the session, and the link stops after its refusals — which is the wanted outcome. The
+  config flow has no reauthentication step yet: recovering from that second case means fixing
+  the entry's credentials and reloading.
 - **States**: `idle`, `connecting`, `connected`, `refused`, `stopped`, shown by the "Cloud MQTT
   link" sensor (`state` attribute) and the `cloud_mqtt_link` diagnostics block (with the counters
   `connects`, `disconnects`, `auth_refusals`, `last_connack_rc`, `received`, `decoded`).
