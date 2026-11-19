@@ -1,38 +1,59 @@
 """Switches: child lock (DP 30), window detection (DP 116), preheat (local).
 
-Child lock / window: path-1a write via tuya.m.custom.wkf.settings.change, for guard-rail products
-(WRITE_VERIFIED_PRODUCTS), unavailable while offline. Preheat: writing DP 1 on the cloud only
-changes the gateway cache; the real lever is the Zigbee attribute 0x0025, via the LOCAL TUNNEL. The
-preheat switch therefore exists only if the `enable_local` option is on and the gateway reachable;
-otherwise it is absent (rather than lying).
+Child lock / window detection, for guard-rail products (WRITE_VERIFIED_PRODUCTS), unavailable while
+offline. The write path depends on the head (real-hardware result W-3, 2026-11-19):
+
+- head GROUPED into a room: the setting is published on the ROOM (``s.m.dev.group.dp.publish``,
+  contract §4.2), the proven path. ⚠ It applies to EVERY head of that room (exposed in the
+  ``write_scope`` / ``room_head_count`` attributes);
+- ISOLATED head: ``tuya.m.custom.wkf.settings.change`` is accepted but NEVER applied for DP 30/116
+  (W-3, whatever the ``gwId``), and an app capture showed the app does not use it for these DPs (it
+  publishes the DP over Tuya cloud MQTT, not implemented here). So: window detection goes through
+  the LOCAL TUNNEL when it is active and the head answers locally (W-4 ✅); otherwise, and always
+  the child lock (not exposed by the local path), the switch is UNAVAILABLE rather than lying.
+
+Preheat: writing DP 1 on the cloud only changes the gateway cache; the real lever is the Zigbee
+attribute 0x0025, via the LOCAL TUNNEL. The preheat switch therefore exists only if the
+`enable_local` option is on and the gateway reachable; otherwise it is absent (rather than lying).
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import DanfossDevice, write_allowed
+from .api import CloudError, DanfossDevice, write_allowed
+from .api.local import tunnel
 from .api.local.manager import Head
 from .const import DATA_COORDINATOR, DATA_LOCAL, DOMAIN
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 from .entity import DanfossEntity
 
+# Write paths of a setting switch (``write_path`` attribute).
+PATH_ROOM = "room"  # group publish on the head's room: affects every head of the room
+PATH_LOCAL = "local"  # local Zigbee tunnel, this head only
+PATH_NONE = "none"  # no proven path: the switch is unavailable
+
 
 @dataclass(frozen=True, kw_only=True)
 class DanfossSwitchDescription(SwitchEntityDescription):
-    """Switch: target DP and read of the decoded state."""
+    """Switch: target DP, read of the decoded state, local-tunnel write if any."""
 
     dp: int
     value: Callable[[DanfossDevice], bool | None]
+    # Name of the setting in ``tunnel.SETTINGS_DP`` when an isolated head can be written through the
+    # local tunnel (proven on real hardware), else None (no proven isolated-head path).
+    local_setting: str | None = None
 
 
 SWITCHES: tuple[DanfossSwitchDescription, ...] = (
@@ -51,6 +72,7 @@ SWITCHES: tuple[DanfossSwitchDescription, ...] = (
         icon="mdi:window-open-variant",
         dp=116,
         value=lambda d: d.window_detection,
+        local_setting="window_detection",  # W-4 ✅ through the tunnel
     ),
 )
 
@@ -63,7 +85,7 @@ async def async_setup_entry(
     local: DanfossLocalCoordinator | None = data.get(DATA_LOCAL)
 
     entities: list[SwitchEntity] = [
-        DanfossSwitch(coordinator, dev.id, desc)
+        DanfossSwitch(coordinator, dev.id, desc, local)
         for dev in coordinator.data.values()
         if dev.is_head and write_allowed(dev)
         for desc in SWITCHES
@@ -79,32 +101,93 @@ async def async_setup_entry(
 
 
 class DanfossSwitch(DanfossEntity, SwitchEntity):
-    """Setting switch of a head (guarded write)."""
+    """Setting switch of a head (guarded write, routed by room / local tunnel)."""
 
     entity_description: DanfossSwitchDescription
 
     def __init__(
-        self, coordinator: DanfossCoordinator, device_id: str, description: DanfossSwitchDescription
+        self,
+        coordinator: DanfossCoordinator,
+        device_id: str,
+        description: DanfossSwitchDescription,
+        local: DanfossLocalCoordinator | None = None,
     ) -> None:
         super().__init__(coordinator, device_id)
         self.entity_description = description
+        self._local = local
         self._attr_unique_id = f"{device_id}_{description.key}"
+
+    def _local_head(self, dev: DanfossDevice) -> Head | None:
+        """The tunnel address of an isolated head, if the local path is usable right now.
+
+        Usable = the setting has a proven tunnel write, the local option is on, the head's gateway
+        is known to the tunnel, and the last local survey got an answer from this head (a gateway or
+        head that does not answer locally makes the switch unavailable, never a blind write).
+        """
+        local = self._local
+        if self.entity_description.local_setting is None or local is None:
+            return None
+        if not dev.node_id or not dev.mesh_id or dev.mesh_id not in local.manager.gateway_ids:
+            return None
+        if not local.last_update_success or (local.data or {}).get(dev.id) is None:
+            return None
+        return Head(dev.id, dev.node_id, dev.mesh_id)
+
+    def _write_path(self, dev: DanfossDevice | None) -> str:
+        if dev is None or not write_allowed(dev):
+            return PATH_NONE
+        if self.coordinator.group_of(dev.id) is not None:
+            return PATH_ROOM
+        if self._local_head(dev) is not None:
+            return PATH_LOCAL
+        return PATH_NONE
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._write_path(self.device) != PATH_NONE
 
     @property
     def is_on(self) -> bool | None:
         dev = self.device
         return self.entity_description.value(dev) if dev else None
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        dev = self.device
+        path = self._write_path(dev)
+        attrs: dict[str, Any] = {"write_path": path}
+        if path == PATH_ROOM and dev is not None:
+            group_id = self.coordinator.group_of(dev.id)
+            attrs["write_scope"] = "room"
+            attrs["room_head_count"] = len(self.coordinator.room_members(group_id or ""))
+        elif path == PATH_LOCAL:
+            attrs["write_scope"] = "head"
+        return attrs
+
     async def _async_write(self, state: bool) -> None:
         dev = self.device
-        if dev is None or not write_allowed(dev):
+        path = self._write_path(dev)
+        if dev is None or path == PATH_NONE:
             return
-        await self.coordinator.client.async_write_setting(
-            dev.id,
-            dev.product_id or "",
-            {str(self.entity_description.dp): state},
-            gw_id=dev.mesh_id,
-        )
+        dp = str(self.entity_description.dp)
+        if path == PATH_ROOM:
+            group_id = self.coordinator.group_of(dev.id) or ""
+            try:
+                await self.coordinator.client.async_group_publish(group_id, {dp: state})
+            except CloudError as err:
+                raise HomeAssistantError(f"room setting write refused: {err}") from err
+            self.coordinator.note_commanded(self.coordinator.room_members(group_id) or [dev.id])
+        else:
+            head = self._local_head(dev)
+            if head is None or self._local is None:
+                return
+            try:
+                await self.hass.async_add_executor_job(
+                    self._local.manager.write_window_detection, head, state
+                )
+            except (tunnel.LocalUnavailable, tunnel.LocalError) as err:
+                raise HomeAssistantError(f"local setting write failed: {err}") from err
+            self.coordinator.note_commanded([dev.id])
         await self.coordinator.async_request_refresh()
 
     async def async_turn_on(self, **kwargs) -> None:

@@ -126,6 +126,11 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         """A head's room group_id, or None if the head is not grouped."""
         return self._group_of.get(head_id)
 
+    def room_members(self, group_id: str) -> tuple[str, ...]:
+        """Member head ids of a room (group), from the cached topology. Empty if unknown."""
+        room = self._rooms_topology.get(group_id)
+        return room.members if room else ()
+
     def home_of(self, group_id: str) -> str | None:
         """The home gid a room (group) belongs to, from the cached topology."""
         room = self._rooms_topology.get(group_id)

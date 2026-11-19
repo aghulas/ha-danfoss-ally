@@ -615,18 +615,21 @@ class CloudClient:
     ) -> object:
         """Write setting DPs on a HEAD (tuya.m.custom.wkf.settings.change, resType 1).
 
-        Mechanism proven by capture (see danfoss-ally-mcp) for the "Setting" screen DPs (child lock,
-        window detection, setpoint...). `dps` = {str(dp): value}. A head GROUPED into a room is
-        normally set through its room (group) - not handled in v0.2.
+        ``dps`` = {str(dp): value}. ``gw_id`` is the head's gateway (``meshId``); when omitted (or
+        falsy) it falls back to ``dev_id``.
 
-        ``gw_id`` is the head's gateway (``meshId``). For an isolated head the gateway is the
-        proven addressing (see ``_resolve_target`` and contract §4.1, confirmed on real hardware
-        2026-11-17, C0b): the schedule writes already use ``gwId = meshId``, and this settings
-        path is now aligned on it. When ``gw_id`` is omitted (or falsy) it falls back to ``dev_id``,
-        the previous behaviour.
+        ⚠ NOT a working path for the head settings DP 30 (child lock) / DP 116 (window detection).
+        Real-hardware validation W-3 (2026-11-19): on an ISOLATED head the request is accepted but
+        never applied (C-1 stayed locked > 10 min), both with ``gwId = meshId`` (this integration)
+        and ``gwId = devId`` (the MCP connector) - addressing is not the cause; consistent with the
+        connector's 2026-11-15 survey (DP 116 applied on 0 of 7 isolated heads). An app capture the
+        same day showed why: the app only uses this route for its "Settings" block
+        ``{"1", "118", "119", "121"}`` (with ``gwId = devId``) and toggles DP 30 through a DP
+        publish over Tuya cloud MQTT (``smart/mb/out/<gateway>``), not over HTTP. Contract §4.2.
 
-        ⚠ The real effect on the head is still to confirm on real hardware (some settings via this
-        path had not reached every isolated head in the MCP trials).
+        So the setting switches no longer call this: a grouped head is set through its room
+        (``async_group_publish``), an isolated head through the local tunnel (window detection) or
+        not at all (unavailable). Kept for the back-to-schedule label (``async_restore_schedule``).
         """
         if not dev_id or not pid:
             raise CloudWriteError("devId/pid required for the write.")
