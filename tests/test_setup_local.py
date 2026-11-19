@@ -142,3 +142,53 @@ async def test_update_options_recharge(hass: HomeAssistant, mqtt_double):
         await hass.async_block_till_done()
     # The entry is still in place after reload.
     assert entry.entry_id in hass.data[DOMAIN]
+
+
+async def test_cloud_mqtt_probe_setup_and_diagnostics(hass: HomeAssistant, monkeypatch):
+    """Probe option ON: the listen-only probe starts from the integration's own session, records a
+    redacted result reachable via diagnostics, and stops on unload. paho is faked (no network)."""
+    import paho.mqtt.client as paho
+
+    from custom_components.danfoss_ally_cloud.const import (
+        CONF_ENABLE_CLOUD_MQTT_PROBE,
+        DATA_MQTT_PROBE,
+    )
+    from custom_components.danfoss_ally_cloud.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
+
+    from .test_mqtt_client import _FakePaho
+
+    _FakePaho.instances.clear()
+    monkeypatch.setattr(paho, "Client", _FakePaho)
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=ENTRY_DATA,
+        unique_id="compte@exemple.fr",
+        options={CONF_ENABLE_CLOUD_MQTT_PROBE: True},
+    )
+    entry.add_to_hass(hass)
+    with (
+        patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=FakeCloudClient()),
+        patch(
+            "custom_components.danfoss_ally_cloud.async_fetch_gateway_keys",
+            AsyncMock(return_value=_GW),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    listener = hass.data[DOMAIN][entry.entry_id][DATA_MQTT_PROBE]
+    assert listener is not None
+    c = _FakePaho.instances[-1]
+    assert c.connected_to[1] == 8883 and c.loop_started  # connected read-only
+    c.on_connect(c, None, None, 0)
+    assert c.subscribed == [("smart/mb/in/gw-1", 1)]  # subscribed to the known gateway
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["cloud_mqtt_probe"]["connack_rc"] == 0  # result exposed, redacted
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert c.loop_stopped and c.disconnected  # stopped on unload

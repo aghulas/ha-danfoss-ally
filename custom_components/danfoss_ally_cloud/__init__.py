@@ -8,20 +8,25 @@ operations the cloud misses (see docs/architecture.md). v0.1: cloud read only.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.typing import ConfigType
 
 from .api import CloudClient, async_fetch_gateway_keys
 from .api.local.manager import LocalTunnelManager
+from .api.mqtt_client import CloudMqttListener, GatewayRef, build_credentials
 from .const import (
+    CLOUD_MQTT_PROBE_MAX_SECONDS,
     CONF_CH_KEY,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
     CONF_ENABLE_CLOUD_MQTT,
+    CONF_ENABLE_CLOUD_MQTT_PROBE,
     CONF_ENABLE_HEAD_UNBIND,
     CONF_ENABLE_LOCAL,
     CONF_ENABLE_VACATION_WRITE,
@@ -41,10 +46,12 @@ from .const import (
     DATA_LOCAL,
     DATA_MQTT,
     DATA_MQTT_LINK,
+    DATA_MQTT_PROBE,
     DATA_SCHEDULES,
     DATA_VACATION_WRITE,
     DEFAULT_DISTINCT_DEVICE_ID,
     DEFAULT_ENABLE_CLOUD_MQTT,
+    DEFAULT_ENABLE_CLOUD_MQTT_PROBE,
     DEFAULT_ENABLE_HEAD_UNBIND,
     DEFAULT_ENABLE_VACATION_WRITE,
     DEFAULT_LOCAL_SCAN_INTERVAL,
@@ -113,6 +120,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # MQTT publishing (optional).
     publisher = await _async_setup_mqtt(hass, entry, coordinator)
 
+    # Cloud-MQTT listen-only probe (optional, R&D). Best-effort: must never block setup.
+    mqtt_probe = await _async_setup_mqtt_probe(hass, entry, client)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         DATA_COORDINATOR: coordinator,
         DATA_LOCAL: local_coordinator,
@@ -127,6 +137,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Live MQTT link is created only during a supervised, gated connect (not wired yet); the
         # switches treat None as "no cloud-MQTT path", so isolated heads stay as PR #69 left them.
         DATA_MQTT_LINK: None,
+        DATA_MQTT_PROBE: mqtt_probe,
     }
     await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
     _cleanup_orphaned_head_climates(hass, entry, coordinator)
@@ -172,6 +183,66 @@ async def _async_setup_local(
     # Non-blocking first survey: an unreachable gateway must not prevent startup.
     await local.async_refresh()
     return local
+
+
+async def _async_setup_mqtt_probe(
+    hass: HomeAssistant, entry: ConfigEntry, client: CloudClient
+) -> CloudMqttListener | None:
+    """Start the LISTEN-ONLY cloud-MQTT probe if its option is on. Best-effort: returns None on any
+    failure and never blocks or breaks setup. Uses the integration's OWN session (no secret taken
+    from HA storage); auto-stops after CLOUD_MQTT_PROBE_MAX_SECONDS and on unload/reload (option
+    toggled off triggers a reload). It has no publish path."""
+    if not entry.options.get(CONF_ENABLE_CLOUD_MQTT_PROBE, DEFAULT_ENABLE_CLOUD_MQTT_PROBE):
+        return None
+    try:
+        # Ensure a fresh session so uid/partnerIdentity are known (needed for the MQTT username).
+        await client.async_login()
+        ident = client.mqtt_identity
+        sess = client.session
+        if not (ident["uid"] and ident["partner_identity"] and sess["sid"] and sess["ecode"]):
+            _LOGGER.warning("Cloud-MQTT probe: session incomplete (uid/partnerIdentity); skipped.")
+            return None
+        gateways = await async_fetch_gateway_keys(client)
+        if not gateways:
+            _LOGGER.warning("Cloud-MQTT probe: no gateway with a local key; skipped.")
+            return None
+        data = entry.data
+        creds = build_credentials(
+            region=data.get(CONF_REGION, "eu"),
+            sign_key=data[CONF_SIGN_KEY],
+            sid=sess["sid"],
+            ecode=sess["ecode"],
+            uid=ident["uid"],
+            partner_identity=ident["partner_identity"],
+            device_id=data[CONF_DEVICE_ID],
+            ch_key=data[CONF_CH_KEY],
+        )
+        refs = {
+            gw_id: GatewayRef(dev_id=gw_id, local_key=k.local_key) for gw_id, k in gateways.items()
+        }
+        listener = CloudMqttListener(creds, refs)
+    except Exception as err:  # noqa: BLE001 - the probe must never break setup
+        _LOGGER.warning("Cloud-MQTT probe setup failed: %s", type(err).__name__)
+        return None
+
+    # start() does TLS setup + a file read for the CA bundle: run it off the event loop.
+    await hass.async_add_executor_job(listener.start)
+    _LOGGER.warning(
+        "Cloud-MQTT LISTEN-ONLY probe started (R&D); auto-stops in %ss. No publish path.",
+        CLOUD_MQTT_PROBE_MAX_SECONDS,
+    )
+
+    def _auto_stop(_now: Any) -> None:
+        listener.stop("timeout")
+
+    cancel_timer = async_call_later(hass, CLOUD_MQTT_PROBE_MAX_SECONDS, _auto_stop)
+
+    def _on_unload() -> None:
+        cancel_timer()
+        listener.stop("unload")
+
+    entry.async_on_unload(_on_unload)
+    return listener
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

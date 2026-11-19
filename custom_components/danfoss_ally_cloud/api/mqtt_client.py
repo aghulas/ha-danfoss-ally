@@ -206,3 +206,144 @@ class CloudMqttLink:
             plan.topic, payload=plan.payload, qos=plan.qos, retain=plan.retain
         )
         return plan
+
+
+# --- Listen-only probe (paho; NO publish path by construction) -----------------------------------
+#
+# A deliberately separate class from CloudMqttLink: it has no publish method and never calls the
+# client's publish(), so there is no send path to misuse (a test asserts this). paho-mqtt is used
+# here (bundled by Home Assistant, so no new dependency and it runs on the Pi) rather than aiomqtt.
+# It records a redacted result for diagnostics: CONNACK rc, timestamps, per-gateway received/decoded
+# counts, a few sample (protocol, cid) tuples, and the last error — never any secret or raw payload.
+
+
+@dataclass
+class MqttProbeStats:
+    """Redacted result of a probe run. No sid/ecode/username/localKey or raw bytes."""
+
+    started_at: float | None = None
+    connack_rc: int | None = None
+    connack_text: str | None = None
+    connected_at: float | None = None
+    disconnected_at: float | None = None
+    stopped_reason: str | None = None
+    received: dict[str, int] = field(default_factory=dict)  # gateway_id -> frames received
+    decoded: dict[str, int] = field(default_factory=dict)  # gateway_id -> frames decoded
+    samples: list[dict[str, Any]] = field(default_factory=list)  # [{gateway, protocol, cid}]
+    last_error: str | None = None
+
+    def as_diagnostics(self) -> dict[str, Any]:
+        """Plain dict for diagnostics. Everything here is already non-secret."""
+        return {
+            "started_at": self.started_at,
+            "connack_rc": self.connack_rc,
+            "connack_text": self.connack_text,
+            "connected_at": self.connected_at,
+            "disconnected_at": self.disconnected_at,
+            "stopped_reason": self.stopped_reason,
+            "received_per_gateway": dict(self.received),
+            "decoded_per_gateway": dict(self.decoded),
+            "sample_frames": list(self.samples),
+            "last_error": self.last_error,
+            "total_received": sum(self.received.values()),
+            "total_decoded": sum(self.decoded.values()),
+        }
+
+
+class CloudMqttListener:
+    """Read-only Tuya cloud MQTT probe. Connects, subscribes to smart/mb/in/<gw>, decodes inbound
+    frames into redacted stats, and auto-stops. **No publish path**: this class exposes no send
+    method and never calls the client's publish()."""
+
+    def __init__(
+        self,
+        credentials: MqttCredentials,
+        gateways: dict[str, GatewayRef],
+        *,
+        max_samples: int = 5,
+    ) -> None:
+        self._creds = credentials
+        self._gateways = gateways
+        self._max_samples = max_samples
+        self.stats = MqttProbeStats()
+        self._client: Any = None
+
+    # Pure handler (unit-tested): decode one message into the stats. No I/O, no send.
+    def handle_message(self, topic: str, payload: bytes) -> None:
+        gateway_id = topic.rsplit("/", 1)[-1]
+        gw = self._gateways.get(gateway_id)
+        if gw is None:
+            return
+        self.stats.received[gateway_id] = self.stats.received.get(gateway_id, 0) + 1
+        try:
+            frame = mp.decode_frame(gw.local_key, payload)
+        except mp.FrameError:
+            return
+        self.stats.decoded[gateway_id] = self.stats.decoded.get(gateway_id, 0) + 1
+        if len(self.stats.samples) < self._max_samples:
+            data = frame.data if isinstance(frame.data, dict) else {}
+            self.stats.samples.append(
+                {"gateway": gateway_id, "protocol": frame.protocol, "cid": data.get("cid")}
+            )
+
+    def inbound_topics(self) -> list[str]:
+        return [mp.topic_in(gw.dev_id) for gw in self._gateways.values()]
+
+    def start(self, *, ca_certs: str | None = None) -> None:
+        """Open the read-only connection (paho, TLS) and subscribe; non-blocking (loop thread)."""
+        import ssl
+        import time
+
+        import paho.mqtt.client as mqtt
+
+        if ca_certs is None:
+            try:
+                import certifi
+
+                ca_certs = certifi.where()
+            except ImportError:
+                ca_certs = None
+
+        self.stats.started_at = time.time()
+        c = self._creds
+
+        def on_connect(client: Any, _u: Any, _f: Any, rc: int) -> None:
+            self.stats.connack_rc = rc
+            self.stats.connack_text = mqtt.connack_string(rc)
+            if rc == 0:
+                self.stats.connected_at = time.time()
+                for topic in self.inbound_topics():
+                    client.subscribe(topic, qos=1)
+
+        def on_message(_client: Any, _u: Any, msg: Any) -> None:
+            try:
+                self.handle_message(str(msg.topic), bytes(msg.payload))
+            except Exception as err:  # noqa: BLE001 - never let a bad frame kill the loop
+                self.stats.last_error = f"{type(err).__name__}"
+
+        def on_disconnect(_client: Any, _u: Any, rc: int) -> None:
+            self.stats.disconnected_at = time.time()
+
+        client = mqtt.Client(client_id=c.client_id, clean_session=True, protocol=mqtt.MQTTv311)
+        client.on_connect = on_connect
+        client.on_message = on_message
+        client.on_disconnect = on_disconnect
+        client.username_pw_set(c.username, c.password)
+        client.tls_set(ca_certs=ca_certs, cert_reqs=ssl.CERT_REQUIRED)
+        self._client = client
+        try:
+            client.connect_async(c.host, c.port, keepalive=60)
+            client.loop_start()
+        except Exception as err:  # noqa: BLE001 - record and stay down, never raise into setup
+            self.stats.last_error = f"{type(err).__name__}: {err}"
+
+    def stop(self, reason: str = "stopped") -> None:
+        self.stats.stopped_reason = reason
+        client = self._client
+        self._client = None
+        if client is not None:
+            try:
+                client.loop_stop()
+                client.disconnect()
+            except Exception:  # noqa: BLE001
+                pass

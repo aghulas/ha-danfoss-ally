@@ -111,3 +111,141 @@ async def test_publish_dp_refuses_when_not_connected():
     link = _link(connected=False)
     with pytest.raises(mp.FrameError):
         await link.publish_dp(GW, "node-9", {"30": True})
+
+
+# --- listen-only probe (no publish path) --------------------------------------------------------
+
+
+def _listener():
+    return mc.CloudMqttListener(
+        credentials=mc.MqttCredentials(host="h", client_id="c", username="u", password="p"),
+        gateways={GW: mc.GatewayRef(dev_id=GW, local_key=KEY)},
+    )
+
+
+def test_listener_has_no_publish_path():
+    """Hard guarantee: the probe object exposes no send method at all (not just a flag)."""
+    lst = _listener()
+    for name in dir(lst):
+        assert "publish" not in name.lower(), f"unexpected send-like member: {name}"
+    assert not hasattr(lst, "publish")
+    assert not hasattr(lst, "publish_dp")
+    assert not hasattr(lst, "plan_dp")
+
+
+def test_listener_handle_message_counts_and_decodes():
+    lst = _listener()
+    raw = mp.encode_frame(KEY, {"cid": "node-9", "dps": {"30": True}}, seq=4, origin=7, protocol=4)
+    lst.handle_message(f"smart/mb/in/{GW}", raw)
+    lst.handle_message(f"smart/mb/in/{GW}", raw)
+    assert lst.stats.received[GW] == 2
+    assert lst.stats.decoded[GW] == 2
+    assert lst.stats.samples[0] == {"gateway": GW, "protocol": 4, "cid": "node-9"}
+
+
+def test_listener_unknown_gateway_and_bad_frame():
+    lst = _listener()
+    raw = mp.encode_frame(KEY, {"cid": "n", "dps": {}}, seq=1, origin=1, protocol=4)
+    lst.handle_message("smart/mb/in/unknown", raw)  # unknown gw -> ignored entirely
+    assert lst.stats.received == {} and lst.stats.decoded == {}
+    lst.handle_message(f"smart/mb/in/{GW}", b"2.3" + bytes(60))  # received but undecodable
+    assert lst.stats.received[GW] == 1 and lst.stats.decoded.get(GW, 0) == 0
+
+
+def test_listener_samples_capped():
+    lst = mc.CloudMqttListener(
+        credentials=mc.MqttCredentials(host="h", client_id="c", username="u", password="p"),
+        gateways={GW: mc.GatewayRef(dev_id=GW, local_key=KEY)},
+        max_samples=2,
+    )
+    raw = mp.encode_frame(KEY, {"cid": "n", "dps": {}}, seq=1, origin=1, protocol=4)
+    for _ in range(5):
+        lst.handle_message(f"smart/mb/in/{GW}", raw)
+    assert len(lst.stats.samples) == 2
+    assert lst.stats.received[GW] == 5
+
+
+def test_probe_stats_diagnostics_shape_no_secrets():
+    lst = _listener()
+    lst.stats.connack_rc = 0
+    lst.stats.connack_text = "ok"
+    raw = mp.encode_frame(KEY, {"cid": "node-9", "dps": {"30": True}}, seq=4, origin=7, protocol=4)
+    lst.handle_message(f"smart/mb/in/{GW}", raw)
+    d = lst.stats.as_diagnostics()
+    assert d["connack_rc"] == 0
+    assert d["total_received"] == 1 and d["total_decoded"] == 1
+    assert d["received_per_gateway"] == {GW: 1}
+    # no secret-ish keys present
+    for k in ("sid", "ecode", "username", "password", "local_key", "localKey"):
+        assert k not in d
+
+
+class _FakePaho:
+    """Minimal paho.mqtt.client.Client double: records calls, lets tests fire callbacks."""
+
+    instances = []
+
+    def __init__(self, client_id=None, clean_session=True, protocol=None):
+        self.client_id = client_id
+        self.on_connect = self.on_message = self.on_disconnect = None
+        self.subscribed = []
+        self.username = self.password = None
+        self.tls = None
+        self.loop_started = self.loop_stopped = self.disconnected = False
+        self.connected_to = None
+        _FakePaho.instances.append(self)
+
+    def username_pw_set(self, u, p):
+        self.username, self.password = u, p
+
+    def tls_set(self, **kw):
+        self.tls = kw
+
+    def connect_async(self, host, port, keepalive=60):
+        self.connected_to = (host, port)
+
+    def loop_start(self):
+        self.loop_started = True
+
+    def loop_stop(self):
+        self.loop_stopped = True
+
+    def disconnect(self):
+        self.disconnected = True
+
+    def subscribe(self, topic, qos=0):
+        self.subscribed.append((topic, qos))
+
+
+def test_listener_start_subscribes_on_connack0_and_stop_closes(monkeypatch):
+    import paho.mqtt.client as paho
+
+    _FakePaho.instances.clear()
+    monkeypatch.setattr(paho, "Client", _FakePaho)
+    lst = _listener()
+    lst.start(ca_certs="/dev/null")
+    c = _FakePaho.instances[-1]
+    assert c.connected_to == ("h", 8883) and c.loop_started and c.username == "u"
+    # broker accepts -> subscribe to the gateway inbound topic
+    c.on_connect(c, None, None, 0)
+    assert lst.stats.connack_rc == 0
+    assert c.subscribed == [(f"smart/mb/in/{GW}", 1)]
+    # a message flows through handle_message
+    raw = mp.encode_frame(KEY, {"cid": "n", "dps": {"30": True}}, seq=2, origin=3, protocol=4)
+    c.on_message(c, None, type("M", (), {"topic": f"smart/mb/in/{GW}", "payload": raw}))
+    assert lst.stats.decoded[GW] == 1
+    lst.stop("done")
+    assert c.loop_stopped and c.disconnected and lst.stats.stopped_reason == "done"
+
+
+def test_listener_start_records_refused(monkeypatch):
+    import paho.mqtt.client as paho
+
+    _FakePaho.instances.clear()
+    monkeypatch.setattr(paho, "Client", _FakePaho)
+    lst = _listener()
+    lst.start(ca_certs="/dev/null")
+    c = _FakePaho.instances[-1]
+    c.on_connect(c, None, None, 5)  # not authorised
+    assert lst.stats.connack_rc == 5 and c.subscribed == []
+    lst.stop()

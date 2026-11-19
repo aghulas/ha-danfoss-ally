@@ -49,6 +49,7 @@ DATA_VACATION_WRITE = "vacation_write"  # bool: vacation-write gate (CONF_ENABLE
 DATA_HEAD_UNBIND = "head_unbind"  # bool: head-unbind gate (CONF_ENABLE_HEAD_UNBIND)
 DATA_CLOUD_MQTT = "cloud_mqtt"  # bool: cloud-MQTT isolated-head write gate (CONF_ENABLE_CLOUD_MQTT)
 DATA_MQTT_LINK = "cloud_mqtt_link"  # CloudMqttLink | None: live link, created only on a gated step
+DATA_MQTT_PROBE = "cloud_mqtt_probe"  # CloudMqttListener | None: the listen-only probe, when on
 
 # LOCAL survey (Zigbee tunnel) interval: slow, ~8 s per head. Distinct from the cloud polling.
 DEFAULT_LOCAL_SCAN_INTERVAL = 900  # seconds
@@ -103,6 +104,16 @@ CONF_POST_COMMAND_REFRESH = "post_command_refresh"
 # head's child-lock / window-detection switch may route through a dedicated-session MQTT link
 # instead of being unavailable. Enable only for a supervised validation session (Rémi present).
 CONF_ENABLE_CLOUD_MQTT = "enable_cloud_mqtt"
+# Cloud-MQTT LISTEN-ONLY probe (R&D diagnostic, distinct from the write gate above). When ON, the
+# integration opens ONE read-only Tuya cloud MQTT connection from ITS OWN session (its distinct
+# deviceId — no secret is taken from HA storage), subscribes to smart/mb/in/<gw> for the known
+# gateways, decodes inbound frames, and records a redacted result in diagnostics. It has NO publish
+# path at all (a listener class with no send method, not just a flag). It auto-stops after
+# CLOUD_MQTT_PROBE_MAX_SECONDS and when the option is turned off. Purpose: measure whether an
+# independent session is accepted by the broker while the phone app is connected (coexistence) —
+# CONNACK rc + per-gateway frame counts land in diagnostics. OFF by default; enable only for a
+# supervised validation window. See docs/cloud-mqtt-probe.md.
+CONF_ENABLE_CLOUD_MQTT_PROBE = "cloud_mqtt_probe"
 
 # Conservative defaults: the account's quota and security come first.
 DEFAULT_SCAN_INTERVAL = 90  # seconds
@@ -111,6 +122,8 @@ DEFAULT_ENABLE_VACATION_WRITE = False
 DEFAULT_ENABLE_HEAD_UNBIND = False
 DEFAULT_POST_COMMAND_REFRESH = False
 DEFAULT_ENABLE_CLOUD_MQTT = False
+DEFAULT_ENABLE_CLOUD_MQTT_PROBE = False
+CLOUD_MQTT_PROBE_MAX_SECONDS = 600  # the listen-only probe auto-stops after this (10 min)
 # How long a commanded head stays "hot" (refreshed via the per-device route) after a write, and the
 # cap on per-device reads per poll (so commanding a large room cannot burst the API). A hot head
 # costs one extra read per poll for at most this window, then returns to the bulk route.
