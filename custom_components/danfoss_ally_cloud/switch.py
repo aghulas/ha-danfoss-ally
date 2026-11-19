@@ -20,9 +20,13 @@ merely accepts the call:
   3. cloud MQTT for a DP PROVEN on it (child lock), when the option is on and the link connected;
   4. otherwise the switch is UNAVAILABLE rather than lying.
 
-Preheat: writing DP 1 on the cloud only changes the gateway cache; the real lever is the Zigbee
+Preheat: writing DP 1 over cloud HTTP only changes the gateway cache; the real lever is the Zigbee
 attribute 0x0025, via the LOCAL TUNNEL. The preheat switch therefore exists only if the
 `enable_local` option is on and the gateway reachable; otherwise it is absent (rather than lying).
+Its state always comes from the tunnel. DP 1 over cloud MQTT is a CANDIDATE, closed: whether that
+publish reaches the head at all is not established (docs/cloud-mqtt-preheat-proposal.md). Armed for
+a supervised trial on the designated isolated head, the write goes out over cloud MQTT and is
+confirmed by the tunnel alone; everywhere else, and always by default, the tunnel writes.
 """
 
 from __future__ import annotations
@@ -61,8 +65,10 @@ from .const import (
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 from .entity import DanfossEntity
 from .mqtt_write import (  # noqa: F401 - timeout re-exported
+    DP_PREHEAT,
     MQTT_CONFIRM_TIMEOUT,
     async_mqtt_write,
+    async_mqtt_write_preheat,
     supervised_for,
 )
 
@@ -133,7 +139,14 @@ async def async_setup_entry(
     if local is not None:
         gws = local.manager.gateway_ids
         entities += [
-            DanfossPreheat(local, coordinator, dev.id)
+            DanfossPreheat(
+                local,
+                coordinator,
+                dev.id,
+                mqtt_link,
+                cloud_mqtt_enabled,
+                supervised_for(data, dev.id),  # the trial is confined to its designated head
+            )
             for dev in coordinator.data.values()
             if dev.is_head and dev.node_id and dev.mesh_id in gws
         ]
@@ -321,6 +334,12 @@ class DanfossPreheat(CoordinatorEntity[DanfossLocalCoordinator], SwitchEntity):
     State and write go through the tunnel; unavailable if the head does not answer locally (rather
     than lying). Writing 0x0025 is validated on real hardware (2026-11-19). After a write the head
     itself is read back (not the whole site, which took ~13 min), never an optimistic state.
+
+    Supervised trial of DP 1 over cloud MQTT (candidate, closed by default): on the one designated
+    isolated head, with DP 1 listed and the cloud-MQTT option on, the write is published over cloud
+    MQTT instead and confirmed by the tunnel read alone (``async_mqtt_write_preheat``). While the
+    trial is armed the tunnel never writes this head's preheat, so a result cannot be attributed
+    to the wrong channel: with the link down the write fails. The state source does not change.
     """
 
     _attr_has_entity_name = True
@@ -329,12 +348,41 @@ class DanfossPreheat(CoordinatorEntity[DanfossLocalCoordinator], SwitchEntity):
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
-        self, local: DanfossLocalCoordinator, cloud: DanfossCoordinator, device_id: str
+        self,
+        local: DanfossLocalCoordinator,
+        cloud: DanfossCoordinator,
+        device_id: str,
+        mqtt: CloudMqttLink | None = None,
+        cloud_mqtt_enabled: bool = False,
+        supervised_dps: frozenset[int] = frozenset(),
     ) -> None:
         super().__init__(local)
         self._cloud = cloud
         self._device_id = device_id
+        self._mqtt = mqtt
+        self._cloud_mqtt_enabled = cloud_mqtt_enabled
+        self._supervised_dps = supervised_dps
         self._attr_unique_id = f"{device_id}_preheat"
+
+    @property
+    def _on_trial(self) -> bool:
+        """DP 1 is armed for a supervised cloud-MQTT trial on this head: the option is on, the DP
+        is listed for this head (the designated trial head), and the head is an isolated one on a
+        verified model (the app publishes DP 1 over MQTT for an isolated head only)."""
+        dev = self._dev
+        return (
+            self._cloud_mqtt_enabled
+            and dev is not None
+            and write_allowed(dev)
+            and self._cloud.group_of(dev.id) is None
+            and mqtt_dp_open(DP_PREHEAT, self._supervised_dps)
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        if self._on_trial:
+            return {"write_path": PATH_MQTT, "write_scope": "head", "write_trial": True}
+        return {"write_path": PATH_LOCAL, "write_scope": "head"}
 
     @property
     def _dev(self) -> DanfossDevice | None:
@@ -368,6 +416,18 @@ class DanfossPreheat(CoordinatorEntity[DanfossLocalCoordinator], SwitchEntity):
     async def _async_write(self, active: bool) -> None:
         dev = self._dev
         if dev is None or not dev.node_id or not dev.mesh_id:
+            return
+        if self._on_trial:
+            # Supervised trial: cloud MQTT only, confirmed by the tunnel only. No tunnel write
+            # here, whatever happens, or the trial would credit the wrong channel.
+            if self._mqtt is None or not self._mqtt.can_publish(dev.mesh_id):
+                raise HomeAssistantError(
+                    "preheat is armed for a supervised cloud-MQTT trial on this head, and the "
+                    "cloud-MQTT link cannot publish: nothing was written"
+                )
+            await async_mqtt_write_preheat(
+                self.coordinator, self._mqtt, dev, active, supervised=self._supervised_dps
+            )
             return
         head = Head(dev.id, dev.node_id, dev.mesh_id)
         try:

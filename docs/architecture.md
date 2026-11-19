@@ -16,8 +16,9 @@ optimistic state.
 
 Status of the cloud-MQTT channel: validated on real hardware and on `main`, behind the option
 `enable_cloud_mqtt`, **off by default**. Its write path carries the child lock only
-(`api.writes.MQTT_WRITE_DPS`); window detection, the setpoint bounds and the isolated-head
-setpoints are implemented as candidates, closed until their supervised write; a diagnostic entity reports the link state. Wire format:
+(`api.writes.MQTT_WRITE_DPS`); window detection, the setpoint bounds, the isolated-head
+setpoints and preheat (DP 1, confirmed by the tunnel only) are implemented as candidates, closed
+until their supervised write; a diagnostic entity reports the link state. Wire format:
 `docs/cloud-mqtt-publish.md`; procedure for a first write of a new DP:
 `docs/first-write-procedure.md`. With the option off, an isolated head's child lock is unavailable.
 
@@ -70,7 +71,7 @@ frames, so neither channel asks anything more of the user.
 | Child lock | Cloud HTTP: room publish (applies to **every** head of the room) | Cloud MQTT when enabled and connected; otherwise unavailable |
 | Window detection | Cloud HTTP: room publish (whole room) | Local tunnel when the head answers locally; otherwise unavailable. Cloud MQTT is a **candidate** fallback, closed until its supervised write |
 | Setpoint bounds (upper, lower) | No path yet | Cloud MQTT, **candidate**: closed until its supervised write |
-| Preheat | Local tunnel (0x0025) | Local tunnel (0x0025) |
+| Preheat | Local tunnel (0x0025) | Local tunnel (0x0025). Cloud MQTT (DP 1) is a **candidate**, closed: on the trial head only, written over cloud MQTT and confirmed by the tunnel read alone; the state always comes from the tunnel |
 | Setpoint override until the next schedule change | Local tunnel (DP 171) | Local tunnel (DP 171) |
 | Valve exercise day and time | Local tunnel | Local tunnel |
 | Holiday, room management, relay binding, unbind | Cloud HTTP (holiday and unbind behind options) | — |
@@ -96,8 +97,10 @@ for a DP proven on it; (4) otherwise unavailable.
   designated in `cloud_mqtt_supervised_head`; it becomes **proven** (`MQTT_WRITE_DPS`) in a change
   of its own (`docs/first-write-procedure.md`).
 - Preheat is the known trap: cloud DP 1 over HTTP only changed the gateway cache. A DP 1 publish
-  over cloud MQTT must be read back as attribute 0x0025 before it is trusted. Not implemented;
-  proposal and prior observation: `docs/cloud-mqtt-preheat-proposal.md`.
+  over cloud MQTT must be read back as attribute 0x0025 before it is trusted. Implemented as a
+  closed candidate with that rule built in (`api.writes.MQTT_TUNNEL_CONFIRMED_DPS`: the echo and
+  the cloud read are refused as confirmation); whether the publish reaches the head at all is
+  **not established**. Observation to make first: `docs/cloud-mqtt-preheat-proposal.md`.
 - After a successful write, the entity shows what the channel returns (echo or re-read), with a
   timeout and a clear error. No optimistic state.
 

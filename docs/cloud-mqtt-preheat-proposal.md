@@ -1,8 +1,12 @@
-# Preheat over Tuya cloud MQTT (DP 1) — proposal, not implemented
+# Preheat over Tuya cloud MQTT (DP 1) — closed candidate, observation pending
 
-Status: **proposal only**. No code writes DP 1 over cloud MQTT, DP 1 is neither proven nor a
-candidate in `api/writes.py`, and no option opens it. This note says what would have to be shown
-before any code is written, and what the code would then look like.
+Status: **candidate, closed, nothing shown on real hardware**. DP 1 is in
+`api.writes.MQTT_CANDIDATE_DPS`: no install writes it over cloud MQTT unless it is listed in
+`cloud_mqtt_supervised_dps` for the one head of `cloud_mqtt_supervised_head`. The code was written
+ahead of the observation at the owner's request (2026-11-19), so that a supervised write is ready
+if the observation is positive. **The observation below still comes first**: it needs no code, and
+if it is negative DP 1 is removed from the candidates and the question is closed. Step-by-step
+sheet: `docs/first-write-procedure.md`, "DP 1 — preheat".
 
 ## Why this DP is last
 
@@ -52,19 +56,31 @@ Outcomes:
 This observation changes a setting on a real head (through the app): it is the owner's to do, like
 any supervised write.
 
-## Implementation, only if the observation is positive
+## Implementation (shipped closed; used only if the observation is positive)
 
-- DP 1 becomes a candidate (`MQTT_CANDIDATE_DPS`), boolean.
+- DP 1 is a candidate (`MQTT_CANDIDATE_DPS`), boolean, and the one member of
+  `MQTT_TUNNEL_CONFIRMED_DPS`: the DPs the gateway's echo and the cloud read cannot confirm.
 - The preheat switch keeps the **tunnel as its only source of state**. It never shows the cloud's
-  DP 1.
-- Routing: tunnel write first when the head answers locally (proven, immediate). Cloud MQTT only
-  when the tunnel can still **read** the head but a tunnel write is not wanted or failed — in
-  practice the same condition, so the second route adds little. Without a tunnel read there is no
-  way to confirm the write, so **no tunnel, no preheat switch**, exactly as today.
-- Confirmation: after the publish, `async_refresh_head` (tunnel read of `0x0025`) until bit 1 shows
-  the value or a timeout; the gateway's echo and the cloud read are **not** accepted as
-  confirmation for this DP. A dedicated confirmation rule, not `async_mqtt_write`'s default.
-- Supervised trial as for the other DPs, read back through the tunnel.
+  DP 1. Without a tunnel there is **no preheat switch**, exactly as before.
+- Routing: the tunnel writes preheat, always, except on the designated trial head while DP 1 is
+  armed (`enable_cloud_mqtt` on, DP 1 listed, isolated head on a verified model). There the write
+  goes out over cloud MQTT **only**: the tunnel never writes that head's preheat during the trial,
+  and with the link down the call fails, so a result cannot be credited to the wrong channel. The
+  switch shows `write_path: cloud_mqtt` and `write_trial: true` in that state, `write_path: local`
+  otherwise.
+- Confirmation (`mqtt_write.async_mqtt_write_preheat`, not `async_mqtt_write`, which refuses
+  DP 1): the head is read through the tunnel **before** the publish (no answer: nothing is sent;
+  already at the value: nothing is sent); after the publish it is read every 10 s until bit 1 of
+  `0x0025` shows the value, for 60 s at most, then a clear error. The gateway's echo is not even
+  listened to, the cloud is not read.
+- After a "not confirmed", the frame has been sent: the head may apply it late, and the cloud's
+  DP 1 may differ from the head. The integration has no way to put that cache back (asking for the
+  head's own value publishes nothing, since the tunnel could not confirm it); the sheet does it
+  from the Danfoss app, checked by a read of cloud DP 1.
+- What the code does **not** check: bit 0 of `0x0025` (the switch only knows bit 1) and the
+  cloud's DP 1 / DP 172. The sheet makes the supervisor read them by hand.
+- No route outside a trial yet. If the trial passes, promoting DP 1 is a change of its own that
+  must also decide when cloud MQTT is preferred to the tunnel (see the assessment).
 
 ## Assessment
 
@@ -72,4 +88,5 @@ Since the tunnel is needed to confirm the write, and the tunnel already writes p
 cloud-MQTT route for DP 1 would not make preheat available on any head that lacks it today. Its
 only value would be as a fallback when the tunnel can read but not write, which has not been
 observed. Recommendation: run the observation (it is cheap and settles what the app's toggle really
-does), and expect to **not** implement this route.
+does), and expect to **not** promote this route — and to remove the candidate if the observation is
+negative.

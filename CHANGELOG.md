@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Preheat (DP 1) as a closed cloud-MQTT candidate.** Nothing changes by default: preheat is
+  still written and read through the local tunnel (attribute 0x0025). DP 1 can be listed in
+  `cloud_mqtt_supervised_dps` for a supervised trial on the designated isolated head; the write
+  then goes out over cloud MQTT and is confirmed **only** by the tunnel's read of the head (never
+  by the gateway's echo or the cloud, which answered from the gateway cache over HTTP). While
+  armed, the tunnel does not write that head's preheat, and the preheat switch shows
+  `write_path` / `write_trial`. **Not validated on real hardware**: the observation that must
+  come first is in docs/cloud-mqtt-preheat-proposal.md.
+
 ## 1.2.0 — Cloud-MQTT channel for isolated heads (gated), non-blocking local start, stale cleanup, reauth
 
 Minor release. It gathers the sections previously listed as unreleased: the gated cloud-MQTT write

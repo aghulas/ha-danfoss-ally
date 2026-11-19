@@ -29,6 +29,8 @@ Every write on this channel, trial or not: the value is validated before sending
 setting go out in one frame, and the write is confirmed by the gateway's echo (inbound protocol-4
 report, 15 s) or, failing that, by one read of the head through the per-device cloud route.
 Otherwise the call raises a clear error. Nothing is ever shown that was not read back.
+One exception, preheat (DP 1): the echo and the cloud read prove nothing for it, so its write is
+confirmed by a read of the head through the local tunnel only (its sheet below).
 
 ## Generic procedure
 
@@ -172,11 +174,82 @@ was the independent source.
   settings screen is the independent source. Weaker than a tunnel read: say so in the record.
 - **Restore**: write `V0` back.
 
-### DP 1 — preheat: no sheet
+### DP 1 — preheat (candidate; observation from the app first)
 
-Not a candidate and not implemented. The gateway's echo and the cloud read cannot confirm it (over
-HTTP, DP 1 only changed the gateway cache); only attribute `0x0025` read through the tunnel can.
-See `docs/cloud-mqtt-preheat-proposal.md` for the observation to make first.
+The known trap: over HTTP, DP 1 only changed the gateway cache while the head's real preheat (bit 1
+of Zigbee attribute `0x0025`) did not move. The gateway's echo and the cloud read therefore confirm
+nothing here; **only `0x0025` read through the local tunnel does**. Background and assessment:
+`docs/cloud-mqtt-preheat-proposal.md`. Two stages; stage B is run only if stage A is positive.
+
+Preconditions for both, on top of the generic ones: the local tunnel answers **this head** right
+before starting (its preheat switch has a value, not "unavailable"), and a raw read of `0x0025`
+is available to the supervisor (both bits: 0 = schedule, 1 = preheat) — the switch only shows
+bit 1.
+
+**Stage A — observation, no code, no option.** The app is the reference publisher.
+
+1. Baseline: raw `0x0025` through the tunnel (`V0`, both bits); cloud DP 1 and DP 172 (the cloud's
+   mirror of `0x0025`) through the per-device route; the app's preheat toggle. Record all four.
+2. In the Danfoss app, toggle preheat on that head, once. Note the time.
+3. Read raw `0x0025`, cloud DP 1 and cloud DP 172 at about 20 s, 1 min, 5 min and 15 min.
+4. Toggle back in the app; same reads; `0x0025` must be back to `V0`. If it is not, restore
+   through the tunnel (the preheat switch, proven) and read again.
+
+| Instant | `0x0025` raw (tunnel) | bit 1 | bit 0 | cloud DP 1 | cloud DP 172 |
+|---|---|---|---|---|---|
+| baseline | | | | | |
+| +20 s | | | | | |
+| +1 min | | | | | |
+| +5 min | | | | | |
+| +15 min | | | | | |
+| after toggle back | | | | | |
+
+Reading the result:
+
+- bit 1 follows the toggle within about a minute, bit 0 unchanged → positive, go to stage B;
+- bit 1 does not move while cloud DP 1 does → cloud MQTT is as blind as HTTP for preheat. Record
+  it, **remove DP 1 from `MQTT_CANDIDATE_DPS`** and close the question: the tunnel stays the only
+  route;
+- bit 1 moves only after minutes → not usable as it stands (the integration waits 60 s); record
+  the delay and do not run stage B;
+- bit 0 changes → stop, restore, do not run stage B.
+
+**Stage B — supervised write from the integration** (generic procedure, with these specifics).
+
+- **What is sent**: one MQTT frame `{"1": bool}`.
+- **Arm**: `enable_local` and `enable_cloud_mqtt` on, the test head designated, DP 1 ticked.
+  Without `enable_local` there is no preheat switch at all, so ticking DP 1 does nothing. The
+  head's preheat switch must show `write_path: cloud_mqtt` and `write_trial: true`; the preheat
+  switch of another head must show `write_path: local`. While armed, the tunnel never writes this
+  head's preheat: with the MQTT link down the write fails instead of falling back.
+- **Trial value**: the opposite of `V0`'s bit 1.
+- **What the call does**: reads the head through the tunnel first (no answer → nothing sent;
+  already at the value → nothing sent), publishes, then reads the head every 10 s for 60 s at most.
+  It returns only when bit 1 shows the value; otherwise it raises "not confirmed". The echo and the
+  cloud are not consulted.
+- **Independent read-back** by the supervisor: raw `0x0025` through the tunnel (bit 1 at the new
+  value, **bit 0 unchanged** — the code does not check bit 0), then the app, then cloud DP 1 and
+  DP 172 for the record.
+- **Restore after a confirmed write**: toggle the switch back while still armed (second proof).
+  Read `0x0025` back: it must equal `V0`.
+- **After a "not confirmed"**: the frame **was sent**. Do not write anything yet.
+  1. Read raw `0x0025` and cloud DP 1 (per-device route) again at about 5 min and 15 min: the
+     head may apply the frame late (stage A's "only after minutes" case). Record the delay if it
+     does; the trial is not passed either way.
+  2. If the head ended up at the trial value: disarm, restore it through the tunnel (the preheat
+     switch, proven), read `0x0025` back (= `V0`). Then read cloud DP 1 through the per-device
+     route: a tunnel write does not update that cache, so if it still shows the trial value,
+     resynchronise it from the app as in step 3.
+  3. If the head stayed at `V0` while **cloud DP 1 shows the trial value**, the gateway cache is
+     out of step with the head — the HTTP failure, reproduced. Toggling the switch back does
+     **not** fix it: the integration reads the head, finds it already at `V0` and publishes
+     nothing (a publish the head does not react to could not be confirmed by the tunnel, so the
+     integration never sends one). A tunnel write does not touch that cache either. Resynchronise
+     from the **Danfoss app**, the reference publisher: set its preheat toggle to the head's value
+     (`V0`'s bit 1), then read cloud DP 1 through the per-device route — it must show that value —
+     and raw `0x0025` — it must still equal `V0`. Record both reads.
+- **Passed** means only: this publish reaches the head. Promotion is a change of its own, which
+  must say when cloud MQTT would be preferred to the tunnel that confirms it.
 
 ## Returning to the released build
 
