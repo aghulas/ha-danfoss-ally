@@ -244,15 +244,26 @@ def mqtt_username(partner_identity: str, app_id: str, ch_key: str, sid: str, eco
     return f"{partner_identity}_v1_{app_id}_{ch_key}_mb_{sid}{tail}"
 
 
-def mqtt_password(native_cmd2_output: str) -> str:
-    """Middle 16 chars of ``doCommandNative(ctx, 2, ecode, null, mD=false)``.
+def _do_command_native_cmd2(sign_key: str, ecode: str) -> str:
+    """Reproduces ``SecureNativeApi.doCommandNative(ctx, 2, ecode, null, false)``.
 
-    Command 2 of libthing_security is NOT reverse-engineered yet: the caller must supply its
-    output (frida oracle on a synthetic ecode, then a static formula; see the design note)."""
-    if not native_cmd2_output or len(native_cmd2_output) < 16:
-        raise ValueError("doCommandNative cmd=2 output required (not reproduced yet)")
-    half = len(native_cmd2_output) >> 1
-    return native_cmd2_output[half - 8 : half + 8]
+    Reverse-engineered on the AVD (2026-11-19, synthetic ecodes, 4/4): the native worker at
+    ``libthing_security.so+0x9364`` returns ``md5hex( md5hex(sign_key) + ecode )`` (32 hex chars).
+    It uses no HMAC/AES (confirmed: the mbedtls hook never fired). ``sign_key`` =
+    ``com.danfoss.ally_<deviceId>_<appSecret1>_<appSecret2>`` (the same global the request
+    signature uses), already held by the integration. Secret in, secret out: never log either."""
+    return _md5_hex(_md5_hex(sign_key) + ecode)
+
+
+def mqtt_password(sign_key: str, ecode: str) -> str:
+    """Broker password = middle 16 chars of ``doCommandNative(cmd=2, ecode)`` (SdkMqttCertInfo).
+
+    Pure Python now (no app, no oracle): derive the 32-hex cmd-2 output, take ``[8:24]``."""
+    if not sign_key or not ecode:
+        raise ValueError("sign_key and ecode required")
+    out = _do_command_native_cmd2(sign_key, ecode)
+    half = len(out) >> 1
+    return out[half - 8 : half + 8]
 
 
 def user_topic(partner_identity: str, uid: str) -> str:

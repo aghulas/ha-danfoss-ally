@@ -130,7 +130,22 @@ def test_credentials_shapes_synthetic():
         user.startswith("p100_v1_appid_abcd1234_mb_SID")
         and len(user) == len("p100_v1_appid_abcd1234_mb_SID") + 16
     )
-    assert mp.mqtt_password("0" * 24 + "X" * 16 + "0" * 24) == "X" * 16
-    with pytest.raises(ValueError):
-        mp.mqtt_password("")
     assert mp.user_topic("p100", "uid1") == "p100/mb/uid1"
+
+
+def test_mqtt_password_derivation():
+    """cmd 2 = md5hex(md5hex(sign_key) + ecode); password = middle 16 chars. Synthetic key."""
+    import hashlib
+
+    sk = "com.danfoss.ally_" + "aa:" * 15 + "aa" + "_" + "b" * 32 + "_" + "c" * 32
+    ecode = "ABCDEF0123456789"
+    full = hashlib.md5((hashlib.md5(sk.encode()).hexdigest() + ecode).encode()).hexdigest()
+    assert mp._do_command_native_cmd2(sk, ecode) == full
+    assert mp.mqtt_password(sk, ecode) == full[8:24]
+    assert len(mp.mqtt_password(sk, ecode)) == 16
+    # ecode changes the password (not a constant derived from sign_key alone)
+    assert mp.mqtt_password(sk, "0000000000000000") != mp.mqtt_password(sk, ecode)
+    with pytest.raises(ValueError):
+        mp.mqtt_password("", ecode)
+    with pytest.raises(ValueError):
+        mp.mqtt_password(sk, "")

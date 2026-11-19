@@ -5,10 +5,11 @@ tests `tests/test_mqtt_publish.py`, synthetic data only). **Nothing is sent**: n
 no write to a head. A real publish needs Rémi's explicit go-ahead (see §6). Draft PR #71.
 
 Progress 2026-11-19 (research, off the 1.1.0 critical path): §6.1 done (branch pushed, draft PR
-#71); §6.2 static analysis of `doCommandNative` done (dispatcher + cmd-2 worker located, see §5),
-the runtime read still needs the frida step and Rémi; §6.3 offline frame-check ready; §6.4
-read-only connect script prepared, not run. The scripts that touch secrets live **outside this
-repo**, in `~/dev/danfoss-ally-signing-re/` (`frida/capture_cmd2.js`, `tools/verify_mqtt_frame.py`,
+#71); **§6.2 DONE — the broker password is reverse-engineered and now derived in pure Python**
+(cmd 2 = `md5hex(md5hex(sign_key) + ecode)`, password = `[8:24]`; see §5.1); §6.3 offline
+frame-check ready; §6.4 read-only connect script prepared with the real password, not run (needs
+Rémi). The scripts that touch secrets live **outside this repo**, in `~/dev/danfoss-ally-signing-re/`
+(`frida/capture_cmd2.js` + `frida/run_cmd2.py`, `tools/verify_mqtt_frame.py`,
 `tools/mqtt_read_only.py`).
 
 ## 1. Why
@@ -98,8 +99,9 @@ localKey) and builds, for a Zigbee sub-device:
   (`ThingApiParams`), i.e. the installation chKey the config flow already stores.
   (`md5AsBase64` is misnamed: lowercase MD5 hex.)
 - **password** = middle 16 chars of `ThingNetworkSecurity.doCommandNative(ctx, 2, ecode, null,
-  mD=false)`. **Command 2 of libthing_security is not reproduced yet** (cmd 1 = request signature is).
-  This is the only blocker for a pure-Python client.
+  mD=false)`. **Reproduced (2026-11-19):** cmd 2 = `md5hex( md5hex(sign_key) + ecode )` (32 hex),
+  password = `[8:24]`. Derived in pure Python by `mqtt_publish.mqtt_password(sign_key, ecode)`; the
+  integration already holds `sign_key`. No longer a blocker.
 
 ### 5.1 Static analysis of `doCommandNative` cmd 2 (2026-11-19)
 
@@ -117,25 +119,20 @@ from symbols):
   `mbedtls_md_hmac` (`0xcda8`) primitives: all four callers of `0xcda8` sit inside
   `encryptPostData`/`getEncryptoKey` (`0xa4xx`+), none in the cmd-2 subtree. So cmd 2 is a lighter,
   string-level transform of `(sign_key, ecode)`, not the standard HMAC path.
-- **Not resolved statically**: the exact transform (the helper semantics aren't legible from the
-  stripped asm). The clean next step is a runtime read — frida Interceptor on the worker's output
-  (and on `0xcda8` in case it is reached) with a **synthetic** ecode via the oracle:
-  `~/dev/danfoss-ally-signing-re/frida/capture_cmd2.js`. That launches the app on the AVD and so
-  needs Rémi (it can disconnect the shared Tuya session — see §6). Candidate formulas to check once
-  a real `(ecode → password)` pair exists, by analogy with `getEncryptoKey =
-  HMAC-SHA256(key=requestId, msg=sign_key + "_" + ecode).hex()[:16]`: a hex digest of
-  `sign_key [+ "_"] + ecode`, then middle 16; or an HMAC keyed by one of the appSecret halves.
+- **Resolved by runtime read (2026-11-19).** frida on the AVD (`frida/run_cmd2.py` +
+  `capture_cmd2.js`, spawn + 16 s delay + unpin), **synthetic** ecodes only, app force-stopped and
+  emulator killed right after. cmd 2 returned a 32-hex string for each ecode and the
+  `mbedtls_md_hmac` hook never fired, confirming it is a plain digest. Matched offline against the
+  real `sign_key` (4/4 vectors): **`cmd2(ecode) = md5hex( md5hex(sign_key) + ecode )`**. So the
+  broker password = that output `[8:24]`. Implemented as `mqtt_publish.mqtt_password(sign_key,
+  ecode)`.
 
 All of these are secrets (sid, ecode, chKey, username, password, localKey): never logged, never in
 diagnostics or the repo. `mqtt_publish.py` never puts them in a repr or an error message.
 
 ## 6. Remaining steps (in order)
 
-1. **Password (cmd 2)**, no write involved: one frida RPC on the AVD (`danfoss34`, app attached,
-   `sign_oracle.js` already exposes `doCommandNative(ctx, cmd, data)`) with **synthetic** ecodes, then
-   match a static formula (candidates: HMAC-SHA256 / MD5 keyed by the app secret, as for cmd 1).
-   ⚠ Launching the app on the emulator invalidates the integration's session (shared deviceId):
-   do it when Rémi is there.
+1. **Password (cmd 2)** — ✅ DONE (2026-11-19, see §5.1): `md5hex(md5hex(sign_key)+ecode)[8:24]`.
 2. **Frame check against the capture**: the 2026-11-19 publishes were not saved as raw bytes. In
    the next capture, dump the MQTT payload (base64) and check locally with
    `~/dev/danfoss-ally-signing-re/tools/verify_mqtt_frame.py` (key read from the secrets file,
