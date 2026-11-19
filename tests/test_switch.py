@@ -596,3 +596,39 @@ async def test_cloud_mqtt_write_failure_raises_homeassistanterror():
     sw, _ = _switch(_verrou_desc(), dev, mqtt=link, cloud_mqtt=True)
     with pytest.raises(HomeAssistantError):
         await sw.async_turn_on()
+
+
+# --- routing with the non-blocking tunnel start: a head is known locally only once read ----------
+
+
+async def test_window_routing_before_and_after_the_first_local_read():
+    """The local survey now runs in the background and ``data`` starts empty. Until the head has
+    been read there is no tunnel route: unavailable outside a trial (DP 116 is not proven on cloud
+    MQTT), cloud MQTT inside one. Once read, the tunnel is the route again outside a trial."""
+    dev = head(window_detection=True)
+    mgr = _FakeManager()
+    local = _FakeLocalCoord({}, manager=mgr)  # survey running, nothing read yet
+    link = _FakeMqttLink(confirm=True)
+
+    plain, _ = _switch(_fenetre_desc(), dev, local=local, mqtt=link, cloud_mqtt=True)
+    assert plain.available is False and plain.extra_state_attributes == {"write_path": "none"}
+    await plain.async_turn_off()  # no route: nothing is sent anywhere
+    assert link.published == [] and mgr.window_writes == []
+
+    trial, _ = _switch(
+        _fenetre_desc(), dev, local=local, mqtt=link, cloud_mqtt=True, supervised=frozenset({116})
+    )
+    assert trial.extra_state_attributes["write_path"] == "cloud_mqtt"
+
+    local.data = {dev.id: False}  # the survey has read this head
+    assert plain.available is True
+    assert plain.extra_state_attributes == {"write_path": "local", "write_scope": "head"}
+    assert trial.extra_state_attributes["write_path"] == "cloud_mqtt"  # the trial keeps MQTT
+
+
+async def test_child_lock_on_cloud_mqtt_does_not_wait_for_the_local_survey():
+    """A DP proven on cloud MQTT with no tunnel write (child lock) is routable at once."""
+    dev = head(child_lock=False)
+    local = _FakeLocalCoord({}, manager=_FakeManager())
+    sw, _ = _switch(_verrou_desc(), dev, local=local, mqtt=_FakeMqttLink(), cloud_mqtt=True)
+    assert sw.extra_state_attributes == {"write_path": "cloud_mqtt", "write_scope": "head"}
