@@ -55,24 +55,16 @@ async def async_get_config_entry_diagnostics(
         "device_count": len(coordinator.data),
         "devices": devices,
     }
+    # Cloud-MQTT link (only when enable_cloud_mqtt or cloud_mqtt_probe opened one): state and
+    # counters, no credential and no identifier.
+    link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
+    if link is not None:
+        diag["cloud_mqtt_link"] = link.diagnostics()
     # Coverage measure of the cloud-MQTT push (only with cloud_mqtt_probe on). Aggregates only; a
     # head is named by its index in ``devices`` above, never by an identifier.
     coverage: CoverageStats | None = data.get(DATA_MQTT_COVERAGE)
     if coverage is not None:
-        link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
-        diag["cloud_mqtt_coverage"] = {
-            "link": (
-                {
-                    "connected": link.connected,
-                    "listen_only": link.listen_only,
-                    "connects": link.connects,
-                    "disconnects": link.disconnects,
-                    "received": link.received,
-                    "decoded": link.decoded,
-                }
-                if link is not None
-                else None
-            ),
-            **coverage.summary(coordinator.data.values(), coordinator.grouped_ids),
-        }
+        diag["cloud_mqtt_coverage"] = coverage.summary(
+            coordinator.data.values(), coordinator.grouped_ids
+        )
     return diag

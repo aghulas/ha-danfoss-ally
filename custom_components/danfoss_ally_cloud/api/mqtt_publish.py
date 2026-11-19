@@ -182,8 +182,8 @@ def dp_publish_data(node_id: str, dps: dict[str | int, Any], ctype: int = 0) -> 
 class PublishPlan:
     """What would be sent: MQTT topic, payload bytes, QoS 1, not retained."""
 
-    topic: str
-    payload: bytes
+    topic: str = field(repr=False)  # embeds the gateway devId
+    payload: bytes = field(repr=False)
     seq: int
     origin: int
     qos: int = 1

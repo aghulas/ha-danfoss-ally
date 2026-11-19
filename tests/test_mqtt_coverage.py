@@ -225,17 +225,13 @@ async def test_probe_alone_is_listen_only_and_feeds_diagnostics(hass: HomeAssist
     c.on_message(c, None, types.SimpleNamespace(topic="smart/mb/in/gw-1", payload=b"x"))
     diag = await async_get_config_entry_diagnostics(hass, entry)
     block = diag["cloud_mqtt_coverage"]
-    assert block["link"] == {
-        "connected": True,
-        "listen_only": True,
-        "connects": 1,
-        "disconnects": 0,
-        "received": 2,
-        "decoded": 1,
-    }
+    link_diag = diag["cloud_mqtt_link"]
+    assert link_diag["state"] == "connected" and link_diag["listen_only"] is True
+    assert (link_diag["connects"], link_diag["disconnects"]) == (1, 0)
+    assert (link_diag["received"], link_diag["decoded"]) == (2, 1)
     assert block["heads_seen"] == 1 and block["heads"][0]["device_index"] == 0
     assert set(block["heads"][0]["dps"]) == {"24", "170"}
-    dump = json.dumps(block)
+    dump = json.dumps([block, link_diag])
     assert "node-1" not in dump and "gw-1" not in dump and "dev-1" not in dump
     assert c.published == []
 
@@ -285,3 +281,66 @@ async def test_write_option_alone_has_no_coverage(hass: HomeAssistant, fake_paho
     entry = await _setup(hass, {CONF_ENABLE_CLOUD_MQTT: True})
     data = hass.data[DOMAIN][entry.entry_id]
     assert data[DATA_MQTT_LINK].listen_only is False and data[DATA_MQTT_COVERAGE] is None
+
+
+# --- channel hardening at the integration level (roadmap stage 5) -------------------------------
+
+
+async def test_turning_the_option_off_closes_the_connection(hass: HomeAssistant, fake_paho):
+    """Kill switch: option off -> entry reload -> the link is closed and none is reopened."""
+    entry = await _setup(hass, {CONF_ENABLE_CLOUD_MQTT: True})
+    c = fake_paho.instances[-1]
+    c.on_connect(c, None, None, 0)
+    with (
+        patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=FakeCloudClient()),
+        patch(
+            "custom_components.danfoss_ally_cloud.async_fetch_gateway_keys",
+            AsyncMock(return_value=_GW),
+        ),
+    ):
+        hass.config_entries.async_update_entry(entry, options={CONF_ENABLE_CLOUD_MQTT: False})
+        await hass.async_block_till_done()
+    assert c.calls == ["disconnect", "loop_stop"]
+    assert len(fake_paho.instances) == 1  # no new connection
+    assert hass.data[DOMAIN][entry.entry_id][DATA_MQTT_LINK] is None
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert "cloud_mqtt_link" not in diag
+
+
+async def test_refused_connection_asks_for_one_cloud_refresh(hass: HomeAssistant, fake_paho):
+    """A not-authorised CONNACK triggers a cloud refresh (which renews an invalidated session)."""
+    entry = await _setup(hass, {CONF_ENABLE_CLOUD_MQTT: True})
+    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    c = fake_paho.instances[-1]
+    with patch.object(coordinator, "async_request_refresh", AsyncMock()) as refresh:
+        await hass.async_add_executor_job(c.on_connect, c, None, None, 5)  # from another thread
+        await hass.async_block_till_done()
+        assert refresh.await_count == 1
+        await hass.async_add_executor_job(c.on_connect, c, None, None, 5)
+        await hass.async_block_till_done()
+        assert refresh.await_count == 1  # once per streak
+    link = hass.data[DOMAIN][entry.entry_id][DATA_MQTT_LINK]
+    assert link.auth_refusals == 2
+
+
+async def test_link_diagnostics_and_sensor_state(hass: HomeAssistant, fake_paho):
+    entry = await _setup(hass, {CONF_ENABLE_CLOUD_MQTT: True})
+    c = fake_paho.instances[-1]
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["cloud_mqtt_link"]["state"] == "connecting"
+    assert "cloud_mqtt_coverage" not in diag
+    dump = json.dumps(diag["cloud_mqtt_link"])
+    for secret in ("gw-1", KEY, ENTRY_DATA["device_id"], ENTRY_DATA["ch_key"], "sess-", "ec-"):
+        assert secret not in dump
+
+    from custom_components.danfoss_ally_cloud.binary_sensor import DanfossCloudMqttConnectivity
+
+    sensor = next(
+        e
+        for e in hass.data["entity_components"]["binary_sensor"].entities
+        if isinstance(e, DanfossCloudMqttConnectivity)
+    )
+    assert sensor.is_on is False
+    assert sensor.extra_state_attributes == {"state": "connecting", "listen_only": False}
+    c.on_connect(c, None, None, 0)
+    assert sensor.is_on is True and sensor.extra_state_attributes["state"] == "connected"

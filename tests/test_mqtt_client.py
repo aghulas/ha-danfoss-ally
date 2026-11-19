@@ -136,6 +136,7 @@ class _FakePaho:
         self.loop_stop_thread = None
         self.published = []
         self.connected_to = None
+        self.calls = []  # order of the closing calls
         import types
 
         self._thread = types.SimpleNamespace(name=f"paho-mqtt-client-{client_id}")
@@ -159,10 +160,12 @@ class _FakePaho:
     def loop_stop(self):
         import threading
 
+        self.calls.append("loop_stop")
         self.loop_stopped = True
         self.loop_stop_thread = threading.current_thread()
 
     def disconnect(self):
+        self.calls.append("disconnect")
         self.disconnected = True
 
     def subscribe(self, topic, qos=0):
@@ -279,3 +282,160 @@ def test_new_paho_client_supports_paho1_and_paho2():
     m2 = types.SimpleNamespace(Client=_Client, MQTTv311=4, CallbackAPIVersion=_CB)
     mc._new_paho_client(m2, "cid")
     assert captured["callback_api_version"] == "v1"
+
+
+# --- hardening (roadmap stage 5): backoff, refusals, closing, redaction -------------------------
+
+
+def _started(monkeypatch, **kw):
+    import paho.mqtt.client as paho
+
+    _FakePaho.instances.clear()
+    monkeypatch.setattr(paho, "Client", _FakePaho)
+    link = mc.CloudMqttLink(
+        credentials=mc.MqttCredentials(
+            host="m1.example.test",
+            client_id="cid-synth",
+            username="user-synth",
+            password="pw-synth",
+        ),
+        gateways={GW: mc.GatewayRef(dev_id=GW, local_key=KEY)},
+        **kw,
+    )
+    assert link.state == mc.STATE_IDLE
+    link.start(ca_certs="/dev/null")
+    return link, _FakePaho.instances[-1]
+
+
+def test_reconnect_backoff_is_exponential_within_conservative_bounds(monkeypatch):
+    link, c = _started(monkeypatch)
+    assert c.reconnect_delay == {
+        "min_delay": mc.RECONNECT_MIN_DELAY,
+        "max_delay": mc.RECONNECT_MAX_DELAY,
+    }
+    assert mc.RECONNECT_MIN_DELAY >= 5 and mc.RECONNECT_MAX_DELAY >= 300
+    assert link.state == mc.STATE_CONNECTING
+
+
+def test_refused_credentials_stop_the_link_after_the_limit(monkeypatch):
+    hook_calls = []
+    refreshes = []
+
+    def provider():
+        refreshes.append(1)
+        return mc.MqttCredentials(host="h", client_id="c2", username="u2", password="p2")
+
+    link, c = _started(
+        monkeypatch, creds_provider=provider, on_auth_refused=lambda: hook_calls.append(1)
+    )
+    for attempt in range(1, mc.MAX_AUTH_REFUSALS + 1):
+        c.on_connect(c, None, None, 5)  # not authorised
+        assert link.auth_refusals == attempt and link.connected is False
+        if attempt < mc.MAX_AUTH_REFUSALS:
+            assert link.state == mc.STATE_CONNECTING and not c.disconnected
+            c.on_disconnect(c, None, 5)  # paho then reconnects with refreshed credentials
+            assert (c.username, c.password) == ("u2", "p2")
+    assert link.state == mc.STATE_REFUSED
+    assert c.disconnected  # ends paho's reconnect loop: no further attempt
+    assert hook_calls == [1]  # the owner is asked to renew the session once per streak
+    before = len(refreshes)
+    c.on_disconnect(c, None, 0)
+    assert len(refreshes) == before  # nothing refreshed once the link has given up
+    assert link.can_publish(GW) is False
+    assert link.diagnostics()["last_connack_rc"] == 5
+
+
+def test_transient_refusal_is_not_counted_and_success_resets_the_streak(monkeypatch):
+    link, c = _started(monkeypatch)
+    c.on_connect(c, None, None, 3)  # server unavailable: transient, not a credential refusal
+    assert link.auth_refusals == 0 and link.state == mc.STATE_CONNECTING
+    c.on_connect(c, None, None, 4)
+    c.on_connect(c, None, None, 5)
+    assert link.auth_refusals == 2
+    c.on_connect(c, None, None, 0)
+    assert link.auth_refusals == 0 and link.state == mc.STATE_CONNECTED and link.connects == 1
+    c.on_disconnect(c, None, 1)
+    assert link.state == mc.STATE_CONNECTING and link.disconnects == 1
+
+
+def test_refusal_hook_failure_does_not_break_the_client_thread(monkeypatch):
+    def boom():
+        raise RuntimeError("synthetic")
+
+    link, c = _started(monkeypatch, on_auth_refused=boom)
+    c.on_connect(c, None, None, 5)
+    assert link.auth_refusals == 1
+
+
+def test_stop_disconnects_before_joining_the_thread_and_is_idempotent(monkeypatch):
+    refreshes = []
+    link, c = _started(monkeypatch, creds_provider=lambda: refreshes.append(1))
+    c.on_connect(c, None, None, 0)
+    link.stop()
+    assert c.calls == ["disconnect", "loop_stop"]
+    assert link.state == mc.STATE_STOPPED and link.connected is False
+    c.on_disconnect(c, None, 0)  # the clean disconnect paho reports while closing
+    assert refreshes == []  # closing: no credential refresh, no reconnection
+    link.stop()
+    assert c.calls == ["disconnect", "loop_stop"]
+
+
+def test_stop_still_ends_the_thread_when_disconnect_raises(monkeypatch):
+    link, c = _started(monkeypatch)
+
+    def boom():
+        raise OSError("synthetic")
+
+    c.disconnect = boom
+    link.stop()
+    assert c.loop_stopped
+
+
+def test_stop_on_a_never_started_link_is_a_no_op():
+    link = _link()
+    link.stop()
+    assert link.state == mc.STATE_IDLE
+
+
+def test_repr_and_diagnostics_expose_no_secret_and_no_identifier(monkeypatch):
+    link, c = _started(monkeypatch)
+    c.on_connect(c, None, None, 0)
+    plan = link.plan_dp(GW, "node-synth-9", {"30": True})
+    texts = [
+        repr(link),
+        repr(link.credentials),
+        repr(link.gateways[GW]),
+        repr(plan),
+        str(link.diagnostics()),
+    ]
+    for text in texts:
+        for secret in ("cid-synth", "user-synth", "pw-synth", KEY, GW):
+            assert secret not in text
+    assert link.diagnostics()["host"] == "m1.example.test"
+    assert link.diagnostics()["gateways"] == 1
+
+
+def test_unknown_gateway_error_names_no_identifier():
+    with pytest.raises(mp.FrameError) as err:
+        _link(connected=True).plan_dp("gw-secret-id", "node-9", {"30": True})
+    assert "gw-secret-id" not in str(err.value)
+
+
+def test_link_logs_carry_no_identifier(monkeypatch, caplog):
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    link, c = _started(
+        monkeypatch,
+        creds_provider=lambda: (_ for _ in ()).throw(ValueError("user-synth pw-synth")),
+    )
+    c.on_connect(c, None, None, 0)
+    c.on_disconnect(c, None, 1)  # credential refresh fails: only the error type is logged
+    for _ in range(mc.MAX_AUTH_REFUSALS):
+        c.on_connect(c, None, None, 5)
+    link.stop()
+    assert caplog.records
+    for record in caplog.records:
+        text = record.getMessage()
+        for secret in ("cid-synth", "user-synth", "pw-synth", KEY, GW):
+            assert secret not in text

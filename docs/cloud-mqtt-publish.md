@@ -66,8 +66,35 @@ accepted (`CONNACK rc=0`) while the phone app stays connected.
 `CloudMqttLink.publish_dp` sends the frame and `await_confirmation` waits for the gateway's inbound
 protocol-4 `{cid, dps}` echo (matched on `cid` + the written DP/value) within a timeout; the switch
 then falls back to a cloud re-read, and raises a clear error if still unconfirmed — never an
-optimistic state. Reconnection uses exponential backoff and refreshes the credentials from the
-current session (a rotated `sid`); a link that is down makes the dependent switches unavailable.
+optimistic state. A link that is down makes the dependent switches unavailable.
+
+## Link lifecycle (hardening)
+
+- **Open**: only when `enable_cloud_mqtt` or `cloud_mqtt_probe` is on. One connection per entry.
+- **Close (kill switch)**: turning the option off reloads the entry; on unload the link sends
+  `DISCONNECT`, which also ends the client's reconnect loop, then joins the client thread (in an
+  executor, never on the event loop). `stop` is idempotent.
+- **Reconnection**: exponential backoff from `RECONNECT_MIN_DELAY` (5 s) to `RECONNECT_MAX_DELAY`
+  (300 s), reset by an accepted connection.
+- **Session rotation**: before each reconnection the credentials are rebuilt from the HTTP client's
+  current session (`creds_provider`), so a renewed `sid` / `ecode` is picked up.
+- **Session invalidated elsewhere**: the broker then answers `CONNACK` 4 or 5. At the first refusal
+  of a streak the link asks the integration for one cloud refresh (`on_auth_refused`): the HTTP call
+  notices the invalid session and signs in again, and the next attempt carries the renewed
+  credentials. After `MAX_AUTH_REFUSALS` (5) refusals in a row, about a minute, the link **stops for
+  good** (state `refused`) until the entry is reloaded: it never presents refused credentials in a
+  loop. Other return codes (broker unavailable…) are transient and only follow the backoff.
+- **States**: `idle`, `connecting`, `connected`, `refused`, `stopped`, shown by the "Cloud MQTT
+  link" sensor (`state` attribute) and the `cloud_mqtt_link` diagnostics block (with the counters
+  `connects`, `disconnects`, `auth_refusals`, `last_connack_rc`, `received`, `decoded`).
+- **Nothing sensitive leaves the process**: the client thread is renamed (paho names it after the
+  client id), log lines carry states and error types only, the `repr` of the credentials, gateway
+  references, link and publish plan omit every secret and identifier, and an "unknown gateway"
+  error does not name the gateway.
+
+Not verified on real hardware: whether the broker drops an established connection when its session
+is renewed or invalidated. The code handles both outcomes (kept: nothing to do; dropped: the path
+above), but the 5-refusal limit has only been exercised with a faked client.
 
 ## Validation status
 

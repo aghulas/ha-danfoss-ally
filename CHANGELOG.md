@@ -32,6 +32,22 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   itself after 48 h. Tooling for roadmap stage 3; the 24 h run on a real install is still to do
   (docs/cloud-mqtt-coverage.md).
 
+### Changed (cloud-MQTT link hardening)
+
+- Reconnection backoff widened to 5 s – 5 min (was 2 s – 60 s).
+- A link the broker refuses as not authorised asks for one cloud refresh (which renews an
+  invalidated session), then **stops for good after five refusals in a row** instead of retrying
+  forever with refused credentials. Reload the integration to try again.
+- Closing sends `DISCONNECT` before joining the client thread, and no longer refreshes credentials
+  while closing.
+- The link's state (`connecting`, `connected`, `refused`, `stopped`) is an attribute of the "Cloud
+  MQTT link" sensor; the diagnostics gain a `cloud_mqtt_link` block (state and counters, no
+  credential, no identifier).
+- No secret or identifier in the `repr` of the link objects, and the "unknown gateway" error no
+  longer names the gateway. Connection log lines moved from warning to info.
+- `enable_cloud_mqtt` now has a label in the options form (en/fr). README: the channel is
+  unofficial and optional, with its risks for the account.
+
 ### Changed
 
 - Shared library **`pydanfoss-cloud` 0.3.0** (packaging only, no behaviour change for the

@@ -32,11 +32,16 @@ again** (changing any option reloads the entry).
 4. Download the diagnostics (Settings → Devices & services → the entry → ⋮ → Download diagnostics).
 5. Turn the option off.
 
-## Reading `cloud_mqtt_coverage`
+## Reading the result
+
+First the sibling block `cloud_mqtt_link`: `state`, `connects` / `disconnects` (a high count means
+the link kept dropping: the gaps below are then the link's, not the heads'), `received` / `decoded`
+(a gap between the two means frames this codec cannot read).
+
+Then `cloud_mqtt_coverage`:
 
 | Field | Meaning |
 |---|---|
-| `link` | `connected`, `listen_only`, `connects` / `disconnects` (a high count means the link kept dropping: the gaps below are then the link's, not the heads'), `received` / `decoded` (a gap between the two means frames this codec cannot read) |
 | `started`, `stopped`, `duration_s` | The window measured. Check it is the 24 h you expect |
 | `frames`, `frames_by_protocol` | Everything decoded. Protocol `4` is a DP report |
 | `frames_without_head_report` | Frames about a gateway itself, or carrying no DP |

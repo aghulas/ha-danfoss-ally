@@ -149,9 +149,27 @@ integration can do the same, **gated behind the `enable_cloud_mqtt` option (off 
 - **Scope**: child lock (DP 30) only for now, validated on real hardware (2026-11-19). Other settings
   will be added one at a time after their own supervised validation.
 - **Requirement**: the path uses `paho-mqtt` (declared in `manifest.json` as `>=1.6.1,<3`, the MQTT client Home Assistant's own MQTT integration already ships — HA pins the exact version); Home Assistant installs it automatically. No manual step.
-- **Risks**: this is an unofficial path that rides the app's Tuya authentication; it can break if
-  Tuya changes it. Leave it off unless you want to try it, and expect to validate a first write on a
-  test head yourself (see `docs/first-write-procedure.md`).
+- **Unofficial and optional.** Nothing in the integration needs this channel: with the option off
+  (the default) no connection to the Tuya broker is ever opened, and an isolated head's child lock
+  is simply unavailable. It reproduces what the Danfoss app does and is not a documented or
+  supported API; Danfoss or Tuya can change or close it without notice.
+- **Risks for your account.** The channel keeps a **long-lived connection** to the Tuya MQTT broker
+  from a client that is not the app, which is more visible than the spaced HTTP polling. It rides
+  the same account session as the rest of the integration. The provider could react by refusing
+  the connection, invalidating the session (the integration then signs in again) or restricting
+  the account; none of this has been observed, but it cannot be ruled out. Use it knowingly, on an
+  account you are entitled to use this way.
+- **What limits the exposure.** One connection per config entry, from the integration's own session
+  (the app and other clients are not logged out). Reconnection backs off exponentially from 5 s to
+  5 min. Credentials are rebuilt from the current session before each reconnection. If the broker
+  refuses them five times in a row the link **stops for good** until the integration is reloaded,
+  rather than retrying forever. No credential, client id or device identifier is written to the
+  log or the diagnostics.
+- **Kill switch.** Turn `enable_cloud_mqtt` off: the entry reloads and the connection is closed.
+  The "Cloud MQTT link" sensor (attribute `state`: `connecting`, `connected`, `refused`,
+  `stopped`) and the `cloud_mqtt_link` block of the diagnostics show what the link is doing.
+- **First write.** Expect to validate a first write of each setting on a test head yourself (see
+  `docs/first-write-procedure.md`).
 
 ### Measuring what the Tuya cloud MQTT broker pushes (listen-only, off by default)
 

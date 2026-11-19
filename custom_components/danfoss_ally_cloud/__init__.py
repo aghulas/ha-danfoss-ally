@@ -130,7 +130,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # ``enable_cloud_mqtt`` (write path for isolated heads: a toggle then publishes a DP — the first
     # such write must be supervised; see docs/first-write-procedure.md) and/or by
     # ``cloud_mqtt_probe`` (coverage measure; listen-only when the write option is off).
-    mqtt_link, mqtt_coverage = await _async_setup_mqtt_link(hass, entry, client)
+    mqtt_link, mqtt_coverage = await _async_setup_mqtt_link(hass, entry, coordinator)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         DATA_COORDINATOR: coordinator,
@@ -238,7 +238,7 @@ async def _async_mqtt_creds_and_gateways(
 
 
 async def _async_setup_mqtt_link(
-    hass: HomeAssistant, entry: ConfigEntry, client: CloudClient
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: DanfossCoordinator
 ) -> tuple[CloudMqttLink | None, CoverageStats | None]:
     """Open the live cloud-MQTT link if ``enable_cloud_mqtt`` or ``cloud_mqtt_probe`` is on (both
     OFF by default). Best-effort: returns ``(None, None)`` on failure, never blocks setup. Uses the
@@ -251,8 +251,14 @@ async def _async_setup_mqtt_link(
       docs/cloud-mqtt-coverage.md). Without ``enable_cloud_mqtt`` the link is LISTEN-ONLY (no send
       path) and closes itself after ``CLOUD_MQTT_PROBE_MAX_SECONDS``.
 
-    Closes on unload. If the ``sid`` later rotates, the reconnect is refused and the switches become
-    unavailable rather than lying — a session-refresh rewire is a follow-up."""
+    Kill switch: turning the option(s) off reloads the entry, and the link closes on unload.
+
+    Session rotation: the link rebuilds its credentials from the client's current session before
+    each reconnection. When the broker refuses them, the link asks for a cloud refresh at once (an
+    HTTP call notices an invalidated session and renews it), so the next attempt carries the renewed
+    session; if the broker still refuses, the link stops for good after a few attempts
+    (``mqtt_client.MAX_AUTH_REFUSALS``) and everything that depends on it is unavailable."""
+    client = coordinator.client
     write = bool(entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT))
     probe = bool(entry.options.get(CONF_CLOUD_MQTT_PROBE, DEFAULT_CLOUD_MQTT_PROBE))
     if not (write or probe):
@@ -279,10 +285,17 @@ async def _async_setup_mqtt_link(
                 ch_key=data[CONF_CH_KEY],
             )
 
+        def _on_auth_refused() -> None:
+            """MQTT thread -> event loop: one cloud refresh, which renews an invalidated session."""
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(coordinator.async_request_refresh())
+            )
+
         link = CloudMqttLink(
             credentials=built[0],
             gateways=built[1],
             creds_provider=_fresh_creds,
+            on_auth_refused=_on_auth_refused,
             on_frame=coverage.record if coverage is not None else None,
             listen_only=not write,
         )

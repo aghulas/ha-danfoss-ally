@@ -63,6 +63,11 @@ class DanfossCloudMqttConnectivity(BinarySensorEntity):
     def is_on(self) -> bool:
         return self._link.connected
 
+    @property
+    def extra_state_attributes(self) -> dict[str, str | bool]:
+        # ``state`` tells a link in backoff (connecting) from one that gave up (refused).
+        return {"state": self._link.state, "listen_only": self._link.listen_only}
+
 
 class DanfossConnectivity(DanfossEntity, BinarySensorEntity):
     """Online / offline - available even offline (that is its purpose)."""

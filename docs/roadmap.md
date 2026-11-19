@@ -113,7 +113,10 @@ publish over Tuya cloud MQTT, the only path found that applies them (contract §
 4. **Push as a read source**, if stage 3 shows full coverage: feed the coordinator from the pushed
    reports, drop the post-command per-device read, lengthen the polling period.
 5. **Hardening before it is on by default anywhere**: kill switch, reconnect backoff, session
-   rotation, redacted diagnostics for the link, "unofficial" wording in the README.
+   rotation, redacted diagnostics for the link, "unofficial" wording in the README. **Code and docs
+   done** (`docs/cloud-mqtt-publish.md`, "Link lifecycle"); the behaviour of an established
+   connection across a real session renewal is still to observe on real hardware. The option stays
+   off by default.
 
 ## Per-room schedules and embedded frontend
 
