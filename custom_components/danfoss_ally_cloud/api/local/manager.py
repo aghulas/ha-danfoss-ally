@@ -7,8 +7,10 @@ link factory is injectable (``open_link``) for tests (a networkless double).
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
+import time
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -18,6 +20,12 @@ from ..keys import GatewayKey
 from . import tunnel
 
 _LOGGER = logging.getLogger(__name__)
+
+# Upper bound of a preheat survey: a fixed margin plus the worst case of one head (two 12 s
+# attempts, ``tunnel.request``) for the busiest gateway. Past it the survey is stopped and the heads
+# not read yet are simply absent from the result (their switch stays unavailable).
+SURVEY_BASE_TIMEOUT = 40.0
+SURVEY_HEAD_TIMEOUT = 30.0
 
 
 @dataclass(frozen=True)
@@ -44,8 +52,23 @@ class LocalTunnelManager:
     def gateway_ids(self) -> set[str]:
         return set(self._gateways)
 
-    def survey_preheat(self, heads: list[Head]) -> dict[str, bool | None]:
-        """Read preheat (0x0025 bit 1) per head, one gateway per thread. Best-effort."""
+    def survey_preheat(
+        self,
+        heads: list[Head],
+        on_result: Callable[[str, bool | None], None] | None = None,
+        stop: threading.Event | None = None,
+    ) -> dict[str, bool | None]:
+        """Read preheat (0x0025 bit 1) per head, one gateway per thread. Best-effort.
+
+        Slow by nature: the heads of a gateway are read one after the other (a few seconds each when
+        they answer, up to 24 s when they do not). ``on_result(dev_id, value)`` is called from the
+        worker thread as soon as a head is read, so the caller can publish it without waiting for
+        the whole site. ``stop`` aborts the survey: it returns at once with what was read so far,
+        and each worker gives up after the head it is on (a tunnel request is not interruptible).
+        No worker outlives the call for longer than that one request: nothing is written into the
+        returned mapping afterwards.
+        """
+        stop = stop if stop is not None else threading.Event()
         res: dict[str, bool | None] = {}
         lock = threading.Lock()
         by_gw: dict[str, list[Head]] = defaultdict(list)
@@ -53,34 +76,48 @@ class LocalTunnelManager:
             if h.gateway_id in self._gateways:
                 by_gw[h.gateway_id].append(h)
 
+        def publish(dev_id: str, value: bool | None) -> None:
+            with lock:
+                if stop.is_set():
+                    return
+                res[dev_id] = value
+            if on_result is not None:
+                with contextlib.suppress(Exception):  # a listener never breaks the survey
+                    on_result(dev_id, value)
+
         def worker(gw_id: str, mine: list[Head]) -> None:
             try:
                 link = self._open_link(self._gateways[gw_id])
             except Exception as err:  # noqa: BLE001 - gateway unreachable: heads = None
                 _LOGGER.debug("local tunnel: gateway %s unreachable (%s)", gw_id, err)
-                with lock:
-                    for h in mine:
-                        res[h.dev_id] = None
+                for h in mine:
+                    publish(h.dev_id, None)
                 return
             try:
                 for h in mine:
+                    if stop.is_set():
+                        return
                     try:
                         v = tunnel.read_preheat(link, h.dev_id, h.node_id)
                     except Exception:  # noqa: BLE001 - isolate each head
                         v = None
-                    with lock:
-                        res[h.dev_id] = v
+                    publish(h.dev_id, v)
             finally:
                 link.close()
 
         threads = [
             threading.Thread(target=worker, args=(g, m), daemon=True) for g, m in by_gw.items()
         ]
+        busiest = max((len(m) for m in by_gw.values()), default=0)
+        deadline = time.monotonic() + SURVEY_BASE_TIMEOUT + SURVEY_HEAD_TIMEOUT * busiest
         for t in threads:
             t.start()
         for t in threads:
-            t.join(timeout=40)
-        return res
+            while t.is_alive() and not stop.is_set() and time.monotonic() < deadline:
+                t.join(timeout=0.2)
+        with lock:
+            stop.set()  # timed out or aborted: late workers stop and publish nothing more
+            return dict(res)
 
     def survey_heads(self, heads: list[Head]) -> dict[str, dict[str, Any]]:
         """Full read-only survey of each head through the tunnel, summarized per head.

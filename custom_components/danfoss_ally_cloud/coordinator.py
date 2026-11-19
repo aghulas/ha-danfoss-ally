@@ -8,11 +8,12 @@ reports wrong (e.g. the real preheat 0x0025); here, cloud read only.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Iterable
 from datetime import timedelta
 
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -266,6 +267,11 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
 
     Slow and best-effort: it corrects what the cloud reports wrong (cloud DP 1 only touches the
     gateway cache). Relies on the cloud coordinator to know the heads and their gateway.
+
+    A survey reads the heads one by one (seconds each, minutes for a whole site), so it is never
+    awaited by the entry setup: ``data`` starts EMPTY (every preheat switch unavailable, never a
+    default ON/OFF) and each head is published as soon as it is read. Only one survey runs at a
+    time, and it is aborted when its task is cancelled (entry unload, Home Assistant stop).
     """
 
     def __init__(
@@ -283,6 +289,12 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
         )
         self.manager = manager
         self._cloud = cloud
+        # Nothing read yet: a head absent from ``data`` is unknown, hence unavailable.
+        self.data = {}
+        self._surveying = False
+        # Heads read back on their own (after a write) while a survey runs: that read is at least
+        # as fresh as the survey's, which must not overwrite it with a pre-write value.
+        self._read_back: dict[str, bool | None] = {}
 
     def heads(self) -> list[Head]:
         """Heads reachable through the tunnel (node_id + gateway known to the manager)."""
@@ -307,17 +319,50 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
         except Exception as err:  # noqa: BLE001 - best-effort, as the survey
             _LOGGER.debug("local preheat read-back failed (%s)", type(err).__name__)
             value = None
+        if self._surveying:
+            self._read_back[head.dev_id] = value
         data = dict(self.data or {})
         data[head.dev_id] = value
         self.data = data
         self.async_update_listeners()
         return value
 
+    @callback
+    def _async_head_read(self, dev_id: str, value: bool | None) -> None:
+        """Publish ONE head just read by the running survey (called on the event loop)."""
+        if not self._surveying or dev_id in self._read_back:
+            return
+        if (self.data or {}).get(dev_id) == value:
+            return  # unchanged (or still unknown): nothing to tell the entities
+        data = dict(self.data or {})
+        data[dev_id] = value
+        self.data = data
+        self.async_update_listeners()
+
     async def _async_update_data(self) -> dict[str, bool | None]:
         heads = self.heads()
         if not heads:
             return {}
+        if self._surveying:
+            # Never two surveys at once on the gateways (a survey can outlast the scan interval):
+            # the running one keeps publishing, this refresh changes nothing.
+            return self.data or {}
+        loop = self.hass.loop
+
+        def on_result(dev_id: str, value: bool | None) -> None:  # worker thread
+            loop.call_soon_threadsafe(self._async_head_read, dev_id, value)
+
+        stop = threading.Event()
+        self._read_back = {}
+        self._surveying = True
         try:
-            return await self.hass.async_add_executor_job(self.manager.survey_preheat, heads)
+            res = await self.hass.async_add_executor_job(
+                self.manager.survey_preheat, heads, on_result, stop
+            )
         except Exception as err:  # noqa: BLE001 - best-effort local fallback
             raise UpdateFailed(f"local survey: {err}") from err
+        finally:
+            # Also reached on cancellation (unload / stop): release the gateways.
+            stop.set()
+            self._surveying = False
+        return {**res, **self._read_back}

@@ -57,7 +57,7 @@ frames, so neither channel asks anything more of the user.
 | Active setpoint | Bulk list, DP 171 (`OccupiedSetpoint`) | Not the comfort setting: the setpoint of the current schedule slot or override. |
 | Heating action | Bulk list, DP 3 (`work_state`) | Taken from the head, never recomputed from temperature vs setpoint. |
 | A head just commanded | Cloud HTTP, per-device route, overlaid on the bulk state | Option `post_command_refresh`, bounded (see `docs/roadmap.md`, R-3). |
-| Real weekly schedule, preheat state | Local tunnel survey | Unavailable per head when that head does not answer. |
+| Real weekly schedule, preheat state | Local tunnel survey | Unavailable per head when that head does not answer. The preheat survey runs in the background (never awaited by setup), one at a time, and publishes each head as it is read: a preheat switch is unavailable until its head has been read. |
 | Connectivity | `online` | Never `update_time`. |
 
 ### Writes
