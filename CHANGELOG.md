@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased — 1.2.0 (gated cloud-MQTT write path for isolated heads)
+## 1.2.0 — Cloud-MQTT channel for isolated heads (gated), non-blocking local start, stale cleanup, reauth
+
+Minor release. It gathers the sections previously listed as unreleased: the gated cloud-MQTT write
+path for isolated heads, the non-blocking start of the local tunnel and the Home Assistant 2026
+deprecations, plus two fixes (window-detection switch after the first local read,
+re-authentication step). Every new option is **off by default**: an updated install behaves as
+1.1.0 until an option is turned on.
 
 Adds the write path the Danfoss app uses for **isolated** heads (those not grouped into a room),
 which `tuya.m.custom.wkf.settings.change` does not reach (W-3): a DP publish over Tuya cloud MQTT.
@@ -137,9 +143,7 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
 - No secret or real device identifier in logs or diagnostics (the MQTT client id is kept out of the
   log thread names; diagnostics redact ids).
 
-## Unreleased — Local tunnel: non-blocking start
-
-### Fixed
+### Fixed (local tunnel: non-blocking start)
 
 - **The entry no longer waits for the first local survey (`enable_local`).** Setup awaited the
   first preheat survey, which reads the heads one by one through the gateways; every start or reload
@@ -160,7 +164,7 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
 Not validated on real hardware yet (unit tests on synthetic data only): load time before/after and
 the switches coming up progressively are to be measured on a real site.
 
-## Unreleased — Home Assistant 2026 deprecations
+### Changed (Home Assistant 2026 deprecations)
 
 No functional change. Removes the deprecation warnings HA 2026.x logs for this integration, ahead of
 the removals in 2027.8 and 2027.11, while staying compatible with older HA versions.
