@@ -6,6 +6,7 @@ write reserved for administrators. The frontend calls ONLY these commands.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import voluptuous as vol
@@ -15,6 +16,12 @@ from homeassistant.loader import async_get_integration
 
 from . import operations as ops
 from .const import DATA_COORDINATOR, DATA_JOBS, DATA_LOCAL, DOMAIN
+
+
+def _command(schema: dict[Any, Any]) -> Callable[[Any], Any]:
+    """`websocket_command` with a voluptuous schema. Runtime-accepted by every supported HA
+    (2026.x included); HA 2026 types the schema keys as probatio markers, hence Any here."""
+    return websocket_api.websocket_command(schema)
 
 
 def _store(hass: HomeAssistant, msg: dict) -> dict | None:
@@ -64,9 +71,7 @@ def async_register(hass: HomeAssistant) -> None:
     reg(hass, ws_vacation_end)
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): "danfoss_ally_cloud/info", vol.Optional("entry_id"): str}
-)
+@_command({vol.Required("type"): "danfoss_ally_cloud/info", vol.Optional("entry_id"): str})
 @websocket_api.async_response
 async def ws_info(hass: HomeAssistant, connection, msg: dict) -> None:
     store = _store(hass, msg)
@@ -81,9 +86,7 @@ async def ws_info(hass: HomeAssistant, connection, msg: dict) -> None:
     )
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): "danfoss_ally_cloud/rooms", vol.Optional("entry_id"): str}
-)
+@_command({vol.Required("type"): "danfoss_ally_cloud/rooms", vol.Optional("entry_id"): str})
 @callback
 def ws_rooms(hass: HomeAssistant, connection, msg: dict) -> None:
     store = _store(hass, msg)
@@ -93,9 +96,7 @@ def ws_rooms(hass: HomeAssistant, connection, msg: dict) -> None:
     connection.send_result(msg["id"], ops.rooms_payload(store))
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): "danfoss_ally_cloud/holiday", vol.Optional("entry_id"): str}
-)
+@_command({vol.Required("type"): "danfoss_ally_cloud/holiday", vol.Optional("entry_id"): str})
 @callback
 def ws_holiday(hass: HomeAssistant, connection, msg: dict) -> None:
     store = _store(hass, msg)
@@ -105,9 +106,7 @@ def ws_holiday(hass: HomeAssistant, connection, msg: dict) -> None:
     connection.send_result(msg["id"], ops.holidays_payload(store))
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): "danfoss_ally_cloud/relays", vol.Optional("entry_id"): str}
-)
+@_command({vol.Required("type"): "danfoss_ally_cloud/relays", vol.Optional("entry_id"): str})
 @callback
 def ws_relays(hass: HomeAssistant, connection, msg: dict) -> None:
     store = _store(hass, msg)
@@ -117,9 +116,7 @@ def ws_relays(hass: HomeAssistant, connection, msg: dict) -> None:
     connection.send_result(msg["id"], ops.relays_payload(store))
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): "danfoss_ally_cloud/overview", vol.Optional("entry_id"): str}
-)
+@_command({vol.Required("type"): "danfoss_ally_cloud/overview", vol.Optional("entry_id"): str})
 @callback
 def ws_overview(hass: HomeAssistant, connection, msg: dict) -> None:
     store = _store(hass, msg)
@@ -129,7 +126,7 @@ def ws_overview(hass: HomeAssistant, connection, msg: dict) -> None:
     connection.send_result(msg["id"], ops.overview_payload(store))
 
 
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/room/get",
         vol.Required("target"): dict,
@@ -150,9 +147,7 @@ async def ws_room_get(hass: HomeAssistant, connection, msg: dict) -> None:
     connection.send_result(msg["id"], result)
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): "danfoss_ally_cloud/local_survey", vol.Optional("entry_id"): str}
-)
+@_command({vol.Required("type"): "danfoss_ally_cloud/local_survey", vol.Optional("entry_id"): str})
 @websocket_api.async_response
 async def ws_local_survey(hass: HomeAssistant, connection, msg: dict) -> None:
     store = _store(hass, msg)
@@ -168,7 +163,7 @@ async def ws_local_survey(hass: HomeAssistant, connection, msg: dict) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/set_descaling",
         vol.Required("target"): dict,
@@ -192,7 +187,7 @@ async def ws_set_descaling(hass: HomeAssistant, connection, msg: dict) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/set_override",
         vol.Required("target"): dict,
@@ -215,7 +210,7 @@ async def ws_set_override(hass: HomeAssistant, connection, msg: dict) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/clear_override",
         vol.Required("target"): dict,
@@ -237,7 +232,7 @@ async def ws_clear_override(hass: HomeAssistant, connection, msg: dict) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/set_window_detection",
         vol.Required("target"): dict,
@@ -259,7 +254,7 @@ async def ws_set_window_detection(hass: HomeAssistant, connection, msg: dict) ->
     connection.send_result(msg["id"], result)
 
 
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/schedule/get",
         vol.Required("target"): dict,
@@ -281,7 +276,7 @@ async def ws_schedule_get(hass: HomeAssistant, connection, msg: dict) -> None:
     connection.send_result(msg["id"], schedule)
 
 
-@websocket_api.websocket_command(
+@_command(
     {vol.Required("type"): "danfoss_ally_cloud/schedule/validate", vol.Required("days"): dict}
 )
 @callback
@@ -290,7 +285,7 @@ def ws_schedule_validate(hass: HomeAssistant, connection, msg: dict) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/schedule/set",
         vol.Required("target"): dict,
@@ -313,7 +308,7 @@ async def ws_schedule_set(hass: HomeAssistant, connection, msg: dict) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/schedule/restore",
         vol.Required("target"): dict,
@@ -355,7 +350,7 @@ async def _ws_room_write(hass, connection, msg, func, *args) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/room/create",
         vol.Required("name"): str,
@@ -372,7 +367,7 @@ async def ws_room_create(hass: HomeAssistant, connection, msg: dict) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/room/rename",
         vol.Required("target"): dict,
@@ -386,7 +381,7 @@ async def ws_room_rename(hass: HomeAssistant, connection, msg: dict) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/room/delete",
         vol.Required("target"): dict,
@@ -399,7 +394,7 @@ async def ws_room_delete(hass: HomeAssistant, connection, msg: dict) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/room/attach",
         vol.Required("target"): dict,
@@ -413,7 +408,7 @@ async def ws_room_attach(hass: HomeAssistant, connection, msg: dict) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/room/detach",
         vol.Required("target"): dict,
@@ -427,7 +422,7 @@ async def ws_room_detach(hass: HomeAssistant, connection, msg: dict) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/relay/set_room",
         vol.Required("relay"): str,
@@ -453,7 +448,7 @@ async def ws_relay_set_room(hass: HomeAssistant, connection, msg: dict) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/vacation/set",
         vol.Required("home"): str,
@@ -486,7 +481,7 @@ async def ws_vacation_set(hass: HomeAssistant, connection, msg: dict) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/vacation/set_at_home",
         vol.Required("home"): str,
@@ -513,7 +508,7 @@ async def ws_vacation_set_at_home(hass: HomeAssistant, connection, msg: dict) ->
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/vacation/cancel",
         vol.Required("home"): str,
@@ -527,7 +522,7 @@ async def ws_vacation_cancel(hass: HomeAssistant, connection, msg: dict) -> None
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
+@_command(
     {
         vol.Required("type"): "danfoss_ally_cloud/vacation/end",
         vol.Required("home"): str,
@@ -551,7 +546,7 @@ async def ws_vacation_end(hass: HomeAssistant, connection, msg: dict) -> None:
     )
 
 
-@websocket_api.websocket_command(
+@_command(
     {vol.Required("type"): "danfoss_ally_cloud/jobs/subscribe", vol.Optional("entry_id"): str}
 )
 @callback

@@ -7,7 +7,7 @@ and return a `WriteJob`. Contract errors (§5.4) are raised as translated `Servi
 
 from __future__ import annotations
 
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
@@ -420,7 +420,13 @@ def async_register_services(hass: HomeAssistant) -> None:
         except ops.OperationError as err:
             _raise(err)
 
-    reg = hass.services.async_register
+    def reg(
+        domain: str, service: str, handler: Any, schema: Any, response: SupportsResponse
+    ) -> None:
+        # Schemas stay voluptuous (runtime-accepted by every supported HA, incl. 2026.x); HA
+        # 2026 types them as probatio, so they cross into HA as Any at this single point.
+        hass.services.async_register(domain, service, handler, schema, response)
+
     reg(DOMAIN, "get_rooms", get_rooms, _GET_ROOMS, SupportsResponse.ONLY)
     reg(DOMAIN, "get_room", get_room, _RESTORE, SupportsResponse.ONLY)
     reg(DOMAIN, "get_holiday", get_holiday, _GET_ROOMS, SupportsResponse.ONLY)
