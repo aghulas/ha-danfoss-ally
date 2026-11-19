@@ -40,7 +40,8 @@ def test_decode_head_complete():
     assert d.online is True
     assert d.temperature == 21.5
     assert d.setpoint == 21.0
-    assert d.setpoints["setpoint"] == 21.0
+    assert d.setpoints["temp_set"] == 21.0
+    assert "setpoint" not in d.setpoints  # the misleading DP 16 key is gone from the decoder
     assert d.battery == 95
     assert d.valve_opening == 40
     assert d.heat_request is True
