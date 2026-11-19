@@ -217,7 +217,8 @@ Reading the result:
 **Stage B — supervised write from the integration** (generic procedure, with these specifics).
 
 - **What is sent**: one MQTT frame `{"1": bool}`.
-- **Arm**: `enable_local` and `enable_cloud_mqtt` on, the test head designated, DP 1 ticked. The
+- **Arm**: `enable_local` and `enable_cloud_mqtt` on, the test head designated, DP 1 ticked.
+  Without `enable_local` there is no preheat switch at all, so ticking DP 1 does nothing. The
   head's preheat switch must show `write_path: cloud_mqtt` and `write_trial: true`; the preheat
   switch of another head must show `write_path: local`. While armed, the tunnel never writes this
   head's preheat: with the MQTT link down the write fails instead of falling back.
@@ -229,8 +230,22 @@ Reading the result:
 - **Independent read-back** by the supervisor: raw `0x0025` through the tunnel (bit 1 at the new
   value, **bit 0 unchanged** — the code does not check bit 0), then the app, then cloud DP 1 and
   DP 172 for the record.
-- **Restore**: toggle the switch back while still armed (second proof), or disarm first and
-  restore through the tunnel if the trial failed. Read `0x0025` back: it must equal `V0`.
+- **Restore after a confirmed write**: toggle the switch back while still armed (second proof).
+  Read `0x0025` back: it must equal `V0`.
+- **After a "not confirmed"**: the frame **was sent**. Do not write anything yet.
+  1. Read raw `0x0025` and cloud DP 1 (per-device route) again at about 5 min and 15 min: the
+     head may apply the frame late (stage A's "only after minutes" case). Record the delay if it
+     does; the trial is not passed either way.
+  2. If the head ended up at the trial value: disarm, restore it through the tunnel (the preheat
+     switch, proven), read `0x0025` back (= `V0`).
+  3. If the head stayed at `V0` while **cloud DP 1 shows the trial value**, the gateway cache is
+     out of step with the head — the HTTP failure, reproduced. Toggling the switch back does
+     **not** fix it: the integration reads the head, finds it already at `V0` and publishes
+     nothing (a publish the head does not react to could not be confirmed by the tunnel, so the
+     integration never sends one). A tunnel write does not touch that cache either. Resynchronise
+     from the **Danfoss app**, the reference publisher: set its preheat toggle to the head's value
+     (`V0`'s bit 1), then read cloud DP 1 through the per-device route — it must show that value —
+     and raw `0x0025` — it must still equal `V0`. Record both reads.
 - **Passed** means only: this publish reaches the head. Promotion is a change of its own, which
   must say when cloud MQTT would be preferred to the tunnel that confirms it.
 

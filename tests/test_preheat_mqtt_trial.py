@@ -152,11 +152,27 @@ async def test_preheat_confirmed_by_the_tunnel_read(monkeypatch):
 async def test_preheat_not_confirmed_when_the_head_does_not_change():
     """The "accepted but not applied" case: the gateway would echo, the head keeps its value."""
     local, link = _Local([False, False]), _link()
-    with pytest.raises(HomeAssistantError, match="not confirmed"):
+    with pytest.raises(HomeAssistantError, match="not confirmed") as err:
         await async_mqtt_write_preheat(local, link, head(), True, supervised=_ARMED)
+    # The message does not claim more than is known: the frame left, and may still apply later.
+    assert "the frame was sent" in str(err.value)
+    assert "may still apply it later" in str(err.value)
     link.publish_dp.assert_awaited_once()
     assert local.data["dev-1"] is False  # the switch keeps showing what the head said
     link.await_confirmation.assert_not_called()
+
+
+async def test_toggling_back_after_a_failed_trial_publishes_nothing():
+    """Documented limit: after a "not confirmed", asking for the head's own value again sends
+    nothing (the tunnel could not confirm such a publish). The cloud's DP 1 is resynchronised from
+    the Danfoss app (DP 1 sheet of docs/first-write-procedure.md), never by a blind publish."""
+    local, link = _Local([False, False, False]), _link()
+    with pytest.raises(HomeAssistantError, match="not confirmed"):
+        await async_mqtt_write_preheat(local, link, head(), True, supervised=_ARMED)
+    assert (
+        await async_mqtt_write_preheat(local, link, head(), False, supervised=_ARMED) == UNCHANGED
+    )
+    link.publish_dp.assert_awaited_once_with("gw-1", "node-1", {"1": True})  # the trial only
 
 
 async def test_preheat_not_confirmed_when_the_tunnel_stops_answering():

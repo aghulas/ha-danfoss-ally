@@ -73,6 +73,10 @@ any supervised write.
   already at the value: nothing is sent); after the publish it is read every 10 s until bit 1 of
   `0x0025` shows the value, for 60 s at most, then a clear error. The gateway's echo is not even
   listened to, the cloud is not read.
+- After a "not confirmed", the frame has been sent: the head may apply it late, and the cloud's
+  DP 1 may differ from the head. The integration has no way to put that cache back (asking for the
+  head's own value publishes nothing, since the tunnel could not confirm it); the sheet does it
+  from the Danfoss app, checked by a read of cloud DP 1.
 - What the code does **not** check: bit 0 of `0x0025` (the switch only knows bit 1) and the
   cloud's DP 1 / DP 172. The sheet makes the supervisor read them by hand.
 - No route outside a trial yet. If the trial passes, promoting DP 1 is a change of its own that

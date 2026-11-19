@@ -155,7 +155,13 @@ async def async_mqtt_write_preheat(
       since the write could not be confirmed afterwards;
     - after the publish the head is read again until it shows the value, or a clear error is
       raised. Every read updates the preheat switch, which therefore only ever shows what the head
-      itself said (unavailable when it did not answer)."""
+      itself said (unavailable when it did not answer).
+
+    Limit, by design: this function cannot put the CLOUD's DP 1 back in step with the head. After
+    a "not confirmed" (the gateway cache may have taken the value while the head did not), asking
+    for the head's own value again returns ``UNCHANGED`` and publishes nothing, because a publish
+    the head has no reason to react to could not be confirmed by the tunnel. That resynchronisation
+    is done from the Danfoss app (docs/first-write-procedure.md, DP 1 sheet)."""
     if not dev.node_id or not dev.mesh_id:
         raise HomeAssistantError(
             "cloud-MQTT write impossible: the head's gateway address is unknown"
@@ -172,7 +178,7 @@ async def async_mqtt_write_preheat(
             "cloud-MQTT preheat write refused: the head does not answer through the local "
             "tunnel, so the write could not be confirmed"
         )
-    if before is value:
+    if before == value:
         return UNCHANGED
 
     try:
@@ -185,7 +191,7 @@ async def async_mqtt_write_preheat(
     deadline = sent_at + PREHEAT_CONFIRM_TIMEOUT
     while True:
         await asyncio.sleep(PREHEAT_CONFIRM_INTERVAL)
-        if await local.async_refresh_head(head) is value:
+        if await local.async_refresh_head(head) == value:
             _LOGGER.debug(
                 "cloud-MQTT preheat confirmed by the local tunnel after %.0f s",
                 loop.time() - sent_at,
@@ -193,7 +199,10 @@ async def async_mqtt_write_preheat(
             return CONFIRMED_BY_TUNNEL
         if loop.time() >= deadline:
             raise HomeAssistantError(
-                "cloud-MQTT preheat write not confirmed: the head's attribute 0x0025, read "
-                "through the local tunnel, does not show the value (the gateway's echo and the "
-                "cloud are not accepted as confirmation for preheat)"
+                "cloud-MQTT preheat write not confirmed: the frame was sent, and after "
+                f"{PREHEAT_CONFIRM_TIMEOUT:.0f} s the head's attribute 0x0025, read through the "
+                "local tunnel, does not show the value (the gateway's echo and the cloud are "
+                "not accepted as confirmation for preheat). The head may still apply it later, "
+                "and the cloud's DP 1 may now differ from the head: read both again before "
+                "any other write"
             )
