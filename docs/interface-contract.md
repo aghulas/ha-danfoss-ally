@@ -15,7 +15,7 @@ The rules in section 2 are not preferences: each corresponds to an observed beha
 | Gateway | device, `category` `wg2` | `devId` | device (hub) |
 | Room | schedule-group (type 5) | `group_id` (integer); product `pid` | **"room" device** (to create), identifier `(DOMAIN, "room_<group_id>")` |
 | Head | device, `category` `wk` | `devId`; `meshId` = gateway; `nodeId` = Zigbee address | existing device, `via_device` = gateway |
-| Isolated head | head with no room | `devId` | same; schedules itself (`resType` 1) |
+| Isolated head | head with no schedule-group (alone in its app room, or in none) | `devId` | same; schedules itself (`resType` 1); a **single-head room** in the fleet overview (§3.6) |
 
 A **grouped** head is scheduled and set only through its room. A room has at least two heads.
 
@@ -241,13 +241,36 @@ cached state** — no extra cloud call (added in 0.6.0, axis D).
         {
           "id": "13000000",
           "name": "Room 1",
+          "kind": "group",
           "head_count": 3,
+          "online": true,
           "offline": 0,
           "low_battery": 1,
           "heating": true,
           "window_open": false,
           "inconsistent": 0,
-          "faults": 1
+          "faults": 1,
+          "temperature": 20.4,
+          "setpoint": 21.0
+        },
+        {
+          "id": "<devId>",
+          "name": "Room 2",
+          "kind": "single_head",
+          "name_source": "room",
+          "room_id": "140000000",
+          "head_id": "<devId>",
+          "head_name": "Room 2",
+          "head_count": 1,
+          "online": true,
+          "offline": 0,
+          "low_battery": 0,
+          "heating": false,
+          "window_open": false,
+          "inconsistent": 0,
+          "faults": 0,
+          "temperature": 19.5,
+          "setpoint": 19.0
         }
       ],
       "relays": [
@@ -256,11 +279,35 @@ cached state** — no extra cloud call (added in 0.6.0, axis D).
     }
   ],
   "totals": {
-    "homes": 1, "gateways": 1, "rooms": 1, "heads": 3,
+    "homes": 1, "gateways": 1, "rooms": 2, "heads": 4,
     "offline": 0, "low_battery": 1, "heating": 1, "faults": 1, "relays_on": 1
   }
 }
 ```
+- **Two kinds of room** (`kind`). `group`: a schedule-group (type 5, `id` = `group_id`), the rooms
+  of two heads or more. `single_head` (added after 1.2.0): a head that belongs to **no** schedule-group
+  (`id` = `head_id` = its `devId`). A room of the app with a single head has no schedule-group, so
+  without this kind it was missing from the panel and from every total (99-head fleet shown as 66).
+  A single-head room is **not** a room write target: no group publish, no room schedule; its writes
+  are those of an isolated head (§4.2, §5.2, `target.type = device`).
+- **Home of a single head**: exact, from the per-home device list (`tuya.m.my.group.device.list`
+  with `gid`). A head of unknown home goes to the first home (kept visible and counted).
+- **Name of a single-head room**: the app room (type 4) of a head **cannot be read**. Observed on
+  real hardware (2026-11-19, two homes, 64 rooms, 33 single heads): `m.life.group.room.map.get`
+  returns `{rooms: [{id, name, displayOrder, background}], roomGroupMap: {}}` with no member;
+  `m.life.my.group.device.relation.list` v3.2 lists the rooms under key `"2"` → `children."4"` with
+  **empty** `children` (no head) for every room; `thing.m.room.list` returns `[{id, name}]` for the
+  whole account, no member; the device list carries no room field. So the room is matched **by
+  name**, inside the head's home: a room whose normalised name (case-folded, alphanumerics only)
+  equals the head's, not already named by a schedule-group of that home (with or without the
+  `" Group"` label, §4.7), and claimed by no other single head. Then `name` = the room's name,
+  `name_source` = `"room"`, `room_id` = its type-4 id. Otherwise `name` = the head's name,
+  `name_source` = `"head"`, `room_id` = `null` (fallback, flagged). On that fleet 28 of the 33 single
+  heads matched; the 5 others differ from their room by a typo, a missing word or another floor prefix, and a fuzzy match is
+  refused on purpose (it would pick the room of another floor).
+- `online`, `temperature`, `setpoint`: for a group, the aggregated room state (§3.4); for a single
+  head, the head's own (its `temperature` is `null` while offline: a stale value is not shown).
+- Rooms are listed per home **by name** (case-folded), groups and single heads together.
 - Per room: `offline` / `low_battery` / `inconsistent` / `faults` are counts over the member heads;
   `low_battery` counts heads with an `E14`/`E15` fault **or** `battery` ≤ 10 %; `heating` is true if
   any member head requests heat (`heat_request`) or the aggregated room is heating; `window_open` is
@@ -269,7 +316,8 @@ cached state** — no extra cloud call (added in 0.6.0, axis D).
   number calling for heat. A relay is listed under the home that holds the majority of its linked
   rooms; the relay → room link carries Tuya *room* ids (type 4), so rooms are matched to homes by
   normalised name (case-folded, alphanumerics only). With a single home every relay belongs to it.
-- `totals` sums the per-home figures (building-wide health at a glance); `relays_on` counts relays
+- `totals` sums the per-home figures over **every** room, single-head rooms included, so `heads`
+  is the whole fleet's head count (building-wide health at a glance); `relays_on` counts relays
   that are on **and online** (an offline relay's state is stale). Everything is **read only**.
 
 ## 4. Cloud calls (`api/` layer)
@@ -736,6 +784,9 @@ sidebar entry; `require_admin` is false (read-only view). Reads `overview` (§3.
 
 - **Shows**, per home: a holiday badge; the gateways and their online state; a room grid with each
   room's health (heads, offline, low battery, calling for heat, open window, inconsistent, faults)
-  linking to that room; the boiler relays (on/off, online, number of rooms calling for heat). A
+  and its temperature / active setpoint. Single-head rooms (§3.6) sit in the same grid with `1×`, a
+  "single head, no group" marker, and the head's own name under the room name when it differs; a
+  room named after its head (no app room matched) says so. No room write is offered for them (they
+  have none); the boiler relays (on/off, online, number of rooms calling for heat). A
   totals header gives building-wide health at a glance.
 - Read-only: it surfaces state and links out; any change is made from the room card or the entities.

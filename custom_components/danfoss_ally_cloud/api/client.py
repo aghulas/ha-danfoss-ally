@@ -129,6 +129,7 @@ class CloudClient:
         # Completeness of the last ``async_list_devices`` (see the properties below).
         self._device_list_complete = False
         self._device_list_homes: dict[str, int] = {}
+        self._device_home: dict[str, str] = {}
         self._ecode = ecode
         self._uid: str | None = None
         self._partner_identity: str | None = None
@@ -243,6 +244,7 @@ class CloudClient:
         homes = await self.async_get_homes()
         complete = bool(homes)
         per_home: dict[str, int] = {}
+        device_home: dict[str, str] = {}
         for home in homes:
             raw = await self._request(
                 "tuya.m.my.group.device.list", "1.0", None, extra_params={"gid": home["gid"]}
@@ -255,12 +257,14 @@ class CloudClient:
                 dev = decode_device(device)
                 if dev.id:
                     count += 1
+                    device_home.setdefault(dev.id, str(home["gid"]))
                     if dev.id not in seen:
                         seen.add(dev.id)
                         devices.append(dev)
             per_home[str(home["gid"])] = count
         self._device_list_complete = complete
         self._device_list_homes = per_home
+        self._device_home = device_home
         return devices
 
     @property
@@ -277,6 +281,14 @@ class CloudClient:
         """Per home gid, the number of devices its list held in the last ``async_list_devices``
         (only the homes that answered with a list)."""
         return dict(self._device_list_homes)
+
+    @property
+    def device_home(self) -> dict[str, str]:
+        """devId -> gid of the home whose device list held it, in the last ``async_list_devices``.
+
+        The per-home device list is the account's own attribution of a device to a home (exact, not
+        inferred). A device listed by several homes keeps the first one."""
+        return dict(self._device_home)
 
     async def async_list_raw(self) -> list[dict]:
         """Raw devices of all homes (devId, name, category, localKey, meshId, nodeId).

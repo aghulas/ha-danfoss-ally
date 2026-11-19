@@ -167,17 +167,31 @@ export interface FleetGateway {
   online: boolean;
 }
 
-/** Santé agrégée d'une pièce dans la vue d'ensemble. */
+/**
+ * Santé agrégée d'une pièce dans la vue d'ensemble. `kind` distingue une pièce
+ * groupée (groupe-programme, ≥ 2 têtes) d'une pièce d'une seule tête, sans groupe
+ * (contrat §3.6). Les champs ajoutés après 1.2.0 sont optionnels : un backend plus
+ * ancien ne les envoie pas.
+ */
 export interface FleetRoom {
   id: string;
   name: string;
+  kind?: "group" | "single_head";
+  /** Pièce d'une tête : nom tiré de la pièce de l'app (`room`) ou, à défaut, de la tête (`head`). */
+  name_source?: "room" | "head";
+  room_id?: string | null;
+  head_id?: string;
+  head_name?: string;
   head_count: number;
+  online?: boolean;
   offline: number;
   low_battery: number;
   heating: boolean;
   window_open: boolean;
   inconsistent: number;
   faults: number;
+  temperature?: number | null;
+  setpoint?: number | null;
 }
 
 /** Relais de chaudière dans la vue d'ensemble. */

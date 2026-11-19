@@ -326,6 +326,7 @@ async def test_device_list_complete_when_every_home_answers_with_a_list():
         devices = await c.async_list_devices()
     assert [d.id for d in devices] == ["dev-1", "dev-2"]
     assert c.device_list_complete is True and c.device_list_homes == {"1": 1, "2": 1}
+    assert c.device_home == {"dev-1": "1", "dev-2": "2"}  # exact home of each device
 
 
 @pytest.mark.parametrize("answer", [None, {"error": "x"}, "oops"])
