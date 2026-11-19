@@ -13,10 +13,17 @@ gateway-key fetching and MQTT publishing of the devices.
 - Public release is intended: bring features to the community **and** exercise the code on other
   installs to make the assumptions more reliable.
 
-## Guiding principle: cloud-first, local fallback
+## Guiding principle: three channels, one router
 
-The cloud API covers most of it. But we have established on real hardware cases where the cloud
-**lies or does not act** — to handle locally (detail in `docs/architecture.md`):
+A head is reachable through three channels: **cloud HTTP** (path 1a), **Tuya cloud MQTT** (the app's
+broker; validated on real hardware, opt-in, not on `main` yet) and the **local tunnel**. Each
+operation goes to the channel **proven for it on real hardware**; with no proven channel up, the
+entity is unavailable. Routing tables and the rules for adding a route: `docs/architecture.md`.
+
+"MQTT" means two things here: **Tuya cloud MQTT** is a channel to the heads; **MQTT publishing**
+(`mqtt_publisher.py`) sends our state to the user's own broker. Always say which.
+
+Cases established on real hardware where the cloud **lies or does not act**:
 
 - The **switch to manual mode** (DP 2 `manual`) erases the head's schedule (R4); `at_home` /
   `leaving_home` published via DP 2 are only **labels** on the cloud side: the head keeps its
@@ -25,10 +32,13 @@ The cloud API covers most of it. But we have established on real hardware cases 
 - Preheat: cloud DP 1 only touches the gateway cache; the real lever is the Zigbee attribute
   **0x0025**, reachable only through the local tunnel.
 - `update_time` is event-driven: `online` is authoritative, not it.
+- Settings of an **isolated** head: HTTP `settings.change` is accepted and never applied. A grouped
+  head is written through its room; an isolated one through the local tunnel or cloud MQTT.
+- The bulk list route lags by minutes after a change; the per-device route is fresher.
 
-So never "all cloud": cloud by default, **optional local tunnel** for the operations the cloud
-misses. The gateway keys are fetched by the integration itself, so the local fallback stays
-internal.
+So never "all cloud", and never a fallback to a channel that merely accepts the call. A new DP on a
+channel needs its own supervised write, read back from an independent source. The gateway keys are
+fetched by the integration itself and serve both the local tunnel and the cloud-MQTT frames.
 
 ## Code map
 
