@@ -45,6 +45,14 @@ def _device(hass, entry, key, name):
     )
 
 
+def _find_device(hass, entry, key):
+    """Device of this entry by identifier value (works on every supported HA line)."""
+    for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id):
+        if (DOMAIN, key) in device.identifiers:
+            return device
+    return None
+
+
 def _entity(hass, entry, domain, unique_id, device=None):
     return er.async_get(hass).async_get_or_create(
         domain,
@@ -70,7 +78,7 @@ async def test_device_of_a_head_gone_from_the_account_is_removed_with_its_entiti
     assert reg.async_get(orphan_switch.entity_id) is None
     assert reg.async_get(orphan_sensor.entity_id) is None
     # The head that is still in the account keeps its device and entities.
-    assert dr.async_get(hass).async_get_device(identifiers={(DOMAIN, "dev-1")}) is not None
+    assert _find_device(hass, entry, "dev-1") is not None
     assert hass.states.get("sensor.salon_battery") is not None
 
 
@@ -192,9 +200,9 @@ async def test_user_can_delete_only_a_device_that_is_no_longer_provided(hass: Ho
         members={"77": ["h1", "h2"]},
     )
     await _setup(hass, entry, fake)
-    reg = dr.async_get(hass)
-    live_head = reg.async_get_device(identifiers={(DOMAIN, "h1")})
-    live_room = reg.async_get_device(identifiers={(DOMAIN, "group_77")})
+    live_head = _find_device(hass, entry, "h1")
+    live_room = _find_device(hass, entry, "group_77")
+    assert live_head is not None and live_room is not None
     old_room = _device(hass, entry, "group_99", "Dissolved room")
     assert await async_remove_config_entry_device(hass, entry, live_head) is False
     assert await async_remove_config_entry_device(hass, entry, live_room) is False
