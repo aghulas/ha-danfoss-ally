@@ -118,9 +118,10 @@ publish over Tuya cloud MQTT, the only path found that applies them (contract §
      put in a comfort slot. To run on an isolated head that already follows a schedule, in a
      comfort slot. The trial must also settle whether a schedule rewrite is needed after the
      publish, as for rooms (R3).
-   - Preheat (DP 1): **not implemented**. Written proposal, with the observation to make before
-     any code and an assessment (probably not worth a second route):
-     `docs/cloud-mqtt-preheat-proposal.md`.
+   - Preheat (DP 1): candidate, code shipped closed, confirmed by the tunnel read of 0x0025 only.
+     **Observation from the app pending**, before any supervised write; if it is negative the
+     candidate is removed. Assessment: probably not worth a second route
+     (`docs/cloud-mqtt-preheat-proposal.md`; sheet in `docs/first-write-procedure.md`).
 3. **Measure inbound coverage**: which heads and DPs the broker pushes, and how often, over a full
    day. **Tooling shipped**: the listen-only option `cloud_mqtt_probe` (off by default) accounts the
    pushed reports per head and per DP and serves the aggregates in the diagnostics. The 24 h run on

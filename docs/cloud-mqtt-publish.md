@@ -120,8 +120,10 @@ above), but the 5-refusal limit has only been exercised with a faked client.
 - **Scope today**: the MQTT write path carries **DP 30, 116, 18, 27 and 120** as proven
   (`api.writes.MQTT_WRITE_DPS`). DP 118 + 16 (comfort setpoint) and DP 119 (setback setpoint) are
   implemented as **candidates** (`MQTT_CANDIDATE_DPS`), closed until their supervised write, which
-  has not been run. Other DPs (133/101 mounting/orientation, 1 preheat) are added one at a time,
-  each as a candidate first (docs/first-write-procedure.md).
+  has not been run. DP 1 (preheat) is a candidate too, with a rule of its own: its write is
+  confirmed by the local tunnel's read of attribute 0x0025 only, never by the echo or the cloud
+  (docs/cloud-mqtt-preheat-proposal.md). Other DPs (133/101 mounting/orientation) are added one at
+  a time, each as a candidate first (docs/first-write-procedure.md).
 
 ## Provenance
 

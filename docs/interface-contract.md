@@ -448,6 +448,7 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
 
   | 118 + 16 | Comfort setpoint | **Candidate** (`MQTT_CANDIDATE_DPS`): closed unless listed in `cloud_mqtt_supervised_dps` for its supervised write | tenths of °C within the head's own bounds, 0.5 step. `{"118": v, "16": v}` in one frame; only DP 118's confirmation is required |
   | 119 | Setback setpoint | **Candidate** | same check. `{"119": v}` alone (no DP 109) |
+  | 1 | Preheat | **Candidate**, not observed on real hardware. Confirmed by the local tunnel only (attribute `0x0025`, bit 1): the gateway's echo and the cloud read are not accepted | boolean; the head must answer through the tunnel before anything is sent |
   | 120 | Pause setpoint | **Proven** (see above) | same check. `{"120": v}` |
 
   Observed during the 2026-11-19 writes, on an isolated head: raising the lower bound above the
