@@ -339,6 +339,12 @@ class CloudMqttListener:
         try:
             client.connect_async(c.host, c.port, keepalive=60)
             client.loop_start()
+            # paho names its loop thread "paho-mqtt-client-<client_id>", which would put the client
+            # id (it embeds the deviceId) in the HA log's threadName. Rename it so no identifier
+            # leaks into logs (diagnostics already redact it). Best-effort, private attr.
+            thread = getattr(client, "_thread", None)
+            if thread is not None:
+                thread.name = "danfoss-cloud-mqtt-probe"
         except Exception as err:  # noqa: BLE001 - record and stay down, never raise into setup
             self.stats.last_error = f"{type(err).__name__}: {err}"
 

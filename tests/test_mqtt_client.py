@@ -193,6 +193,9 @@ class _FakePaho:
         self.tls = None
         self.loop_started = self.loop_stopped = self.disconnected = False
         self.connected_to = None
+        import types
+
+        self._thread = types.SimpleNamespace(name=f"paho-mqtt-client-{client_id}")
         _FakePaho.instances.append(self)
 
     def username_pw_set(self, u, p):
@@ -226,6 +229,7 @@ def test_listener_start_subscribes_on_connack0_and_stop_closes(monkeypatch):
     lst.start(ca_certs="/dev/null")
     c = _FakePaho.instances[-1]
     assert c.connected_to == ("h", 8883) and c.loop_started and c.username == "u"
+    assert c._thread.name == "danfoss-cloud-mqtt-probe"  # no client id leaks into logs
     # broker accepts -> subscribe to the gateway inbound topic
     c.on_connect(c, None, None, 0)
     assert lst.stats.connack_rc == 0

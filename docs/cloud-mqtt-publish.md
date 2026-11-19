@@ -221,21 +221,32 @@ most consistent remaining explanation for rc=5 is **per-session MQTT exclusivity
 integration satisfies with **its own** session (its own `sid`/`ecode` → its own username), distinct
 from the app's.
 
-**What this means:** the lock is very likely **passable** — the integration should connect with its
-**own** session, never a borrowed one. What is still unproven (a server policy, invisible in the
+**RESOLVED (2026-11-19, in-integration probe on real hardware).** The listen-only probe ran on the
+Pi from the integration's **own** session (gated option, cb05109), with Rémi's iPhone app open:
+**`CONNACK rc=0` (Connection Accepted)** and the **app stayed connected** the whole window — ~4m40,
+**426 inbound frames received, 426 decoded (100 %)**. So the broker allows **one MQTT connection per
+session**: the integration's own session coexists with the app. **The cloud-MQTT write path is
+viable.** (Hygiene fix applied: the paho loop thread is renamed so the client id never reaches the
+HA log; diagnostics already redact it.)
+
+**What this means:** confirmed — the integration connects with its **own** session, never a borrowed
+one, and coexists with the app/connector. What is still unproven (a server policy, invisible in the
 client) is one-active-MQTT-per-**session** (→ integration + app coexist, feature works) vs
 one-per-**account/uid** (→ the integration's MQTT would conflict with the app/connector, re-creating
 the session conflict that the distinct-deviceId coexistence solved). **Decisive test:** one
 read-only MQTT connect using the **integration's own live session** (which the Pi already holds) —
 not reproducible here (it needs the integration's login/session, which this session has no access
 to, and must not borrow the app's). Best run from inside the integration on the Pi, gated, with
-Rémi. Until then the live-link lifecycle in `mqtt_client.py` stays unwired.
+Rémi. (This was answered on 2026-11-19 — see §6.3b: one-per-session, coexistence OK.)
 
-**Keep vs shelve.** Keep (all validated, no live session needed): the 2.3 frame **codec**, the
-**credential derivations** (byte-exact), and **inbound-frame decoding in listen mode** (6/6 real
-frames). Keep the gated, offline-tested async client + switch routing (dormant, OFF by default).
-Shelve until the one-per-session/uid answer: creating and connecting the live link, and therefore any
-isolated-head MQTT write.
+**Status after the coexistence result.** Validated end to end short of a write: the 2.3 **codec**, the
+**credential derivations** (byte-exact), **inbound decoding on real frames** (6/6 + 426/426 live), and
+**an independent live connection that coexists with the app** (`rc=0`). The gated async client +
+switch routing are in place (dormant, OFF by default). **Next (write path now viable):** wire the
+live-link lifecycle in `mqtt_client.py` (connect `CloudMqttLink` from the entry's own session when
+`enable_cloud_mqtt` is on; reconnect on `sid` refresh; close on unload), then the **first supervised
+DP-30 write** (docs/first-write-procedure.md), Rémi present, before extending per DP on
+`WRITE_VERIFIED_MODELS`.
 
 ### 6a. Preparing the credentials for a live connect (step 3, prepared, NOT executed)
 
@@ -251,11 +262,10 @@ before any login + connect runs.
 
 ### 6b. Open questions — current best answers (static + the captures)
 
-- **Second connection for the same account?** Static analysis (§6.3b) refutes a deviceId-registration
-  requirement (MQTT auth is session-based, no registration call). The live rc=5 was an identity
-  collision from borrowing the app's own session. Remaining unknown: one active MQTT per **session**
-  (→ integration coexists with the app) vs per **account** (→ conflict). Decided only by a connect
-  from the integration's **own** session (Pi, gated) — not borrowing the app's.
+- **Second connection for the same account?** ANSWERED: **one active MQTT per session**. The
+  integration's own session connected (`rc=0`) and coexisted with the app the whole window
+  (real-hardware probe 2026-11-19, §6.3b). The earlier rc=5 was an identity collision from borrowing
+  the app's own session; with its own session there is no conflict.
 - **Is `t` freshness enforced?** No evidence of a timestamp window. The inbound decoder's replay guard
   is on **(seq, origin)** ("cloud command repeat", code 12003), not on `t`. So dedup = the per-gateway
   monotonic `SeqOrigin` (kept for the whole session); `t` is epoch seconds, informational. Keep the
