@@ -2,7 +2,14 @@
 
 Status: **study + codec prototype** (`custom_components/danfoss_ally_cloud/api/mqtt_publish.py`,
 tests `tests/test_mqtt_publish.py`, synthetic data only). **Nothing is sent**: no MQTT connection,
-no write to a head. A real publish needs Rémi's explicit go-ahead (see §6).
+no write to a head. A real publish needs Rémi's explicit go-ahead (see §6). Draft PR #71.
+
+Progress 2026-11-19 (research, off the 1.1.0 critical path): §6.1 done (branch pushed, draft PR
+#71); §6.2 static analysis of `doCommandNative` done (dispatcher + cmd-2 worker located, see §5),
+the runtime read still needs the frida step and Rémi; §6.3 offline frame-check ready; §6.4
+read-only connect script prepared, not run. The scripts that touch secrets live **outside this
+repo**, in `~/dev/danfoss-ally-signing-re/` (`frida/capture_cmd2.js`, `tools/verify_mqtt_frame.py`,
+`tools/mqtt_read_only.py`).
 
 ## 1. Why
 
@@ -94,6 +101,31 @@ localKey) and builds, for a Zigbee sub-device:
   mD=false)`. **Command 2 of libthing_security is not reproduced yet** (cmd 1 = request signature is).
   This is the only blocker for a pure-Python client.
 
+### 5.1 Static analysis of `doCommandNative` cmd 2 (2026-11-19)
+
+Static read of `artifacts/arm64-v8a/libthing_security.so` (jadx gave only the obfuscated Java;
+the native lib is stripped, so the JNI method table was rebuilt from the RELA relocations, not
+from symbols):
+
+- JNI table (`.data.rel.ro` @ `0x16320`): `doCommandNative` → fn `0x9b9c`, `encryptPostData` →
+  `0xa428`, `getEncryptoKey` → `0xa570` (the last matches the signing session's `FUN_0010a570`).
+- `doCommandNative` (`0x9b9c`) dispatches on the cmd argument at `0x9e44`: **cmd 1 → worker
+  `0x94c0`** (request signature), **cmd 2 → worker `0x9364`**, else error.
+- The cmd-2 worker `0x9364` builds a `std::string` from `DAT_00116560` — **the same composed
+  secret as sign/getEncryptoKey** (`com.danfoss.ally_<deviceId>_<appSecret1>_<appSecret2>`) — and
+  combines the input (the ecode) with it via `std::string` ops. It does **not** call the AES-GCM or
+  `mbedtls_md_hmac` (`0xcda8`) primitives: all four callers of `0xcda8` sit inside
+  `encryptPostData`/`getEncryptoKey` (`0xa4xx`+), none in the cmd-2 subtree. So cmd 2 is a lighter,
+  string-level transform of `(sign_key, ecode)`, not the standard HMAC path.
+- **Not resolved statically**: the exact transform (the helper semantics aren't legible from the
+  stripped asm). The clean next step is a runtime read — frida Interceptor on the worker's output
+  (and on `0xcda8` in case it is reached) with a **synthetic** ecode via the oracle:
+  `~/dev/danfoss-ally-signing-re/frida/capture_cmd2.js`. That launches the app on the AVD and so
+  needs Rémi (it can disconnect the shared Tuya session — see §6). Candidate formulas to check once
+  a real `(ecode → password)` pair exists, by analogy with `getEncryptoKey =
+  HMAC-SHA256(key=requestId, msg=sign_key + "_" + ecode).hex()[:16]`: a hex digest of
+  `sign_key [+ "_"] + ecode`, then middle 16; or an HMAC keyed by one of the appSecret halves.
+
 All of these are secrets (sid, ecode, chKey, username, password, localKey): never logged, never in
 diagnostics or the repo. `mqtt_publish.py` never puts them in a repr or an error message.
 
@@ -105,12 +137,15 @@ diagnostics or the repo. `mqtt_publish.py` never puts them in a repr or an error
    ⚠ Launching the app on the emulator invalidates the integration's session (shared deviceId):
    do it when Rémi is there.
 2. **Frame check against the capture**: the 2026-11-19 publishes were not saved as raw bytes. In
-   the next capture, dump the MQTT payload (base64) and check locally (outside the repo, key read
-   from the secrets file) that `decode_frame(localKey, payload)` gives
+   the next capture, dump the MQTT payload (base64) and check locally with
+   `~/dev/danfoss-ally-signing-re/tools/verify_mqtt_frame.py` (key read from the secrets file,
+   outside the repo; self-tested on a synthetic frame). Expected:
    `{"data":{"cid":…,"ctype":0,"dps":{"30":…}},"protocol":5,"t":…}`.
 3. **Connect only** (read): TLS connect with the derived credentials, subscribe
    `smart/mb/in/<gw>` and the user topic, decode inbound frames (DP reports). No publish. Validates
-   creds + decoder for real without touching a head.
+   creds + decoder for real without touching a head. Script ready (not run):
+   `~/dev/danfoss-ally-signing-re/tools/mqtt_read_only.py` (0 `publish()` calls by design; needs the
+   §5 password and a distinct deviceId).
 4. **First write** (Rémi's go-ahead, on site): one reversible DP (e.g. 30 child lock on a test head),
    check in the app and on the head, then revert. Then extend per DP, only on
    `WRITE_VERIFIED_MODELS`, with value validation before send (CLAUDE.md write safety).
