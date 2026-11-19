@@ -96,7 +96,8 @@ for a DP proven on it; (4) otherwise unavailable.
   designated in `cloud_mqtt_supervised_head`; it becomes **proven** (`MQTT_WRITE_DPS`) in a change
   of its own (`docs/first-write-procedure.md`).
 - Preheat is the known trap: cloud DP 1 over HTTP only changed the gateway cache. A DP 1 publish
-  over cloud MQTT must be read back as attribute 0x0025 before it is trusted.
+  over cloud MQTT must be read back as attribute 0x0025 before it is trusted. Not implemented;
+  proposal and prior observation: `docs/cloud-mqtt-preheat-proposal.md`.
 - After a successful write, the entity shows what the channel returns (echo or re-read), with a
   timeout and a clear error. No optimistic state.
 
