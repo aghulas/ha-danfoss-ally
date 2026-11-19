@@ -147,3 +147,81 @@ async def test_publish_flow_z2m(monkeypatch):
         c.args[2] for c in publie.await_args_list if c.args[1] == "danfoss_ally_cloud/Salon"
     )
     assert json.loads(etat)["local_temperature"] == 20.5
+
+
+# --- publishing scope: boiler relays in discovery mode; sensors and gateways never ---------------
+
+
+def _relay(**kw):
+    base = dict(
+        id="relay-1",
+        name="Boiler relay",
+        category="relay",
+        product_id="ypieax1h",
+        online=True,
+        relay_on=True,
+    )
+    base.update(kw)
+    return DanfossDevice(**base)
+
+
+async def _published(monkeypatch, devices, mode="discovery"):
+    publie = AsyncMock()
+    monkeypatch.setattr(mqtt_mod, "async_publish", publie)
+    monkeypatch.setattr(mqtt_mod, "async_wait_for_mqtt_client", AsyncMock(return_value=True))
+    coordinator = MagicMock()
+    coordinator.data = {d.id: d for d in devices}
+    coordinator.async_add_listener = MagicMock(return_value=lambda: None)
+    await _publisher(coordinator, mode=mode).async_start()
+    return {c.args[1]: c.args[2] for c in publie.await_args_list}
+
+
+def test_relay_discovery_is_one_read_only_binary_sensor():
+    cfgs = _publisher().discovery_configs(_relay())
+    assert [c["topic"] for c in cfgs] == [
+        "homeassistant/binary_sensor/danfoss_relay-1_boiler_relay/config"
+    ]
+    payload = cfgs[0]["payload"]
+    assert payload["device_class"] == "running" and payload["icon"] == "mdi:water-boiler"
+    assert payload["state_topic"] == "danfoss_ally_cloud/relay-1"
+    assert payload["availability_topic"] == "danfoss_ally_cloud/relay-1/availability"
+    assert "relay_on" in payload["value_template"]
+    assert "command_topic" not in payload  # read-only: the relay has no on/off control
+
+
+def test_head_discovery_is_unchanged_by_the_relay_entity():
+    cfgs = _publisher().discovery_configs(_dev())
+    assert len(cfgs) == 5  # 4 sensors + window
+    assert not any("boiler_relay" in c["topic"] for c in cfgs)
+
+
+async def test_relay_is_published_in_discovery_mode(monkeypatch):
+    out = await _published(monkeypatch, [_dev(), _relay(relay_on=False, online=False)])
+    assert json.loads(out["danfoss_ally_cloud/relay-1"]) == {"relay_on": False}
+    assert out["danfoss_ally_cloud/relay-1/availability"] == "offline"
+    assert "homeassistant/binary_sensor/danfoss_relay-1_boiler_relay/config" in out
+    assert "danfoss_ally_cloud/dev-1" in out  # heads still published
+
+
+async def test_relay_with_unknown_state_publishes_no_state(monkeypatch):
+    out = await _published(monkeypatch, [_relay(relay_on=None)])
+    assert "danfoss_ally_cloud/relay-1" not in out  # never a state read as "off"
+    assert out["danfoss_ally_cloud/relay-1/availability"] == "online"
+
+
+async def test_sensors_gateways_and_others_are_never_published(monkeypatch):
+    others = [
+        DanfossDevice(id="sensor-1", name="Room sensor", category="sensor", online=True),
+        DanfossDevice(id="gw-1", name="Gateway", category="gateway", online=True),
+        DanfossDevice(id="x-1", name="Other", category="other", online=True),
+    ]
+    for mode in ("discovery", "zigbee2mqtt"):
+        out = await _published(monkeypatch, others, mode=mode)
+        assert not any(d.id in topic or d.name in topic for d in others for topic in out)
+
+
+async def test_relay_is_not_published_in_zigbee2mqtt_mode(monkeypatch):
+    out = await _published(monkeypatch, [_dev(), _relay()], mode="zigbee2mqtt")
+    assert not any("relay" in topic.lower() for topic in out)
+    devices = json.loads(out["danfoss_ally_cloud/bridge/devices"])
+    assert [d["friendly_name"] for d in devices] == ["Salon"]

@@ -41,7 +41,8 @@ For the chosen head, read the same value in all three places and tick only if th
   `homeassistant-admin` (`ha_entite`).
 - MQTT: `mqtt` connector — `mqtt_topics` to list, `mqtt_lire` for a retained payload,
   `mqtt_surveiller` to watch live while Rémi acts. Topics:
-  - discovery: `danfoss_ally_cloud/<device_id>` (state), `…/<device_id>/availability`.
+  - discovery: `danfoss_ally_cloud/<device_id>` (state), `…/<device_id>/availability`. Heads and
+    boiler relays (a relay's state is `{"relay_on": bool}`); room sensors are not published.
   - z2m: `danfoss_ally_cloud/<friendly_name>` (state), `…/bridge/devices` (exposes), `…/bridge/state`.
 
 - [ ] **R-1** All seven rows agree on first read (no writes yet).

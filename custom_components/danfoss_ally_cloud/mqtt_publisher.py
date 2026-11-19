@@ -10,6 +10,16 @@ mode "zigbee2mqtt": bridge/state + bridge/devices (with exposes) and one state t
 source ("cloud" | "local"): where the values come from. v0.4: cloud source, read-only
 (sensors + binary + availability). MQTT control will come later.
 
+Scope (what is published), decided after the 2026-11-19 real-hardware run:
+
+- HEADS: both modes (temperature, active setpoint, battery, valve opening, window).
+- BOILER RELAYS: "discovery" mode only, as one binary sensor (on/off, read-only), the mirror of
+  the integration's own relay entity. Not in "zigbee2mqtt" mode, whose device list describes
+  thermostats to a z2m consumer.
+- ROOM SENSORS and any other category: NOT published. The integration does not decode them (they
+  have no Home Assistant entity either): their DPs are not verified on real hardware.
+- Gateways: not published.
+
 Config and state messages are published `retain` (a late subscriber gets the last state).
 Availability follows `online` (cf. docs/architecture.md: online is authoritative, not update_time).
 """
@@ -66,10 +76,22 @@ _SENSORS: tuple[dict[str, Any], ...] = (
 _BINARY: tuple[dict[str, Any], ...] = (
     {"key": "window", "field": "window_open", "device_class": "window", "name": "Window"},
 )
+# The one entity published for a boiler relay (discovery mode): its on/off state, read-only.
+_RELAY_BINARY: tuple[dict[str, Any], ...] = (
+    {
+        "key": "boiler_relay",
+        "field": "relay_on",
+        "device_class": "running",
+        "icon": "mdi:water-boiler",
+        "name": "Boiler relay",
+    },
+)
 
 
 def state_payload(dev: DanfossDevice) -> dict[str, Any]:
-    """Values published for a head (state JSON). None excluded."""
+    """Values published for a head or a boiler relay (state JSON). None excluded."""
+    if dev.is_relay:
+        return {} if dev.relay_on is None else {"relay_on": dev.relay_on}
     fields = {
         "temperature": dev.temperature,
         "setpoint": dev.setpoint,
@@ -189,11 +211,10 @@ class MqttPublisher:
 
     async def _async_publish_all(self) -> None:
         for dev in self._coordinator.data.values():
-            if not dev.is_head:
-                continue
             if self._mode == "zigbee2mqtt":
-                await self._async_publish_device_z2m(dev)
-            else:
+                if dev.is_head:  # the z2m device list describes thermostats only
+                    await self._async_publish_device_z2m(dev)
+            elif dev.is_head or dev.is_relay:
                 await self._async_publish_device(dev)
 
     async def _async_publish_device(self, dev: DanfossDevice) -> None:
@@ -212,10 +233,15 @@ class MqttPublisher:
             qos=0,
             retain=True,
         )
+        payload = state_payload(dev)
+        if dev.is_relay and not payload:
+            # Relay state unknown: publish nothing rather than a state the template would read
+            # as "off". The last retained state and the availability stay as they are.
+            return
         await mqtt.async_publish(
             self._hass,
             self._state_topic(dev.id),
-            json.dumps(state_payload(dev)),
+            json.dumps(payload),
             qos=0,
             retain=True,
         )
@@ -283,7 +309,8 @@ class MqttPublisher:
         }
 
     def discovery_configs(self, dev: DanfossDevice) -> list[dict[str, Any]]:
-        """Discovery config messages {topic, payload} for a head (exposed for the tests)."""
+        """Discovery config messages {topic, payload} for a head or a boiler relay (exposed for
+        the tests)."""
         return self._discovery_configs(dev)
 
     def _discovery_configs(self, dev: DanfossDevice) -> list[dict[str, Any]]:
@@ -295,7 +322,7 @@ class MqttPublisher:
             "payload_available": AVAIL_ONLINE,
             "payload_not_available": AVAIL_OFFLINE,
         }
-        for s in _SENSORS:
+        for s in () if dev.is_relay else _SENSORS:
             payload = {
                 "name": s["name"],
                 "unique_id": f"{self._base}_{dev.id}_{s['key']}",
@@ -316,7 +343,7 @@ class MqttPublisher:
                     "payload": payload,
                 }
             )
-        for b in _BINARY:
+        for b in _RELAY_BINARY if dev.is_relay else _BINARY:
             tpl = f"{{{{ 'ON' if value_json.{b['field']} else 'OFF' }}}}"
             payload = {
                 "name": b["name"],
@@ -330,6 +357,8 @@ class MqttPublisher:
                 "device": device,
                 **avail,
             }
+            if "icon" in b:
+                payload["icon"] = b["icon"]
             out.append(
                 {
                     "topic": f"{DISCOVERY_PREFIX}/binary_sensor/{payload['object_id']}/config",
