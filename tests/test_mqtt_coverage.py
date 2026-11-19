@@ -354,21 +354,25 @@ async def test_supervised_option_opens_only_real_candidates(hass: HomeAssistant,
         CONF_CLOUD_MQTT_SUPERVISED_DPS,
         DATA_MQTT_SUPERVISED_DPS,
     )
-    from custom_components.danfoss_ally_cloud.switch import PATH_MQTT, PATH_NONE, DanfossSwitch
+    from custom_components.danfoss_ally_cloud.number import PATH_MQTT, DanfossHeadSetpoint
 
     entry = await _setup(hass, {CONF_ENABLE_CLOUD_MQTT: True})
     assert hass.data[DOMAIN][entry.entry_id][DATA_MQTT_SUPERVISED_DPS] == frozenset()
     c = fake_paho.instances[-1]
     c.on_connect(c, None, None, 0)
 
-    def window_switch():
+    def setback_number():
         return next(
-            e
-            for e in hass.data["entity_components"]["switch"].entities
-            if isinstance(e, DanfossSwitch) and e.entity_description.key == "window_detection"
+            (
+                e
+                for e in hass.data["entity_components"]["number"].entities
+                if isinstance(e, DanfossHeadSetpoint)
+                and e.entity_description.key == "setback_setpoint"
+            ),
+            None,
         )
 
-    assert window_switch()._write_path(window_switch().device) == PATH_NONE  # closed by default
+    assert setback_number() is None  # a candidate: closed by default, no entity
 
     with (
         patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=FakeCloudClient()),
@@ -381,15 +385,16 @@ async def test_supervised_option_opens_only_real_candidates(hass: HomeAssistant,
             entry,
             options={
                 CONF_ENABLE_CLOUD_MQTT: True,
-                # 30 is proven (not a candidate), 2 and "x" are not candidates: all ignored.
-                CONF_CLOUD_MQTT_SUPERVISED_DPS: ["116", "30", "2", "x"],
+                # 30 and 116 are proven (no longer candidates), 2 and "x" are not candidates: all
+                # ignored.
+                CONF_CLOUD_MQTT_SUPERVISED_DPS: ["119", "116", "30", "2", "x"],
                 "cloud_mqtt_supervised_head": "dev-1",  # the trial head (the fixture's only head)
             },
         )
         await hass.async_block_till_done()
-    assert hass.data[DOMAIN][entry.entry_id][DATA_MQTT_SUPERVISED_DPS] == frozenset({116})
+    assert hass.data[DOMAIN][entry.entry_id][DATA_MQTT_SUPERVISED_DPS] == frozenset({119})
     c = fake_paho.instances[-1]
     c.on_connect(c, None, None, 0)
-    sw = window_switch()
-    assert sw._write_path(sw.device) == PATH_MQTT
-    assert sw.extra_state_attributes["write_trial"] is True
+    num = setback_number()
+    assert num is not None and num._write_path(num.device) == PATH_MQTT
+    assert num.extra_state_attributes["write_trial"] is True

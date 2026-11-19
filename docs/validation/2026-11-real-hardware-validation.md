@@ -618,6 +618,97 @@ tests, real-hardware validation at the next window.
 - `reconnect_session_connector` cannot reload a healthy stdio MCP server: a new tool only appears
   after a manual restart of the server.
 
+## Supervised cloud-MQTT first writes (DP 116, 18, 120, 27), 2026-11-19 ~21:05–22:05
+
+Procedure: `docs/first-write-procedure.md`. One isolated test head on a verified model (not the
+head of the DP 30 trial), the owner at the keyboard with the Danfoss app open, one explicit
+go-ahead per write. One DP opened at a time through `cloud_mqtt_supervised_dps`, on that head only
+(`cloud_mqtt_supervised_head`). Independent read-back: the head read through the **local tunnel**
+by the MCP connector, which does not go through the cloud; then the app.
+
+Build: the DP 116 "on" write ran on `1.2.0-rc1`, every later write on `1.2.0-rc2` (another session
+installed it and restarted Home Assistant in between; the cloud-MQTT candidate code is the same in
+both). Options found and left: `enable_cloud_mqtt` off, no supervised DP, no trial head,
+`cloud_mqtt_probe` on.
+
+Baseline of the head (cloud and tunnel agreeing unless noted): window detection off, bounds
+35 / 5 °C, pause setpoint 5 °C (cloud only), current setpoint 5 °C, child lock off. The cloud
+showed comfort 21 / setback 17 where the head held 5 / 5.
+
+| DP | Write | Tunnel | Cloud (per-device) | App | Restore |
+|---|---|---|---|---|---|
+| 116 window detection | off → on | **on** | on | on | off, tunnel **off** |
+| 18 upper bound | 35 → 34.5 | **34.5** | 34.5 | 34.5 | 35, tunnel **35** |
+| 120 pause setpoint | 5 → 5.5 | no attribute known | 5.5 | 5.5 | (kept for the next step) |
+| 27 lower bound, alone | 5 → 5.5 (pause already 5.5) | **5.5** | 5.5, pause unchanged | 5.5 | — |
+| 27 + 120, one frame | 5.5 → 6 (above the pause) | **6** | 6, pause **6** | 6 / pause 6 | bound 5 (tunnel **5**), then pause 5 by DP 120 |
+
+- **Armed entity**: on the trial head `write_path: cloud_mqtt`, `write_trial: true`; the same
+  switch of another isolated head kept `write_path: local`. The bound and pause `number` entities
+  appeared when their DP was opened and were removed when it was closed.
+- **Confirmation**: every call returned without error in 0.4–0.7 s, which fits the gateway's echo
+  (the cloud fallback only starts after 15 s). The source was not read from the logs (not at debug
+  level): "confirmed by echo" is an inference. The per-device fallback was therefore not exercised.
+- **Neighbours**: after each write the other settings of the head, read through the tunnel, were
+  unchanged. The other heads were not re-read one by one.
+- **DP 120 is the weaker proof**: no tunnel attribute is known for the pause setpoint, so the app's
+  settings screen (and the cloud) are the only read-backs, and both have been seen holding values
+  the head does not have. The DP 27 + 120 frame gives a second, still indirect, observation.
+- **Lower bound and current setpoint**: with the bound raised to 5.5 then 6, the head's current
+  setpoint stayed at 5 °C (tunnel): a head does not re-clamp its current setpoint when the lower
+  bound rises above it.
+- **Lower bound and pause setpoint**: lowering the bound back to 5 left the pause setpoint at 6; it
+  was restored by its own write. Whether the app itself publishes DP 120 with DP 27 when the bound
+  rises above the pause setpoint was **not** observed: the rule stays this project's reading.
+
+**Verdict: ✅ DP 116, 18 and 27 (alone and with DP 120) proven on Tuya cloud MQTT; DP 120 proven on
+app + cloud evidence only.**
+
+### DP 118 + 16 and DP 119 — not run ❌ (precondition not met)
+
+The sheets require the head to be in a comfort slot. The test head was not following a schedule
+with slots (tunnel: a flat 5 °C schedule on the seven days, operation mode 3, preheat on; cloud:
+mode `manual`, empty schedule). Attempt to prepare it, each step on the owner's go-ahead:
+
+| Time | Step | Result |
+|---|---|---|
+| 21:40 | `set_schedule` on the head: one comfort slot that evening | accepted by the cloud |
+| 21:42–21:47 | three tunnel reads | flat 5 °C schedule, unchanged |
+| 21:47 | `restore_schedule` (seven days, then `at_home`) | accepted by the cloud |
+| 21:50, 21:53 | two tunnel reads | unchanged; cloud mode still `manual` |
+| 21:54 | `set_schedule` with the day emptied (clean-up) | accepted by the cloud |
+| 21:55 | tunnel + cloud | head in **manual at 21 °C**, heat demand, mode 0, preheat off, empty schedule |
+| 21:55 | `set_override` 5 °C (tunnel) | current setpoint 5 °C; mode 3, preheat on, flat **21 °C** schedule |
+| ~21:58 | manual mode at 5 °C set by the owner in the app | manual 5 °C, mode 0, preheat off, empty schedule, valve closed |
+| 22:01 | `set_override` 5 °C (tunnel) | no change in two reads |
+
+No frame carrying DP 118, 16 or 119 was sent. What this run does establish:
+
+- **HTTP schedule writes on an isolated head in manual mode did not act within the 5 minutes of
+  R7** and showed on the head more than ten minutes later, as a switch to manual at the comfort
+  setpoint — not as the schedule that was written. Which of the three calls produced it cannot be
+  told apart. A schedule write "accepted" by the cloud must not be read as "not applied" after five
+  minutes on such a head: a late effect is possible.
+- `restore_schedule` over HTTP did not bring this head back to its schedule.
+- The integration has no proven way to write an isolated head's durable setpoint: the manual
+  setpoint was corrected in the app.
+
+**State left on the test head**: setpoint 5 °C, valve closed, bounds, window detection, pause
+setpoint and child lock as found; but plain manual (operation mode 0, no schedule, preheat off)
+where it was found in mode 3 with a flat 5 °C schedule and preheat on. How the found state had been
+produced is not known, and it was not recreated. To re-read through the tunnel the next morning.
+
+**To run the two remaining trials**: an isolated head that already follows a schedule, during one
+of its comfort slots, in daytime.
+
+### Incident — Home Assistant restarted by other sessions during the trial
+
+Home Assistant was restarted three times by other sessions while the trial was armed (21:06,
+21:10, 22:02). The first fell between the DP 116 "on" write and its restore: the restore waited
+163 s for the write lock, then ran after the restart and was read back through the tunnel. No write
+was lost, but the "one driver of the live install at a time" rule did not hold. The options stayed
+armed across the restarts, as designed.
+
 ## §3 — online vs update_time (autonomous spot-check)
 
 - Room A (online) → MQTT availability `online` ✅.

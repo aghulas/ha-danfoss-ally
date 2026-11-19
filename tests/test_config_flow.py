@@ -76,11 +76,11 @@ async def test_options_flow(hass: HomeAssistant):
             CONF_MQTT_MODE: "discovery",
             "mqtt_source": "cloud",
             "mqtt_base_topic": "danfoss_ally_cloud",
-            "cloud_mqtt_supervised_dps": ["116"],
+            "cloud_mqtt_supervised_dps": ["118"],
         },
     )
     assert result2["type"] == FlowResultType.CREATE_ENTRY
-    assert entry.options["cloud_mqtt_supervised_dps"] == ["116"]
+    assert entry.options["cloud_mqtt_supervised_dps"] == ["118"]
     assert entry.options[CONF_SCAN_INTERVAL] == 120
     assert entry.options[CONF_ENABLE_LOCAL] is True
     assert entry.options[CONF_MQTT_MODE] == "discovery"

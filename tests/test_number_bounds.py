@@ -24,7 +24,8 @@ from .test_switch import _FakeClient, _FakeCloudCoord, _FakeMqttLink
 
 UPPER = next(d for d in HEAD_BOUNDS if d.bound == "upper")
 LOWER = next(d for d in HEAD_BOUNDS if d.bound == "lower")
-TRIAL = frozenset({18, 27, 120})
+# DP 18, 27 and 120 are proven on cloud MQTT (2026-11-19): no supervised trial is needed.
+TRIAL = frozenset()
 
 
 def _head(**kw):
@@ -51,23 +52,16 @@ def test_bound_reads_the_decoded_value_and_schema_range():
     assert up.unique_id == "dev-1_upper_bound" and low.unique_id == "dev-1_lower_bound"
 
 
-def test_bound_under_trial_states_its_route():
+def test_bound_states_its_route_without_a_trial_marker():
     ent, _, _ = _bound(UPPER, _head())
     assert ent.available is True
-    assert ent.extra_state_attributes == {
-        "write_path": "cloud_mqtt",
-        "write_scope": "head",
-        "write_trial": True,
-    }
+    assert ent.extra_state_attributes == {"write_path": "cloud_mqtt", "write_scope": "head"}
 
 
 def test_bound_unavailable_without_a_usable_route():
-    # Candidate not opened for a trial.
-    ent, _, _ = _bound(UPPER, _head(), supervised=frozenset())
-    assert ent.available is False and ent.extra_state_attributes == {"write_path": "none"}
     # Link down.
     ent, _, _ = _bound(UPPER, _head(), link=_FakeMqttLink(connected=False))
-    assert ent.available is False
+    assert ent.available is False and ent.extra_state_attributes == {"write_path": "none"}
     # Gateway unknown to the link.
     ent, _, _ = _bound(UPPER, _head(), link=_FakeMqttLink(gateways=("gw-x",)))
     assert ent.available is False
@@ -104,9 +98,16 @@ async def test_lower_bound_drags_the_pause_setpoint_when_it_rises_above_it():
     assert sorted(link.confirmations) == [("node-1", 27, 55), ("node-1", 120, 55)]
 
 
-async def test_lower_bound_needing_dp120_is_refused_when_dp120_is_closed():
+async def test_a_frame_with_a_closed_dp_is_refused_whole(monkeypatch):
+    """Should a DP of the frame be closed on the channel, nothing is sent at all (here DP 120 put
+    back among the candidates: the lower bound that needs it is refused, DP 27 does not go out
+    alone)."""
+    from custom_components.danfoss_ally_cloud.api import writes
+
+    monkeypatch.setattr(writes, "MQTT_WRITE_DPS", writes.MQTT_WRITE_DPS - {120})
+    monkeypatch.setattr(writes, "MQTT_CANDIDATE_DPS", writes.MQTT_CANDIDATE_DPS | {120})
     dev = _head()
-    ent, _, link = _bound(LOWER, dev, supervised=frozenset({27}))
+    ent, _, link = _bound(LOWER, dev)
     with pytest.raises(HomeAssistantError, match="DP 120"):
         await ent.async_set_native_value(5.5)
     assert link.published == []
@@ -227,13 +228,23 @@ async def _setup(
     return [e for e in added if isinstance(e, kind)]
 
 
-async def test_no_bound_entity_by_default():
-    assert await _setup([_head(dev_id="iso")], supervised=frozenset()) == []  # candidates closed
-    assert _removed_bounds() == ["iso_upper_bound", "iso_lower_bound"]
+async def test_no_bound_entity_without_the_cloud_mqtt_option():
     assert await _setup([_head(dev_id="iso")], cloud_mqtt=False) == []
     assert _removed_bounds() == ["iso_upper_bound", "iso_lower_bound"]
-    assert await _setup([_head(dev_id="iso")], trial_head=None) == []  # no trial head designated
-    assert _removed_bounds() == ["iso_upper_bound", "iso_lower_bound"]
+
+
+async def test_bound_entities_need_no_trial():
+    """Proven DPs: with the option on and a link, every isolated head gets its bounds, with no
+    DP ticked and no trial head designated."""
+    ents = await _setup([_head(dev_id="iso"), _head(dev_id="iso2")], trial_head=None)
+    assert sorted(e.unique_id for e in ents) == [
+        "iso2_lower_bound",
+        "iso2_upper_bound",
+        "iso_lower_bound",
+        "iso_upper_bound",
+    ]
+    assert _removed_bounds() == []
+    assert all("write_trial" not in e.extra_state_attributes for e in ents)
 
 
 async def test_open_dp_without_a_link_creates_nothing_and_removes_nothing():
@@ -243,7 +254,7 @@ async def test_open_dp_without_a_link_creates_nothing_and_removes_nothing():
     assert _removed_bounds() == []
 
 
-async def test_bound_entities_only_for_isolated_verified_heads_and_open_dps():
+async def test_bound_entities_only_for_isolated_verified_heads():
     isolated = _head(dev_id="iso")
     grouped = _head(dev_id="grp")
     other_model = _head(dev_id="other", product_id="unverified")
@@ -251,18 +262,18 @@ async def test_bound_entities_only_for_isolated_verified_heads_and_open_dps():
     assert sorted(e.unique_id for e in ents) == ["iso_lower_bound", "iso_upper_bound"]
     # The grouped head's bounds are closed; the unverified model is never considered at all.
     assert _removed_bounds() == ["grp_upper_bound", "grp_lower_bound"]
-    only_upper = await _setup([isolated], supervised=frozenset({18}))
-    assert [e.unique_id for e in only_upper] == ["iso_upper_bound"]
-    assert _removed_bounds() == ["iso_lower_bound"]
 
 
-async def test_trial_is_confined_to_the_designated_head():
-    """Two isolated heads, a trial armed on one: only that head gets bound entities; the other
-    head's are not provided (and any leftover registry entry is flagged for removal)."""
-    ents = await _setup([_head(dev_id="iso"), _head(dev_id="iso2")], trial_head="iso")
-    assert sorted(e.unique_id for e in ents) == ["iso_lower_bound", "iso_upper_bound"]
-    assert _removed_bounds() == ["iso2_upper_bound", "iso2_lower_bound"]
-    assert all(e.extra_state_attributes.get("write_trial") is True for e in ents)
+async def test_a_trial_on_another_head_does_not_touch_the_bounds():
+    """A trial of the remaining candidates armed on one head changes nothing for the proven
+    bounds: both isolated heads keep theirs, unmarked."""
+    ents = await _setup(
+        [_head(dev_id="iso"), _head(dev_id="iso2")],
+        supervised=frozenset({118, 16, 119}),
+        trial_head="iso",
+    )
+    assert len(ents) == 4 and _removed_bounds() == []
+    assert all("write_trial" not in e.extra_state_attributes for e in ents)
 
 
 # --- registry: a disarmed trial leaves no restored, unavailable entity behind ---------------------

@@ -79,12 +79,8 @@ def _account_id(username: str) -> str:
 _CANDIDATE_DP_LABELS = {
     1: "1 — preheat (confirmed only by the local tunnel, attribute 0x0025: needs enable_local)",
     16: "16 — temp_set (needed with 118: the app publishes both for the comfort setpoint)",
-    18: "18 — upper bound",
-    27: "27 — lower bound",
-    116: "116 — window detection",
     118: "118 — comfort setpoint (with 16)",
     119: "119 — setback setpoint",
-    120: "120 — pause setpoint (also needed with 27 when the lower bound rises above it)",
 }
 
 

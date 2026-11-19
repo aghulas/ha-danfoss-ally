@@ -21,7 +21,8 @@ from .test_switch import _FakeClient, _FakeCloudCoord, _FakeMqttLink
 COMFORT = next(d for d in HEAD_SETPOINTS if d.setpoint == "comfort")
 SETBACK = next(d for d in HEAD_SETPOINTS if d.setpoint == "setback")
 PAUSE = next(d for d in HEAD_SETPOINTS if d.setpoint == "pause")
-TRIAL = frozenset({118, 16, 119, 120})
+# DP 120 (pause) is proven since 2026-11-19; comfort (118 + 16) and setback (119) are candidates.
+TRIAL = frozenset({118, 16, 119})
 BLOCK_DPS = {"1": False, "118": 210, "119": 140, "121": 145}
 
 
@@ -167,14 +168,20 @@ def _removed_setpoints():
 
 async def test_setpoint_entities_only_for_open_settings_of_isolated_heads():
     kind = DanfossHeadSetpoint
-    all_three = ["iso_comfort_setpoint", "iso_setback_setpoint", "iso_pause_setpoint"]
+    candidates = ["iso_comfort_setpoint", "iso_setback_setpoint"]
+    all_three = [*candidates, "iso_pause_setpoint"]
     iso = _head(dev_id="iso")
-    assert await _setup_platform([iso], supervised=frozenset(), kind=kind) == []  # closed
-    assert _removed_setpoints() == all_three
+    # No trial: the pause setpoint (DP 120, proven) is there, comfort and setback are closed.
+    ents = await _setup_platform([iso], supervised=frozenset(), kind=kind)
+    assert [e.unique_id for e in ents] == ["iso_pause_setpoint"]
+    assert "write_trial" not in ents[0].extra_state_attributes
+    assert _removed_setpoints() == candidates
+    ents = await _setup_platform([iso], supervised=TRIAL, trial_head=None, kind=kind)
+    assert [e.unique_id for e in ents] == ["iso_pause_setpoint"]
+    assert _removed_setpoints() == candidates  # no trial head designated: no candidate is open
+    # Without the cloud-MQTT option nothing is provided at all.
     assert await _setup_platform([iso], supervised=TRIAL, cloud_mqtt=False, kind=kind) == []
     assert _removed_setpoints() == all_three
-    assert await _setup_platform([iso], supervised=TRIAL, trial_head=None, kind=kind) == []
-    assert _removed_setpoints() == all_three  # no trial head designated: nothing is open
     # The link failed to start: transient, nothing created and nothing removed.
     assert await _setup_platform([iso], supervised=TRIAL, link=False, kind=kind) == []
     assert _removed_setpoints() == []
@@ -185,20 +192,24 @@ async def test_setpoint_entities_only_for_open_settings_of_isolated_heads():
     assert _removed_setpoints() == [u.replace("iso_", "grp_") for u in all_three]
     # Comfort needs 118 AND 16: with 118 alone there is no comfort entity.
     ents = await _setup_platform([iso], supervised=frozenset({118, 119}), kind=kind)
-    assert [e.unique_id for e in ents] == ["iso_setback_setpoint"]
-    assert _removed_setpoints() == ["iso_comfort_setpoint", "iso_pause_setpoint"]
+    assert [e.unique_id for e in ents] == ["iso_setback_setpoint", "iso_pause_setpoint"]
+    assert _removed_setpoints() == ["iso_comfort_setpoint"]
 
 
 async def test_setpoint_trial_is_confined_to_the_designated_head():
-    """Two isolated heads, a trial armed on one: the other head gets no setpoint entity, so nothing
-    of it can be written through the channel under trial."""
+    """Two isolated heads, a trial armed on one: the other head gets no comfort or setback entity,
+    so nothing of it can be written through the channel under trial. The pause setpoint, proven,
+    exists on both and carries no trial marker."""
     kind = DanfossHeadSetpoint
     ents = await _setup_platform(
         [_head(dev_id="iso"), _head(dev_id="iso2")], supervised=TRIAL, trial_head="iso", kind=kind
     )
-    assert {e.unique_id.split("_")[0] for e in ents} == {"iso"}
-    assert _removed_setpoints() == [
-        "iso2_comfort_setpoint",
-        "iso2_setback_setpoint",
+    assert sorted(e.unique_id for e in ents) == [
         "iso2_pause_setpoint",
+        "iso_comfort_setpoint",
+        "iso_pause_setpoint",
+        "iso_setback_setpoint",
     ]
+    assert _removed_setpoints() == ["iso2_comfort_setpoint", "iso2_setback_setpoint"]
+    marked = {e.unique_id for e in ents if e.extra_state_attributes.get("write_trial")}
+    assert marked == {"iso_comfort_setpoint", "iso_setback_setpoint"}

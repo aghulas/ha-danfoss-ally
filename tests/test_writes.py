@@ -100,13 +100,23 @@ def test_mqtt_write_value_messages_and_types():
     from custom_components.danfoss_ally_cloud.api import CloudWriteError, writes
 
     assert writes.mqtt_write_value(30, True) is True
-    assert writes.mqtt_write_value(116, False, frozenset({116})) is False
+    assert writes.mqtt_write_value(116, False) is False  # proven since 2026-11-19
+    assert writes.mqtt_write_value(118, 205, frozenset({118})) == 205
     with pytest.raises(CloudWriteError, match="supervised first write"):
-        writes.mqtt_write_value(116, True)
+        writes.mqtt_write_value(118, 205)  # a candidate, closed by default
     with pytest.raises(CloudWriteError, match="not enabled"):
         writes.mqtt_write_value(2, "manual", frozenset({2}))
     with pytest.raises(CloudWriteError, match="boolean"):
-        writes.mqtt_write_value(116, "true", frozenset({116}))
+        writes.mqtt_write_value(116, "true")
+
+
+def test_mqtt_proven_and_candidate_sets():
+    """The sets as established on real hardware: a DP moves from candidate to proven only after
+    its own supervised write (docs/first-write-procedure.md)."""
+    from custom_components.danfoss_ally_cloud.api import writes
+
+    assert sorted(writes.MQTT_WRITE_DPS) == [18, 27, 30, 116, 120]
+    assert sorted(writes.MQTT_CANDIDATE_DPS) == [1, 16, 118, 119]
 
 
 def test_mqtt_write_value_tenths_range_and_step():
@@ -114,15 +124,20 @@ def test_mqtt_write_value_tenths_range_and_step():
 
     from custom_components.danfoss_ally_cloud.api import CloudWriteError, writes
 
-    trial = frozenset({18, 27, 120})
-    assert writes.mqtt_write_value(18, 345, trial) == 345
-    assert writes.mqtt_write_value(27, 50, trial) == 50
-    assert writes.mqtt_write_value(120, 55, trial) == 55
+    # Bounds and pause setpoint are proven: no trial needed.
+    assert writes.mqtt_write_value(18, 345) == 345
+    assert writes.mqtt_write_value(27, 50) == 50
+    assert writes.mqtt_write_value(120, 55) == 55
     for dp, bad in ((18, 195), (18, 355), (27, 45), (27, 205), (120, 45), (18, 301)):
         with pytest.raises(CloudWriteError, match="out of range"):
-            writes.mqtt_write_value(dp, bad, trial)
+            writes.mqtt_write_value(dp, bad)
     for bad in (30.0, "300", True):
         with pytest.raises(CloudWriteError, match="integer"):
-            writes.mqtt_write_value(18, bad, trial)
+            writes.mqtt_write_value(18, bad)
+    # The remaining candidates follow the same value rule once opened, and stay closed otherwise.
+    trial = frozenset({118, 16, 119})
+    assert writes.mqtt_write_value(119, 170, trial) == 170
+    with pytest.raises(CloudWriteError, match="out of range"):
+        writes.mqtt_write_value(119, 45, trial)
     with pytest.raises(CloudWriteError, match="supervised first write"):
-        writes.mqtt_write_value(18, 300)  # closed by default
+        writes.mqtt_write_value(119, 170)  # closed by default
