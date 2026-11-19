@@ -2,7 +2,10 @@ ruff
 mypy==2.4.1
 pytest
 pytest-cov
-pytest-homeassistant-custom-component
+# Test harness. Python 3.14 -> the HA line we run in production (bump the pin with prod HA);
+# Python 3.12 -> the newest HA that still supports it (2025.1.x), the floor checked in CI.
+pytest-homeassistant-custom-component==0.13.375; python_version >= "3.14"  # = HA 2026.10.4
+pytest-homeassistant-custom-component; python_version < "3.14"
 pip-audit
 # Dépendances d'exécution de l'intégration (cf. manifest.json / requirements.txt).
 pycryptodome

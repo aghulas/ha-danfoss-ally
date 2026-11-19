@@ -45,7 +45,7 @@ class DanfossEntity(CoordinatorEntity[DanfossCoordinator]):
         # Grouped head: attach it to the "room" device (sub-device of the room thermostat).
         group_id = self.coordinator.group_of(self._device_id)
         if group_id is not None:
-            info["via_device"] = (DOMAIN, f"group_{group_id}")
+            info["via_device"] = (DOMAIN, f"group_{group_id}")  # type: ignore[typeddict-unknown-key]  # deprecated in HA 2026 (removed 2027.8): move to via_device_id
         return info
 
 

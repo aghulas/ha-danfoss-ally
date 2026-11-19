@@ -48,6 +48,13 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def _schema(schema: vol.Schema) -> Any:
+    """Voluptuous form schema handed to HA. Runtime-accepted by every supported HA (2026.x
+    included); HA 2026 types `data_schema` as probatio, hence Any at this boundary."""
+    return schema
+
+
 _REGIONS = ["eu", "us", "cn", "in"]
 
 
@@ -97,7 +104,7 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_CH_KEY): str,
             }
         )
-        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="user", data_schema=_schema(schema), errors=errors)
 
     @staticmethod
     @callback
@@ -152,4 +159,4 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
                 ): str,
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="init", data_schema=_schema(schema))

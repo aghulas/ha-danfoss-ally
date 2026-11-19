@@ -121,8 +121,13 @@ class _FakePaho:
 
     instances = []
 
-    def __init__(self, client_id=None, clean_session=True, protocol=None):
+    def __init__(
+        self, client_id=None, clean_session=True, protocol=None, callback_api_version=None
+    ):
+        # callback_api_version: passed by _new_paho_client when the real paho is 2.x (the module
+        # the tests patch keeps its CallbackAPIVersion enum); None on paho 1.6.1.
         self.client_id = client_id
+        self.callback_api_version = callback_api_version
         self.on_connect = self.on_message = self.on_disconnect = None
         self.subscribed = []
         self.username = self.password = None

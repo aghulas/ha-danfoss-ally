@@ -77,7 +77,7 @@ truth).
 ## Tests and quality
 
 ```
-python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+python3.14 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/ruff check . && .venv/bin/ruff format --check .
 .venv/bin/mypy custom_components/danfoss_ally_cloud
 .venv/bin/pytest -q
@@ -91,11 +91,14 @@ npm --prefix frontend ci && npm --prefix frontend run typecheck && npm --prefix 
 npm --prefix frontend run build
 ```
 
-Everything green before commit: these are exactly the commands CI runs (`.github/workflows/`:
-`test` = ruff + mypy + pytest with the coverage threshold, `frontend` = typecheck + vitest + build +
-"bundle up to date" check, plus `hassfest` and `hacs`). `main` is protected: those four checks are
-required, so a PR cannot merge while one is red. Aim eventually for the level of a serious
-integration: high coverage, redacted diagnostics, dependency audit.
+Everything green before commit: these are exactly the commands CI runs (`.github/workflows/`: `test`
+= ruff + mypy + pytest with the coverage threshold, `frontend` = typecheck + vitest + build +
+"bundle up to date" check, plus `hassfest` and `hacs`). The test harness tracks the production HA
+line (Python 3.14, `pytest-homeassistant-custom-component` pinned in `requirements-dev.txt`, bumped
+with prod HA); a non-required `test-ha-floor` job re-runs the tests on Python 3.12 / HA 2025.1.x.
+`main` is protected: those four checks are required, so a PR cannot merge while one is red. Aim
+eventually for the level of a serious integration: high coverage, redacted diagnostics, dependency
+audit.
 
 ## Publishing (HACS / Marketplace)
 

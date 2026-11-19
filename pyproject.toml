@@ -51,7 +51,7 @@ line-length = 100
 select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "FURB"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"  # type-check against the HA runtime (2026.x)
 warn_unused_ignores = true
 warn_redundant_casts = true
 disallow_untyped_defs = false

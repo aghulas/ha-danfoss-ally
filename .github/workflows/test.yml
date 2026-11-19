@@ -8,7 +8,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"  # HA 2026.x requires 3.14 (matches the pytest-HA pin)
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
       - run: ruff format --check .
@@ -19,3 +19,17 @@ jobs:
       - run: python -c "import pydanfoss_cloud; from pydanfoss_cloud import CloudClient, decode_device; from pydanfoss_cloud.local import tunnel"
       # Runtime dependency audit.
       - run: pip-audit -r requirements.txt
+
+  # Floor check: the same tests on the oldest HA line our harness can still install (Python 3.12 ->
+  # HA 2025.1.x). Catches code that only works on recent HA (e.g. a dependency pin or an API that
+  # changed), since hacs.json still declares an older minimum. Not a required check.
+  test-ha-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: python -c "import homeassistant.const as c; print('HA', c.__version__)"
+      - run: pytest
