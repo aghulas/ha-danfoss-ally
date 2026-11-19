@@ -90,8 +90,9 @@ below).
   - **isolated head otherwise, and always for the child lock** → the switch is **unavailable**
     rather than pretending to write. Attach the head to a room to make it writable.
   The Danfoss app writes isolated-head settings over Tuya cloud MQTT; that path is not implemented
-  (see `docs/interface-contract.md` §4.2). *Not yet validated on real hardware: the subject of the
-  1.1.0 release candidate.*
+  in 1.1.0 (see `docs/interface-contract.md` §4.2). Validated on real hardware with 1.1.0-rc1: the
+  child lock written through a room applied to both of its heads within about 15 s; on an isolated
+  head the child lock is unavailable.
 - **Isolated-head climate now shows its active setpoint.** `DanfossHeadClimate` (heads outside a
   Danfoss room) already computed the active setpoint (DP 171 `OccupiedSetpoint`, the value the
   Danfoss app shows) but declared no features, so Home Assistant never published it as the
@@ -122,13 +123,18 @@ below).
 
 ### Validation status
 
-Validated on real hardware (2026-11-18/19): R-1, R-2 (open-window detection), R-3, setpoint writes
-(comfort, setback, override and back to schedule, weekly schedule intact), window detection through
-the local tunnel, MQTT availability following `online`, preheat read on the morning curves, relays
-per building, vacation `plan.leave` + `cancel` (through HA, option turned back off after). Still
-**gated**: head unbind (`enable_head_unbind`, not validated through HA) and vacation writes
-(`enable_vacation_write`; `plan.athome` and `leave.now` not validated). Pending for the final 1.1.0: the W-3 routing above, and
-the preheat **write** trial.
+Validated on real hardware (2026-11-18/19, release candidates rc1 to rc3 on the school install):
+R-1, R-2 (open-window detection), R-3 and its settle delay, setpoint writes (comfort, setback,
+override and back to schedule, weekly schedule intact), head settings routed by room / local tunnel
+(W-3), window detection through the local tunnel, MQTT availability following `online`, preheat read
+on the morning curves, relays per building, vacation `plan.leave` + `cancel` (through HA, option
+turned back off after).
+
+Not validated on real hardware, covered by unit tests: the rc3 fixes (#74: holiday `isRunning`,
+R-3 on the room `number` and tunnel services, preheat read-back), beyond a smoke check of rc3 on the
+install. Still **gated**: head unbind (`enable_head_unbind`, not validated through HA) and vacation
+writes (`enable_vacation_write`; `plan.athome` and `leave.now` not validated). The preheat **write**
+trial (an existing feature since 0.4.0) is read after the release.
 
 
 ## 1.0.1 — Frontend card bundle version fix
