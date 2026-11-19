@@ -25,6 +25,15 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   so the link never fails silently; reconnect uses exponential backoff and picks up a refreshed
   `sid`.
 
+### Changed
+
+- Shared library **`pydanfoss-cloud` 0.3.0** (packaging only, no behaviour change for the
+  integration): the `api/` layer as of this release — `gw_id` on `async_write_setting`, distinct
+  `deviceId`, the holiday / room / relay / unbind calls, and the cloud-MQTT modules `mqtt_publish`
+  (codec) and `mqtt_client` (live link). `paho-mqtt` sits behind the new **`[mqtt]` extra**
+  (`>=1.6.1,<3`, the same range as `manifest.json`); the codec alone needs no extra. CI now builds
+  the wheel and imports the MQTT modules from it. To be published to PyPI for the MCP connector.
+
 ### Notes
 
 - Experimental / unofficial path; it rides the app's Tuya auth. Enable only deliberately. The first

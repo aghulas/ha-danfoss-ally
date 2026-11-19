@@ -22,10 +22,11 @@ dependency** and packaged under the name **`pydanfoss-cloud`** by the repo's `py
 `custom_components/danfoss_ally_cloud/api/README.md`.
 
 - The integration keeps "vendoring" this code (relative import) → self-contained HACS install.
-- The MCP connector can replace its copy (`tuya/`, `local.py`, `modeles.py`) with a
-  `pydanfoss-cloud` dependency once the library is **published to PyPI** (repo/account to be decided
-  by Rémi).
-- Only then will the integration reference the version in `manifest.json -> requirements`.
+- The library is **published to PyPI** (`docs/publishing-pydanfoss-cloud.md`); the MCP connector
+  depends on it for the fault decoding and the cloud-MQTT codec and link (extra `mqtt`), and can
+  progressively replace the rest of its copy (`tuya/`, `local.py`).
+- The integration may later reference the version in `manifest.json -> requirements` instead of
+  vendoring.
 
 ## Official Danfoss path (OAuth2): outside the lib, outside the integration
 
