@@ -172,6 +172,12 @@ was the independent source.
   settings screen is the independent source. Weaker than a tunnel read: say so in the record.
 - **Restore**: write `V0` back.
 
+### DP 1 — preheat: no sheet
+
+Not a candidate and not implemented. The gateway's echo and the cloud read cannot confirm it (over
+HTTP, DP 1 only changed the gateway cache); only attribute `0x0025` read through the tunnel can.
+See `docs/cloud-mqtt-preheat-proposal.md` for the observation to make first.
+
 ## Returning to the released build
 
 Turn the options off (the link closes on reload), then redeploy the released build and restart.
