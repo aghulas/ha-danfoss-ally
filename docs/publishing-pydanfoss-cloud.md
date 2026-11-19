@@ -77,3 +77,8 @@ cd ~/dev/danfoss-ally-mcp
   `CHANGELOG.md`.
 - Released: 0.2.0 (English public API, first PyPI release); 0.3.0 (`gw_id` on `async_write_setting`, distinct deviceId,
   cloud-MQTT modules, `[mqtt]` extra).
+- Prepared, **not published yet**: 0.3.1 (candidate DPs on the cloud-MQTT write path
+  (`MQTT_CANDIDATE_DPS`, `mqtt_dp_open`, `supervised` argument of `mqtt_write_value`); completeness
+  indicators of the device list on `CloudClient`). The later DPs of the cloud-MQTT stack (bounds,
+  isolated-head setpoints) also add to `api/writes.py` and `api/const.py`: if they merge after
+  0.3.1 is published they need their own bump; if before, they belong in the 0.3.1 notes.

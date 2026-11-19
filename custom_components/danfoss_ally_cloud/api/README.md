@@ -47,6 +47,12 @@ pip install -e '.[local,mqtt]'         # development install from the repository
 
 ## Changes
 
+- **0.3.1** — additive, no change to existing behaviour. `writes`: `MQTT_CANDIDATE_DPS` (DPs
+  implemented on the cloud-MQTT write path but not proven on real hardware), `mqtt_dp_open()`, and
+  an optional third argument `supervised` to `mqtt_write_value()` (the candidates opened for a
+  supervised trial; without it only the proven DPs pass, as before). `CloudClient`:
+  `device_list_complete` and `device_list_homes` say whether the last `async_list_devices` had an
+  answer from every home (the list itself is unchanged and still tolerant of a degraded home).
 - **0.3.0** — `gw_id` on `async_write_setting` (the head's gateway; it defaulted to the head
   itself); distinct `deviceId` (`derive_distinct_device_id`, `CloudClient(distinct_device_id=…)`);
   `mqtt_publish` and `mqtt_client` (extra `mqtt`); holiday, room, relay and unbind calls; active
