@@ -451,3 +451,147 @@ async def test_ensure_admin(hass, hass_admin_user, hass_read_only_user):
     with pytest.raises(ops.OperationError) as exc:
         await ops.ensure_admin(hass, hass_read_only_user.id)
     assert exc.value.code == "not_admin"
+
+
+# --- Schedule writes on an ISOLATED head (docs/isolated-head-schedule-writes.md) ----------------
+
+_HEAD = {"type": "device", "id": "iso"}
+_ONE_SLOT = {"mon": [{"start": "08:30", "end": "17:30"}]}
+
+
+class _ModeManager:
+    gateway_ids = {"gw-1"}
+
+    def __init__(self, mode=None, error=None):
+        self.mode = mode
+        self.error = error
+        self.reads: list = []
+
+    def read_programming_mode(self, head):
+        self.reads.append((head.dev_id, head.node_id, head.gateway_id))
+        if self.error is not None:
+            raise self.error
+        return self.mode
+
+
+class _ModeLocal:
+    def __init__(self, manager):
+        self.manager = manager
+
+
+def _isolated_store(**head_kw):
+    """A store with ONE isolated head ``iso``, by default following its schedule."""
+    store, coord = _store(grouped=False)
+    kw = {"mode": "at_home", "schedule_active": True, **head_kw}
+    coord.data["iso"] = head("iso", "Local technique", **kw)
+    return store, coord
+
+
+async def test_set_schedule_isolated_head_following_its_schedule_is_written():
+    store, coord = _isolated_store()
+    job = await ops.set_schedule(None, store, _HEAD, _ONE_SLOT)  # no tunnel: cloud view only
+    assert job["kind"] == "set_schedule"
+    assert [h["device_id"] for h in job["heads"]] == ["iso"]
+    assert coord.client.calls == [("set", _HEAD, _ONE_SLOT)]
+
+
+@pytest.mark.parametrize(
+    "head_kw",
+    [
+        {"mode": "manual"},  # the 2026-11-19 case: accepted, then manual at the comfort value
+        {"mode": None},
+        {"mode": "holiday"},
+        {"online": False},
+        {"schedule_active": False},  # cloud label says schedule, DP 172 says manual
+    ],
+)
+async def test_set_schedule_isolated_head_not_following_refused(head_kw):
+    store, coord = _isolated_store(**head_kw)
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.set_schedule(None, store, _HEAD, _ONE_SLOT)
+    assert exc.value.code == "head_not_following_schedule"
+    assert coord.client.calls == []  # nothing sent
+
+
+async def test_set_schedule_isolated_head_unknown_refused():
+    store, coord = _store(grouped=False)
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.set_schedule(None, store, {"type": "device", "id": "nope"}, _ONE_SLOT)
+    assert exc.value.code == "unknown_target"
+    assert coord.client.calls == []
+
+
+async def test_set_schedule_isolated_head_tunnel_says_manual_refused():
+    """The cloud's mode can be wrong: the head's own 0x0025 (bit 0 clear) wins when it answers."""
+    store, coord = _isolated_store()
+    manager = _ModeManager(mode=0x02)  # preheat bit alone: no schedule bit
+    store[DATA_LOCAL] = _ModeLocal(manager)
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.set_schedule(_FakeHass(), store, _HEAD, _ONE_SLOT)
+    assert exc.value.code == "head_not_following_schedule"
+    assert manager.reads == [("iso", "node-1", "gw-1")]
+    assert coord.client.calls == []
+
+
+@pytest.mark.parametrize(
+    "manager",
+    [
+        _ModeManager(mode=0x03),  # schedule + preheat
+        _ModeManager(mode=0x01),
+        _ModeManager(mode=None),  # no answer: judged on the cloud alone
+        _ModeManager(error=tunnel.LocalUnavailable("gateway down")),
+        _ModeManager(error=tunnel.LocalError("bad frame")),
+    ],
+)
+async def test_set_schedule_isolated_head_tunnel_lets_through(manager):
+    store, coord = _isolated_store()
+    store[DATA_LOCAL] = _ModeLocal(manager)
+    await ops.set_schedule(_FakeHass(), store, _HEAD, _ONE_SLOT)
+    assert coord.client.calls == [("set", _HEAD, _ONE_SLOT)]
+
+
+async def test_set_schedule_isolated_head_not_addressable_skips_the_tunnel():
+    store, coord = _isolated_store(mesh_id="gw-other")
+    manager = _ModeManager(mode=0x00)
+    store[DATA_LOCAL] = _ModeLocal(manager)
+    await ops.set_schedule(_FakeHass(), store, _HEAD, _ONE_SLOT)
+    assert manager.reads == []
+    assert coord.client.calls == [("set", _HEAD, _ONE_SLOT)]
+
+
+async def test_set_schedule_room_target_has_no_head_guard():
+    """A room is written through its group whatever the mode of its heads (R4 handles manual)."""
+    store, coord = _store()
+    coord.data["a"].mode = "manual"
+    manager = _ModeManager(mode=0x00)
+    store[DATA_LOCAL] = _ModeLocal(manager)
+    await ops.set_schedule(_FakeHass(), store, _ROOM, _ONE_SLOT)
+    assert manager.reads == []
+    assert coord.client.calls[0][0] == "set"
+
+
+async def test_set_schedule_checked_skips_the_guard():
+    store, coord = _isolated_store(mode="manual")
+    await ops.set_schedule(None, store, _HEAD, _ONE_SLOT, checked=True)
+    assert coord.client.calls == [("set", _HEAD, _ONE_SLOT)]
+
+
+async def test_restore_schedule_isolated_head_refused():
+    store, coord = _isolated_store()  # even a head following its schedule
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.restore_schedule(None, store, _HEAD)
+    assert exc.value.code == "isolated_restore_unproven"
+    assert coord.client.calls == []
+
+
+async def test_restore_schedule_grouped_head_keeps_its_own_refusal():
+    store, coord = _store()
+    with pytest.raises(ops.OperationError) as exc:
+        await ops.restore_schedule(None, store, {"type": "device", "id": "a"})
+    assert exc.value.code == "grouped_device"
+
+
+async def test_restore_schedule_room_still_written():
+    store, coord = _store()
+    job = await ops.restore_schedule(None, store, _ROOM)
+    assert job["kind"] == "restore" and coord.client.calls == [("restore", _ROOM)]

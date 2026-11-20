@@ -356,6 +356,14 @@ with `gwId = meshId` was accepted by the backend **and reached the hardware** (t
 slot appeared in the head's schedule, re-read through the tunnel). `gwId = devId` for a schedule
 write is **not** proven and must not be reintroduced blindly.
 
+That proof holds for an isolated head **following its schedule**. On an isolated head the cloud
+shows in `manual` (the cloud-side state of a head parked on a flat setpoint), three accepted calls
+of 2026-11-19 — a slot written, `restore_schedule`, the slot cleared — had no effect for thirteen
+minutes, then left the head in manual mode at the cloud's comfort value, asking for heat, with no
+schedule. Which call did it is not known (`docs/isolated-head-schedule-writes.md`). Hence two
+refusals before any send (§5.2): a schedule write to an isolated head that is not following a
+schedule, and `restore_schedule` on any isolated head.
+
 | Operation | API | Version | Body (in addition to the common body) |
 |---|---|---|---|
 | Read | `tuya.m.custom.wkf.week.timer.list` | 1.0 | — |
@@ -718,9 +726,9 @@ take `config_entry_id` when several accounts are configured.
 |---|---|---|---|
 | `get_rooms` | — | `{"rooms": [Room]}` | read |
 | `get_schedule` | `target`, `refresh` (bool, default false) | `Schedule` | read (cache, or cloud if `refresh`) |
-| `set_schedule` | `target`, `days` (one or more days) | `WriteJob` | validate R1, write the given days |
-| `copy_schedule` | `source`, `targets` (list), `days` (optional) | `{"jobs": [WriteJob]}` | copy the schedule |
-| `restore_schedule` | `target` | `WriteJob` | R4: rewrite the 7 days then publish `at_home` |
+| `set_schedule` | `target`, `days` (one or more days) | `WriteJob` | validate R1, write the given days. Isolated head: only if it follows a schedule (below) |
+| `copy_schedule` | `source`, `targets` (list), `days` (optional) | `{"jobs": [WriteJob]}` | copy the schedule. Every target is checked before the first is written |
+| `restore_schedule` | `target` (room) | `WriteJob` | R4: rewrite the 7 days then publish `at_home`. Refused on an isolated head (`isolated_restore_unproven`) |
 | `get_write_job` | `job_id` | `WriteJob` | read |
 | `get_holiday` | — | `{"holidays": [Holiday]}` | read |
 | `get_relays` | — | `{"relays": [Relay]}` | read |
@@ -736,6 +744,13 @@ take `config_entry_id` when several accounts are configured.
 | `set_vacation_at_home` | `home`, `start_date`, `end_date`, `rooms` (optional), `time_zone` (optional) | `{"home", "mode": "at_home", …}` | **GATED** at-home holiday (`vacation.plan.athome`) |
 | `cancel_vacation` | `home`, `time_zone` (optional) | `{"home", "cancelled": true}` | **GATED** cancel a planned holiday (`vacation.cancel`) |
 | `end_vacation` | `home`, `temperature` (°C), `rooms` (optional), `time_zone` (optional) | `{"home", "ended": true, …}` | **GATED** end a running holiday now (`vacation.leave.now`) |
+
+**Schedule write to an isolated head** (`target.type = device`, §4.1). Refused with
+`head_not_following_schedule`, before any send, unless the head is online, the cloud shows it in a
+schedule mode (DP 2 `at_home` or `leaving_home`), the cloud's DP 172 does not report it without its
+schedule bit, and — when the local tunnel is enabled and the head answers — bit 0 of attribute
+`0x0025` is set (one short read; a head that does not answer locally is judged on the cloud alone).
+A room target has no such check.
 
 `set_schedule` touches only the given days; the others stay as they are in the cloud. The room
 write actions and `set_relay_room` refuse a non-administrator (`not_admin`); they are gated on
@@ -787,6 +802,8 @@ stable.
 | `too_many_transitions` | R1: count > 6 |
 | `unknown_target` | unknown room or head |
 | `grouped_device` | grouped head targeted directly: target its room |
+| `head_not_following_schedule` | schedule write to an isolated head that is offline, in manual mode or without an active schedule |
+| `isolated_restore_unproven` | `restore_schedule` on an isolated head: no proven route |
 | `not_admin` | write by a non-administrator user |
 | `cloud_refused` | the cloud refused the call |
 | `session_expired` | session to renew (re-authentication in progress) |

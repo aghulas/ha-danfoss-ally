@@ -619,3 +619,17 @@ def test_ws_store_resolves_target_and_home_across_multiple_entries(hass: HomeAss
     assert ws._store(hass, {"target": {"type": "device", "id": "d2"}}) is s2
     assert ws._store(hass, {"home": "h2"}) is s2
     assert ws._store(hass, {}) is s1
+
+
+async def test_service_copy_schedule_checks_every_target_before_writing(setup):
+    """A refused target (here a grouped head) stops the copy before the first target is written."""
+    hass, _, fake = setup
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            "copy_schedule",
+            {"source": _ROOM_TARGET, "targets": [_ROOM_TARGET, {"type": "device", "id": "a"}]},
+            blocking=True,
+            return_response=True,
+        )
+    assert not any(w[0] == "set" for w in fake.writes)

@@ -604,6 +604,12 @@
   "grouped_device": {
    "message": "Tête groupée : viser sa pièce."
   },
+  "head_not_following_schedule": {
+   "message": "Tête isolée qui ne suit pas un programme (hors ligne, en manuel ou sans programme actif) : écriture du programme refusée."
+  },
+  "isolated_restore_unproven": {
+   "message": "Le retour au programme n'a pas de voie prouvée pour une tête isolée : passer par l'app Danfoss."
+  },
   "not_admin": {
    "message": "Écriture réservée aux administrateurs."
   },

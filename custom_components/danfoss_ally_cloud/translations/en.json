@@ -604,6 +604,12 @@
     "grouped_device": {
       "message": "Grouped head: target its room."
     },
+    "head_not_following_schedule": {
+      "message": "Isolated head not following a schedule (offline, manual mode or no active schedule): the schedule write is refused."
+    },
+    "isolated_restore_unproven": {
+      "message": "Back to schedule has no proven route for an isolated head: use the Danfoss app."
+    },
     "not_admin": {
       "message": "Writing is reserved for administrators."
     },
