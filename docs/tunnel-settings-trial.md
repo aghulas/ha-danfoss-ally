@@ -74,13 +74,14 @@ restore `V0` from the same entity and read it back the same way.
 1. **Radiator covered.** Flip it. Expected: `confirmed_by_tunnel`, the switch shows the new value.
    Check the app's setting if it shows one. No immediate thermal effect is expected (it changes
    how the head estimates the room temperature). Restore `V0`.
-2. **Setpoint offset.** The tenths-of-°C scale is **not confirmed**, so the first write is a
-   small value: `+0.5 °C` (raw 5), never a large one, **checked at once in the app**. If the app
-   shows `+0.5 °C`, the scale holds. If it shows anything else (`5 °C` would mean the head reads
-   whole degrees), restore `V0` immediately and stop the offset trial. The offset shifts the
-   temperature the head regulates to, not the one it measures, so the valve is no check: the
-   scale is settled only by a source that shows the offset in °C. Without one (the app has no
-   such setting), the scale stays unconfirmed after the trial: say so in the notes. Restore `V0`.
+2. **Setpoint offset.** The tenths-of-°C scale is **not confirmed**, so the first write is
+   `V0 + 0.1` (raw +1), never a large value: if the head read the raw value in whole degrees
+   instead of tenths, the error stays at 1 °C. **Check it at once in the app**: if the app shows
+   anything other than `V0 + 0.1 °C`, restore `V0` immediately and stop the offset trial. The
+   offset shifts the temperature the head regulates to, not the one it measures, so the valve is
+   no check: the scale is settled only by a source that shows the offset in °C. Without one (the
+   app has no such setting), the scale stays unconfirmed after the trial: say so in the notes.
+   Restore `V0`.
 3. **Regulation speed.** Write `V0 ± 1`. No visible effect is expected in the short term. Check
    the app if it shows it. Restore `V0`.
 4. **Valve exercise.** Change the day first (another weekday), check it reads back with the time
