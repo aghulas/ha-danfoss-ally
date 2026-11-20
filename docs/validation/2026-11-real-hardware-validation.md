@@ -698,6 +698,17 @@ setpoint and child lock as found; but plain manual (operation mode 0, no schedul
 where it was found in mode 3 with a flat 5 °C schedule and preheat on. How the found state had been
 produced is not known, and it was not recreated. To re-read through the tunnel the next morning.
 
+**Re-read the next morning (2026-11-20 ~08:40), two reads, nothing written**: the head is back in
+the state it was found in, without any further write. Tunnel: operation mode 3, preheat on, a flat
+5 °C schedule on the seven days, current setpoint 5 °C, bounds 35 / 5 °C, window detection off.
+Cloud (per-device): manual setpoint 5 °C, pause setpoint 5 °C, setpoint source "Schedule", no heat
+demand, valve 1 %. So the "found" state is what an isolated head in manual at X °C settles into by
+itself: mode 0 with an empty schedule right after the manual write, then, some time during the
+following hours, mode 3 with a flat schedule at X and preheat back on. When that happens (a fixed
+delay, or the day change at 00:00) was not observed. Two consequences: an operation mode of 3 with
+the schedule bit set does not by itself mean the head follows a schedule with slots — read the
+schedule; and neither late schedule write of the evening left a trace on the head.
+
 **To run the two remaining trials**: an isolated head that already follows a schedule, during one
 of its comfort slots, in daytime.
 
