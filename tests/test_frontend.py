@@ -6,6 +6,7 @@ so our registration / update / cleanup logic against a real
 collection de ressources.
 """
 
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,6 +29,7 @@ RES_BASE = f"{FRONTEND_URL_BASE}/{JS_FILENAME}"
 # Version attendue = celle du manifest (le code l'injecte pour le cache-busting) : lue ici pour que
 # the test does not break on every version bump.
 VERSION = json.loads((Path(frontend.__file__).parent / "manifest.json").read_text())["version"]
+DIGEST = hashlib.sha256((frontend.FRONTEND_DIR / JS_FILENAME).read_bytes()).hexdigest()[:8]
 
 
 class _FakeLovelaceConfig:
@@ -56,8 +58,35 @@ def _module_urls(resources: ResourceStorageCollection) -> list[str]:
 async def test_resource_url_contient_la_version(hass: HomeAssistant):
     url = await _async_resource_url(hass)
     assert url.startswith(f"{RES_BASE}?v=")
-    # Manifest version injected (cache-busting, contract §6).
-    assert url.endswith(f"?v={VERSION}")
+    # Manifest version plus the bundle's hash (cache-busting, contract §6): two pre-releases of
+    # the same version get different URLs as soon as their bundles differ.
+    assert url.endswith(f"?v={VERSION}-{DIGEST}")
+
+
+async def test_resource_url_changes_with_the_bundle(hass: HomeAssistant, tmp_path, monkeypatch):
+    (tmp_path / JS_FILENAME).write_text("console.log('rc1');")
+    monkeypatch.setattr(frontend, "FRONTEND_DIR", tmp_path)
+    first = await _async_resource_url(hass)
+    (tmp_path / JS_FILENAME).write_text("console.log('rc2');")
+    second = await _async_resource_url(hass)
+    assert first != second
+    assert first.split("?")[0] == second.split("?")[0] == RES_BASE
+
+
+async def test_resource_url_without_a_readable_bundle(hass: HomeAssistant, tmp_path, monkeypatch):
+    monkeypatch.setattr(frontend, "FRONTEND_DIR", tmp_path)  # no bundle there
+    assert (await _async_resource_url(hass)).endswith(f"?v={VERSION}")
+
+
+async def test_register_updates_a_resource_left_by_a_previous_rc(hass: HomeAssistant):
+    """An install upgraded from an rc of the same version gets the new URL, not a duplicate."""
+    resources = await _install_fake_lovelace(hass)
+    await resources.async_load()
+    resources.loaded = True
+    await resources.async_create_item({"res_type": "module", "url": f"{RES_BASE}?v={VERSION}"})
+
+    await async_register_frontend(hass)
+    assert _module_urls(resources) == [f"{RES_BASE}?v={VERSION}-{DIGEST}"]
 
 
 async def test_collection_absent_without_lovelace(hass: HomeAssistant):
@@ -83,11 +112,11 @@ async def test_registration_idempotent_and_update(hass: HomeAssistant):
     assert _module_urls(resources) == [f"{RES_BASE}?v=0.0.1"]
 
     await async_register_frontend(hass)
-    assert _module_urls(resources) == [f"{RES_BASE}?v={VERSION}"]  # a single one, up to date
+    assert _module_urls(resources) == [f"{RES_BASE}?v={VERSION}-{DIGEST}"]  # one, up to date
 
     # Idempotent : un second enregistrement ne duplique pas.
     await async_register_frontend(hass)
-    assert _module_urls(resources) == [f"{RES_BASE}?v={VERSION}"]
+    assert _module_urls(resources) == [f"{RES_BASE}?v={VERSION}-{DIGEST}"]
 
     # Cleanup: the resource disappears.
     await async_unregister_frontend(hass)

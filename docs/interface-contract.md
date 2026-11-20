@@ -924,8 +924,9 @@ stable.
   `custom_components/danfoss_ally_cloud/frontend/danfoss-ally-cloud.js`.
 - The integration serves this folder at URL `/danfoss_ally_cloud/frontend/`
   (`async_register_static_paths`) and declares the Lovelace resource
-  `…/danfoss-ally-cloud.js?v=<version>` (storage-mode dashboards; in YAML mode, the user adds it by
-  hand — to document).
+  `…/danfoss-ally-cloud.js?v=<version>-<bundle hash>` (storage-mode dashboards; in YAML mode,
+  the user adds it by hand — to document). The hash (first 8 hex characters of the bundle's
+  SHA-256) changes the URL between pre-releases of the same version.
 - Registration in `async_setup` (once per instance), never in `async_setup_entry`.
 - On load, the frontend compares its version (injected at build) to `danfoss_ally_cloud/info`; if
   they differ, it offers to reload the page.
