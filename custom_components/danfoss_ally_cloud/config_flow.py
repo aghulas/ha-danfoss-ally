@@ -193,6 +193,68 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="reauth_confirm", data_schema=_schema(schema), errors=errors
         )
 
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> Any:
+        """Update region, country code, password or installation secrets without deleting the entry.
+
+        Any secret field left blank keeps its stored value. The resulting credentials are checked
+        by a real login before saving and reloading.
+        """
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            updates: dict[str, Any] = {
+                CONF_COUNTRY_CODE: user_input[CONF_COUNTRY_CODE],
+                CONF_REGION: user_input[CONF_REGION],
+            }
+            for key in (CONF_PASSWORD, *_INSTALL_SECRETS):
+                value = str(user_input.get(key) or "").strip()
+                if value:
+                    updates[key] = value
+            data = {**entry.data, **updates}
+            client = CloudClient(
+                username=data[CONF_USERNAME],
+                password=data[CONF_PASSWORD],
+                country_code=data[CONF_COUNTRY_CODE],
+                sign_key=data[CONF_SIGN_KEY],
+                device_id=data[CONF_DEVICE_ID],
+                ch_key=data[CONF_CH_KEY],
+                region=data[CONF_REGION],
+                distinct_device_id=entry.options.get(
+                    CONF_DISTINCT_DEVICE_ID, DEFAULT_DISTINCT_DEVICE_ID
+                ),
+            )
+            try:
+                await client.async_validate()
+            except CloudAuthError:
+                errors["base"] = "invalid_auth"
+            except CloudError:
+                errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001 - config_flow robustness
+                _LOGGER.exception("Unexpected error while reconfiguring the Danfoss Ally account")
+                errors["base"] = "unknown"
+            finally:
+                await client.async_close()
+            if not errors:
+                return self.async_update_reload_and_abort(entry, data_updates=updates)
+
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_COUNTRY_CODE, default=entry.data.get(CONF_COUNTRY_CODE, "33")
+                ): str,
+                vol.Required(
+                    CONF_REGION, default=entry.data.get(CONF_REGION, "eu")
+                ): vol.In(["eu", "us", "cn", "in"]),
+                vol.Optional(CONF_PASSWORD): str,
+                vol.Optional(CONF_SIGN_KEY): str,
+                vol.Optional(CONF_DEVICE_ID): str,
+                vol.Optional(CONF_CH_KEY): str,
+            }
+        )
+        return self.async_show_form(
+            step_id="reconfigure", data_schema=_schema(schema), errors=errors
+        )
+
     @staticmethod
     @callback
     def async_get_options_flow(entry: ConfigEntry) -> OptionsFlow:

@@ -24,6 +24,18 @@
           "device_id": "Device id (deviceId) — only if it changed",
           "ch_key": "Channel key (chKey) — only if it changed"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Danfoss Ally (Cloud)",
+        "description": "Update the country code, datacenter, password or installation secrets. Leave any secret field empty to keep the current value.",
+        "data": {
+          "country_code": "Country calling code (e.g. 33 for France)",
+          "region": "Datacenter (eu, us, cn, in)",
+          "password": "Password — only if it changed",
+          "sign_key": "Sign key (sign_key) — only if it changed",
+          "device_id": "Device id (deviceId) — only if it changed",
+          "ch_key": "Channel key (chKey) — only if it changed"
+        }
       }
     },
     "error": {
@@ -34,6 +46,7 @@
     "abort": {
       "already_configured": "This account is already configured",
       "reauth_successful": "Re-authentication successful",
+      "reconfigure_successful": "Reconfiguration successful",
       "wrong_account": "This is not the account of this entry: sign in with the same account, or add the other account as a new entry"
     }
   },
@@ -693,6 +706,16 @@
     "action_type": {
       "set_temperature": "Set target temperature on {entity_name}",
       "restore_schedule": "Restore weekly schedule"
+    }
+  },
+  "issues": {
+    "gateway_offline": {
+      "title": "Danfoss Ally gateway offline: {name}",
+      "description": "Gateway **{name}** is reported offline by the Danfoss cloud. Heads paired to it cannot be reached until the gateway reconnects."
+    },
+    "head_fault": {
+      "title": "Danfoss Ally hardware fault on {name}",
+      "description": "Radiator thermostat **{name}** reports active fault(s): **{faults}**. Inspect the valve mounting, battery or pin on site."
     }
   }
 }
