@@ -591,61 +591,85 @@ def read_head(link: Any, dev_id: str, node_id: str, schedule: bool = True) -> di
     return e
 
 
+# Upper bound of a full survey: a fixed margin plus a per-head allowance for the busiest gateway (a
+# head that answers takes ~8 s, one that does not about 48 s: two attribute reads of two 12 s
+# attempts). Past it the survey stops and the heads not read yet are reported ``not_read``.
+SURVEY_BASE_TIMEOUT = 60.0
+SURVEY_HEAD_TIMEOUT = 60.0
+
+
+def _not_surveyed(error: str, **extra: Any) -> dict[str, Any]:
+    return {"attributes": {}, "schedule": {}, "unreachable": True, "error": error[:80], **extra}
+
+
 def survey(
     gateways: dict[str, GatewayKey],
     heads: list[Any],
     open_link: Callable[[GatewayKey], Any] = LocalLink,
     progress: Callable[[str, dict[str, Any]], None] | None = None,
+    timeout: float | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Robust survey of several heads, one gateway per thread (read-only, ~8 s per head).
 
     ``heads``: objects exposing ``dev_id``, ``node_id`` and ``gateway_id`` (e.g. ``manager.Head``).
     Result indexed by ``dev_id``. Best-effort: an unreachable gateway marks its heads unreachable,
-    and each head is isolated from the others (no exception propagated)."""
+    and each head is isolated from the others (no exception propagated).
+
+    Every head of a known gateway is in the result. ``timeout`` (default: scaled on the busiest
+    gateway) bounds the whole survey: past it, each worker gives up after the head it is on (a
+    tunnel request is not interruptible) and the heads not read yet are returned as
+    ``{"unreachable": True, "not_read": True}`` rather than left out. Nothing is written into the
+    returned mapping afterwards. A head of an unknown gateway is ignored."""
     res: dict[str, dict[str, Any]] = {}
     lock = threading.Lock()
+    stop = threading.Event()
     by_gw: dict[str, list[Any]] = {}
     for h in heads:
         if h.gateway_id in gateways:
             by_gw.setdefault(h.gateway_id, []).append(h)
 
+    def publish(dev_id: str, entry: dict[str, Any]) -> bool:
+        with lock:
+            if stop.is_set():
+                return False
+            res[dev_id] = entry
+            return True
+
     def worker(gw_id: str, mine: list[Any]) -> None:
         try:
             link = open_link(gateways[gw_id])
         except Exception as ex:  # noqa: BLE001 - gateway unreachable
-            with lock:
-                for h in mine:
-                    res[h.dev_id] = {
-                        "attributes": {},
-                        "schedule": {},
-                        "unreachable": True,
-                        "error": str(ex)[:80],
-                    }
+            for h in mine:
+                publish(h.dev_id, _not_surveyed(str(ex)))
             return
         try:
             for h in mine:
+                if stop.is_set():
+                    return
                 try:
                     e = read_head(link, h.dev_id, h.node_id)
                 except Exception as ex:  # noqa: BLE001 - isolate each head
-                    e = {
-                        "attributes": {},
-                        "schedule": {},
-                        "unreachable": True,
-                        "error": str(ex)[:80],
-                    }
-                with lock:
-                    res[h.dev_id] = e
-                if progress:
+                    e = _not_surveyed(str(ex))
+                if publish(h.dev_id, e) and progress:
                     progress(h.dev_id, e)
         finally:
             link.close()
 
     threads = [threading.Thread(target=worker, args=(g, m), daemon=True) for g, m in by_gw.items()]
+    if timeout is None:
+        busiest = max((len(m) for m in by_gw.values()), default=0)
+        timeout = SURVEY_BASE_TIMEOUT + SURVEY_HEAD_TIMEOUT * busiest
+    deadline = time.monotonic() + timeout
     for t in threads:
         t.start()
     for t in threads:
-        t.join(timeout=60)
-    return res
+        t.join(timeout=max(0.0, deadline - time.monotonic()))
+    with lock:
+        stop.set()  # timed out: late workers stop after their current head and publish nothing
+        for mine in by_gw.values():
+            for h in mine:
+                res.setdefault(h.dev_id, _not_surveyed("survey timed out", not_read=True))
+        return dict(res)
 
 
 # --- summary and comparison (pure functions) --------------------------------------------------
@@ -654,7 +678,8 @@ def survey(
 def summarize_head(e: dict[str, Any]) -> dict[str, Any]:
     """Summary of a head survey: comfort slots per day, comfort/setback and attributes."""
     if not e.get("attributes"):
-        return {"unreachable": True}
+        # ``not_read``: the survey ran out of time before this head (it was not asked at all).
+        return {"unreachable": True, **({"not_read": True} if e.get("not_read") else {})}
     p = e.get("schedule") or {}
     cs = [t["c"] for d in WEEKDAYS for t in p.get(d, [])]
     return {

@@ -107,6 +107,28 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   the head's own name, flagged (`name_source`). Rooms also carry `online`, `temperature` and
   `setpoint`, shown on the tiles. Read only: one extra room-map read per home on the hourly topology
   cadence; no write path is added (a single head keeps the isolated-head writes).
+- **`get_local_survey` silently left heads out.** The survey waited a flat 60 s per gateway,
+  whatever its head count, and the heads not read by then were absent from the response: on a real
+  install (2026-11-19) it returned 91 heads for a 99-head fleet, with nothing saying eight were
+  missing. The time limit now grows with the busiest gateway (60 s + 60 s per head), and the
+  response accounts for every head: `heads_total`, `attempted` (addressable through the tunnel,
+  all present in `heads`), `reachable`, `not_read` (not reached before the limit, flagged
+  `not_read` instead of being dropped) and `not_addressable` (heads with no Zigbee node id or
+  whose gateway key is missing, with the reason). A survey that runs out of time also stops its
+  gateway threads after the head they are on, instead of leaving them reading in the background.
+  Documented in docs/interface-contract.md §4.4. Not replayed on real hardware yet.
+- **Building panel: every gateway was listed under the first home.** On an account with several
+  homes the overview (contract §3.6) put all the gateways under the first home and none under the
+  others. A gateway is now listed under the home of the heads it carries (majority, a tie going
+  to the earlier home); one that carries no head of a known home falls back to its own home in the
+  per-home device lists, then to the first home as before. `totals.gateways` is unchanged. No
+  frontend change: the panel already reads `gateways` per home.
+- **An offline boiler relay showed `off` instead of unavailable.** The relay binary sensor stayed
+  available while the relay was offline and served the last DP 1 the cloud kept (seen on a real
+  install, 2026-11-19, while the relay's MQTT availability said offline). It is now unavailable
+  while the relay is offline, like the head entities. The "rooms calling for heat" sensor is
+  unchanged on purpose: it counts the rooms linked to the relay, an account configuration that is
+  still true while the relay is offline.
 
 - **Re-authentication step in the config flow.** When the account refuses the sign-in at
   runtime (password changed, installation secrets no longer valid), the coordinator raised

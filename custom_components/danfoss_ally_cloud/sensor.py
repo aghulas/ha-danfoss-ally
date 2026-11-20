@@ -143,8 +143,9 @@ class DanfossHolidaySetpoint(DanfossHomeEntity, SensorEntity):
 class DanfossRelayRooms(DanfossEntity, SensorEntity):
     """Number of rooms currently driving a boiler relay (read only — contract §4.6).
 
-    Available even offline (the linkage is a cloud configuration, not a live reading). The linked
-    rooms are exposed as the ``rooms`` attribute.
+    Stays available while the relay is offline, unlike the relay's on/off: the linkage is a cloud
+    configuration read from the account, not a reading of the relay, so it is still true then. The
+    linked rooms are exposed as the ``rooms`` attribute.
     """
 
     _require_online = False

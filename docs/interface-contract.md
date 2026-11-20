@@ -290,6 +290,11 @@ cached state** — no extra cloud call (added in 0.6.0, axis D).
   without this kind it was missing from the panel and from every total (99-head fleet shown as 66).
   A single-head room is **not** a room write target: no group publish, no room schedule; its writes
   are those of an isolated head (§4.2, §5.2, `target.type = device`).
+- **Home of a gateway**: the home of the heads it carries (a head's `meshId` is its gateway, and
+  a head's home is exact). The heads vote, a tie going to the earlier home. A gateway carrying no
+  head of a known home is listed under its own home in the per-home device lists, else under the
+  first home. Every gateway is listed once, so `totals.gateways` is the gateway count. (Until
+  1.2.0-rc4 every gateway was listed under the first home.)
 - **Home of a single head**: exact, from the per-home device list (`tuya.m.my.group.device.list`
   with `gid`). A head of unknown home goes to the first home (kept visible and counted).
 - **Name of a single-head room**: the app room (type 4) of a head **cannot be read**. Observed on
@@ -520,6 +525,39 @@ reference, over the published product schema.
 > head as `7`, idle — whereas a `10⁰` reading of `700` would have clamped to the upper bound and
 > requested heat). Do not "correct" the code to the schema.
 
+**Multi-gateway survey (`get_local_survey` service, `danfoss_ally_cloud/local_survey` WebSocket
+command).** Read-only, one thread per gateway, the heads of a gateway read one after the other
+(~8 s for a head that answers, about 48 s for one that does not). Response:
+
+```json
+{
+  "surveyed_at": "2026-11-20T10:00:00+01:00",
+  "gateways": ["<gateway devId>"],
+  "heads_total": 4,
+  "attempted": 3,
+  "reachable": 1,
+  "not_read": 1,
+  "not_addressable": { "<devId>": "no_node_id" },
+  "heads": {
+    "<devId>": { "comfort": 21.0, "setback": 17.0, "slots": {}, "…": "decoded attributes" },
+    "<devId>": { "unreachable": true },
+    "<devId>": { "unreachable": true, "not_read": true }
+  }
+}
+```
+
+- Every head of the account is accounted for: `heads_total` = `attempted` + the heads of
+  `not_addressable`; it is the number of heads the cloud lists for the account.
+- `attempted`: the heads the tunnel can address (a Zigbee node id and a gateway whose local key
+  was fetched); the same heads have a preheat switch. Each one has an entry in `heads`.
+- `not_addressable`: the others, with the reason — `no_node_id` (the cloud gives no node id for
+  the head) or `no_gateway_key` (its gateway is unknown, or its key was not fetched).
+- `reachable`: attempted heads that answered. `unreachable: true` alone = asked, no answer.
+- `not_read`: attempted heads the survey did not get to before its time limit (60 s + 60 s per
+  head of the busiest gateway); flagged `not_read: true`, they were not asked at all. Until
+  1.2.0-rc4 the limit was a flat 60 s per gateway and those heads were **absent** from the response
+  (91 heads returned for a 99-head fleet, 2026-11-19).
+
 ### 4.5 Holiday (read + gated write)
 
 The holiday **read** and the holiday **set / exit** routes both run through the app's runtime
@@ -641,7 +679,9 @@ by the MCP connector (`smartlife.m.*` family; the APK also exposes the `thing.m.
   and a `sensor` "holiday setpoint" (the temperature of the holiday on record, in progress or
   planned, `null` if none). No holiday *write* entity (§4.5, §7).
 - **Boiler relay (read only)**: per relay device (`category` `kg`), a `binary_sensor` "boiler relay"
-  (DP `1`) and a `sensor` "rooms calling for heat" (count of linked rooms). No relay on/off *switch*
+  (DP `1`; **unavailable while the relay is offline**, the cloud then keeps its last DP `1`) and a
+  `sensor` "rooms calling for heat" (count of linked rooms, an account configuration: it stays
+  available while the relay is offline). No relay on/off *switch*
   (the device-level write is uncaptured, §4.6, §7); the room ↔ relay link is changed via
   `set_relay_room` (§5.2).
 

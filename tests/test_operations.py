@@ -92,8 +92,12 @@ class _FakeManager:
     gateway_ids = {"gw1", "gw2"}
 
     def survey_heads(self, heads):
-        assert list(heads) == ["dev1-head", "dev2-head"]  # the heads themselves, iterable
-        return {"dev1": {"comfort": 21.0, "setback": 14.0}, "dev2": {"unreachable": True}}
+        assert list(heads) == ["dev1-head", "dev2-head", "dev3-head"]  # the heads, iterable
+        return {
+            "dev1": {"comfort": 21.0, "setback": 14.0},
+            "dev2": {"unreachable": True},
+            "dev3": {"unreachable": True, "not_read": True},
+        }
 
 
 class _FakeLocal:
@@ -104,7 +108,10 @@ class _FakeLocal:
     manager = _FakeManager()
 
     def heads(self):
-        return ["dev1-head", "dev2-head"]  # opaque to the fake manager
+        return ["dev1-head", "dev2-head", "dev3-head"]  # opaque to the fake manager
+
+    def unaddressable(self):
+        return {"dev4": "no_node_id", "dev5": "no_gateway_key"}
 
 
 async def test_local_survey_disabled():
@@ -119,8 +126,14 @@ async def test_local_survey_ok():
     store, _ = _store()
     store[DATA_LOCAL] = _FakeLocal()
     res = await ops.local_survey(_FakeHass(), store)
-    assert res["attempted"] == 2
-    assert res["reachable"] == 1  # dev2 unreachable
+    # Every head of the account is accounted for (real install: 91 attempted for 99 heads, the
+    # eight others nowhere in the response).
+    assert res["heads_total"] == 5
+    assert res["attempted"] == 3
+    assert res["reachable"] == 1  # dev2 did not answer, dev3 was not read in time
+    assert res["not_read"] == 1
+    assert res["not_addressable"] == {"dev4": "no_node_id", "dev5": "no_gateway_key"}
+    assert set(res["heads"]) == {"dev1", "dev2", "dev3"}
     assert res["gateways"] == ["gw1", "gw2"]  # sorted
     assert res["heads"]["dev1"]["comfort"] == 21.0
     assert "surveyed_at" in res

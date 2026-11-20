@@ -144,6 +144,58 @@ class _TwoHomeCoord(_Coord):
         }
 
 
+def _gateways_by_home(data):
+    return {h["gid"]: [g["device_id"] for g in h["gateways"]] for h in data["homes"]}
+
+
+def test_overview_gateways_listed_under_the_home_of_their_heads():
+    """Regression (real two-home install, 2026-11-19): every gateway was listed under the first
+    home, none under the second, whatever the heads they carry."""
+    coord = _TwoHomeCoord()
+    # gw-1 carries the heads of h1 (a, b, c: the fixture default); gw-2 those of h2.
+    for dev_id in ("d", "e"):
+        coord.data[dev_id] = head(dev_id, coord.data[dev_id].name, mesh_id="gw-2")
+    coord.data["gw-2"] = _gateway("gw-2", "Gateway 2", online=False)
+    data = ops.overview_payload({DATA_COORDINATOR: coord})
+    assert _gateways_by_home(data) == {"h1": ["gw-1"], "h2": ["gw-2"]}
+    assert data["homes"][1]["gateways"][0] == {
+        "device_id": "gw-2",
+        "name": "Gateway 2",
+        "online": False,
+    }
+    assert data["totals"]["gateways"] == 2
+
+
+def test_overview_gateway_home_vote_and_fallbacks():
+    coord = _TwoHomeCoord()
+    homes = ["h1", "h2"]
+    for dev_id in ("d", "e"):
+        coord.data[dev_id] = head(dev_id, coord.data[dev_id].name, mesh_id="gw-2")
+    gw2 = _gateway("gw-2", "Gateway 2")
+    assert ops._gateway_home_gid(coord, gw2, homes) == "h2"
+    # Mixed gateway: the majority of its heads wins; a tie goes to the earlier home.
+    coord.data["c"] = head("c", "Salle 2 #1", mesh_id="gw-2")
+    assert ops._gateway_home_gid(coord, gw2, homes) == "h2"
+    coord.data["a"] = head("a", "Salle 1 #1", mesh_id="gw-2")
+    assert ops._gateway_home_gid(coord, gw2, homes) == "h1"
+    # A head of unknown home does not vote.
+    coord.data["z"] = head("z", "Nowhere", mesh_id="gw-3")
+    gw3 = _gateway("gw-3", "Gateway 3")
+    # No head with a known home: the gateway's own entry in the per-home device lists...
+    coord.device_home["gw-3"] = "h2"
+    assert ops._gateway_home_gid(coord, gw3, homes) == "h2"
+    # ...and without it, the first home (kept visible, as before).
+    del coord.device_home["gw-3"]
+    assert ops._gateway_home_gid(coord, gw3, homes) == "h1"
+    assert ops._gateway_home_gid(coord, gw3, []) is None
+    # Every gateway is listed exactly once, so the total stays the gateway count.
+    coord.data.update({"gw-2": gw2, "gw-3": gw3})
+    data = ops.overview_payload({DATA_COORDINATOR: coord})
+    listed = [g for ids in _gateways_by_home(data).values() for g in ids]
+    assert sorted(listed) == ["gw-1", "gw-2", "gw-3"]
+    assert data["totals"]["gateways"] == 3
+
+
 def test_overview_relays_attached_to_their_own_home():
     data = ops.overview_payload({DATA_COORDINATOR: _TwoHomeCoord()})
     by_home = {h["gid"]: [r["device_id"] for r in h["relays"]] for h in data["homes"]}

@@ -55,6 +55,27 @@ async def test_binary_sensor_adds_relay_and_reads_state():
     assert relays[0].unique_id == "relay-1_boiler_relay"
 
 
+def test_offline_relay_is_unavailable_not_off():
+    """Regression (real install, 2026-11-19): an offline relay showed ``off`` (the cloud keeps its
+    last DP 1) while its availability said offline. Unavailable rather than a stale state."""
+    coord = _FakeCoord({"relay-1": relay(on=False, online=False)})
+    ent = DanfossRelay(coord, "relay-1")
+    assert ent.available is False
+    coord.data = {"relay-1": relay(on=True, online=True)}  # back online: state served again
+    assert ent.available is True and ent.is_on is True
+    coord.data = {}  # relay gone from the account
+    assert ent.available is False
+
+
+def test_relay_rooms_stay_available_while_the_relay_is_offline():
+    """The linkage is an account configuration, not a reading of the relay: still true offline."""
+    rooms = [{"room_id": 1, "name": "A", "linked": True}]
+    coord = _FakeCoord({"relay-1": relay(online=False)}, relay_rooms={"relay-1": rooms})
+    ent = DanfossRelayRooms(coord, "relay-1")
+    assert ent.available is True
+    assert ent.native_value == 1
+
+
 async def test_sensor_relay_rooms_counts_linked():
     rooms = [
         {"room_id": 1, "name": "A", "linked": True},
