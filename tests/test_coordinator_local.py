@@ -287,3 +287,23 @@ async def test_cancelled_survey_releases_the_gateways(hass: HomeAssistant):
     assert manager.aborted is True
     assert local.data == {}
     await local.async_shutdown()
+
+
+async def test_attributes_and_settings_kept_when_the_loop_callbacks_come_late(hass: HomeAssistant):
+    """The worker posts each head's attributes and settings to the event loop, but those
+    callbacks may run only after the survey has returned and ``_surveying`` is False (seen on
+    Python 3.14), when they are dropped. What the heads gave must be kept anyway: the survey
+    keeps it from the worker and merges it, as it does for preheat. Here the loop callbacks are
+    made no-ops, the worst case."""
+    cloud = _cloud(hass, {"dev-1": head("dev-1", mesh_id="gw-1", node_id="node-1")})
+    manager = FakeManager(survey={"dev-1": True})
+    manager.settings = {"dev-1": {"radiator_covered": True}}
+    local = DanfossLocalCoordinator(hass, manager, cloud, 900)
+    local._async_head_attributes = lambda *a: None  # type: ignore[method-assign]
+    local._async_head_settings = lambda *a: None  # type: ignore[method-assign]
+
+    assert await local._async_update_data() == {"dev-1": True}
+
+    assert local.attributes["dev-1"]["programming_mode"] == 3
+    assert local.settings["dev-1"]["radiator_covered"] is True
+    assert "read_at" in local.settings["dev-1"]

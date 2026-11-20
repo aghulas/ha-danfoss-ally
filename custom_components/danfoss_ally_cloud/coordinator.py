@@ -465,18 +465,29 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
         fails the preheat survey it follows.
         """
         loop = self.hass.loop
+        # Also kept here, from the worker: a callback posted to the loop may run only after the
+        # pass has returned (seen on Python 3.14), when ``_async_head_settings`` drops it.
+        collected: dict[str, dict[str, Any]] = {}
 
         def on_result(dev_id: str, attrs: dict[str, Any] | None) -> None:  # worker thread
+            if attrs is not None:
+                collected[dev_id] = attrs
             loop.call_soon_threadsafe(self._async_head_settings, dev_id, attrs)
 
+        failed = False
         try:
             await self.hass.async_add_executor_job(
                 self.manager.survey_settings, heads, on_result, stop
             )
         except Exception as err:  # noqa: BLE001 - best-effort
             _LOGGER.debug("local settings survey failed (%s)", type(err).__name__)
-            return
-        self._settings_at = time.monotonic()
+            failed = True
+        # What the heads gave is kept even when the pass failed part-way (best-effort).
+        now = dt_util.utcnow()
+        for dev_id, attrs in collected.items():
+            self.settings[dev_id] = {**attrs, "read_at": now}
+        if not failed:
+            self._settings_at = time.monotonic()
 
     @callback
     def _async_head_read(self, dev_id: str, value: bool | None) -> None:
@@ -503,7 +514,13 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
         def on_result(dev_id: str, value: bool | None) -> None:  # worker thread
             loop.call_soon_threadsafe(self._async_head_read, dev_id, value)
 
+        # Also kept here, from the worker: a callback posted to the loop may run only after the
+        # survey has returned and ``_surveying`` is False (seen on Python 3.14), when
+        # ``_async_head_attributes`` drops it. The survey's result is merged below, as for preheat.
+        collected: dict[str, dict[str, Any] | None] = {}
+
         def on_attributes(dev_id: str, attrs: dict[str, Any] | None) -> None:  # worker thread
+            collected[dev_id] = attrs
             loop.call_soon_threadsafe(self._async_head_attributes, dev_id, attrs)
 
         stop = threading.Event()
@@ -517,6 +534,10 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
                 )
             except Exception as err:  # noqa: BLE001 - best-effort local fallback
                 raise UpdateFailed(f"local survey: {err}") from err
+            for dev_id, attrs in collected.items():
+                # A head read back on its own meanwhile (after a write) keeps that fresher read.
+                if dev_id not in self._read_back:
+                    self._store_attributes(dev_id, attrs)
             if self._settings_at is None or (
                 time.monotonic() - self._settings_at >= LOCAL_SETTINGS_INTERVAL
             ):
