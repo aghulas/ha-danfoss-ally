@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.2.1 — Building overview: gateway homes; preheat cloud-MQTT candidate reworked (still closed)
+
+Patch release. Nothing changes for an install that has not armed a supervised trial: no new
+option, no new default.
+
+**Not validated on real hardware**: the gateway-home change was not replayed on the real install,
+and the reworked preheat write (publish, then settings block) has never been tried — DP 1 is still
+a closed candidate, and the preheat switch keeps writing through the local tunnel as before.
 
 ### Changed
 
