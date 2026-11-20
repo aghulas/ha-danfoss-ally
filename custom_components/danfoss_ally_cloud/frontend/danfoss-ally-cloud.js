@@ -905,23 +905,32 @@ function parseHHMM(value) {
   }
   return hours * 60 + minutes;
 }
-function dayBars(ranges) {
+function indexedDayBars(ranges) {
   const bars = [];
-  for (const range of ranges) {
+  ranges.forEach((range, index) => {
     const start = parseHHMM(range.start);
     const end = parseHHMM(range.end);
     if (start === null || end === null || end <= start) {
-      continue;
+      return;
     }
     bars.push({
+      index,
       start: range.start,
       end: range.end,
       leftPct: start / MINUTES_PER_DAY * 100,
       widthPct: (end - start) / MINUTES_PER_DAY * 100
     });
-  }
+  });
   bars.sort((a2, b2) => a2.leftPct - b2.leftPct);
   return bars;
+}
+function dayBars(ranges) {
+  return indexedDayBars(ranges).map(({ start, end, leftPct, widthPct }) => ({
+    start,
+    end,
+    leftPct,
+    widthPct
+  }));
 }
 function isSetbackOnly(ranges) {
   return dayBars(ranges).length === 0;
@@ -1781,6 +1790,7 @@ let DanfossAllyScheduleCard = class extends i {
     this._schedule = null;
     this._loaded = false;
     this._refreshing = false;
+    this._ready = false;
     this._editing = false;
     this._draft = null;
     this._saving = false;
@@ -1791,7 +1801,9 @@ let DanfossAllyScheduleCard = class extends i {
     this._copyTargets = /* @__PURE__ */ new Set();
     this._serverValidation = null;
     this._unsubscribe = null;
+    this._subscribing = false;
     this._validateTimer = null;
+    this._validateSeq = 0;
     this._onBeforeUnload = (ev) => {
       if (this._editing && this._modified.length > 0) {
         ev.preventDefault();
@@ -1799,7 +1811,7 @@ let DanfossAllyScheduleCard = class extends i {
       }
     };
     this._onDragMove = (ev) => {
-      if (!this._drag || !this._draft) {
+      if (!this._drag || !this._draft || ev.pointerId !== this._drag.pointerId) {
         return;
       }
       const { day, index, mode, startX, trackWidth, orig } = this._drag;
@@ -1807,10 +1819,22 @@ let DanfossAllyScheduleCard = class extends i {
       const next = mode === "move" ? moveRange(orig, index, deltaMin) : resizeRange(orig, index, mode, deltaMin);
       this._setDay(day, next);
     };
-    this._onDragEnd = () => {
-      if (this._drag && this._draft) {
+    this._onDragEnd = (ev) => {
+      if (!this._drag || ev.pointerId !== this._drag.pointerId) {
+        return;
+      }
+      if (this._draft) {
         const day = this._drag.day;
         this._setDay(day, sortRanges(this._draft[day] ?? []));
+      }
+      this._teardownDrag();
+    };
+    this._onDragCancel = (ev) => {
+      if (!this._drag || ev.pointerId !== this._drag.pointerId) {
+        return;
+      }
+      if (this._draft) {
+        this._setDay(this._drag.day, this._drag.orig);
       }
       this._teardownDrag();
     };
@@ -1825,10 +1849,18 @@ let DanfossAllyScheduleCard = class extends i {
     if (!config) {
       throw new Error("Configuration invalide");
     }
-    if (this._editing && config.room_id !== this._config?.room_id) {
+    const roomChanged = config.room_id !== this._config?.room_id;
+    if (this._editing && roomChanged) {
       this._leaveEdit(false);
     }
     this._config = config;
+    if (roomChanged && this._loaded) {
+      this._schedule = null;
+      this._job = null;
+      this._error = null;
+      this._ready = false;
+      void this._load();
+    }
   }
   getCardSize() {
     return this._editing ? 12 : 6;
@@ -1840,6 +1872,15 @@ let DanfossAllyScheduleCard = class extends i {
   /** Demande la sortie d'édition avec confirmation si des jours ont été modifiés. */
   cancelEdit() {
     this._cancelEdit();
+  }
+  connectedCallback() {
+    super.connectedCallback();
+    if (this._loaded) {
+      void this._subscribe();
+    }
+    if (this._editing) {
+      globalThis.addEventListener?.("beforeunload", this._onBeforeUnload);
+    }
   }
   disconnectedCallback() {
     super.disconnectedCallback();
@@ -1863,21 +1904,36 @@ let DanfossAllyScheduleCard = class extends i {
       return;
     }
     const target = this._target;
+    const roomId = this._config?.room_id;
     const [info, rooms, schedule] = await Promise.all([
       fetchInfo(this.hass),
       this.embedded ? Promise.resolve([]) : fetchRooms(this.hass),
       target ? fetchSchedule(this.hass, target) : Promise.resolve(null)
     ]);
+    if (roomId !== this._config?.room_id) {
+      return;
+    }
     this._info = info;
     if (!this.embedded) {
       this._rooms = rooms;
     }
     this._schedule = schedule;
+    this._ready = true;
     if (this.embedded && !this._editing && this._isAdmin && this._schedule) {
       this._beginEdit();
     }
-    if (!this._unsubscribe && !this.embedded) {
+    await this._subscribe();
+  }
+  /** Suivi des lots d'écriture (si la connexion WS le permet) ; le parent s'en charge en mode imbriqué. */
+  async _subscribe() {
+    if (!this.hass || this.embedded || this._unsubscribe || this._subscribing) {
+      return;
+    }
+    this._subscribing = true;
+    try {
       this._unsubscribe = await subscribeJobs(this.hass, (job) => this._onJob(job));
+    } finally {
+      this._subscribing = false;
     }
   }
   _onJob(job) {
@@ -1893,7 +1949,7 @@ let DanfossAllyScheduleCard = class extends i {
     this._refreshing = true;
     try {
       const schedule = await fetchSchedule(this.hass, target, true);
-      if (schedule) {
+      if (schedule && target.id === this._config?.room_id) {
         this._schedule = schedule;
       }
     } finally {
@@ -1929,8 +1985,9 @@ let DanfossAllyScheduleCard = class extends i {
     this._copyFrom = null;
     globalThis.addEventListener?.("beforeunload", this._onBeforeUnload);
   }
-  _leaveEdit(notifyParent = true) {
+  _leaveEdit(notifyParent = true, saved = false) {
     this._editing = false;
+    this._validateSeq += 1;
     this._draft = null;
     this._copyFrom = null;
     this._serverValidation = null;
@@ -1943,7 +2000,9 @@ let DanfossAllyScheduleCard = class extends i {
     if (this.embedded && notifyParent) {
       this.dispatchEvent(
         new CustomEvent("schedule-edit-close", {
-          detail: { schedule: this._schedule, job: this._job },
+          // Le programme n'est remonté qu'après un enregistrement : à l'annulation,
+          // le parent garde sa propre lecture (peut-être plus fraîche que la nôtre).
+          detail: { schedule: saved ? this._schedule : null, job: this._job, saved },
           bubbles: true,
           composed: true
         })
@@ -1960,7 +2019,7 @@ let DanfossAllyScheduleCard = class extends i {
     this._leaveEdit(true);
   }
   _setDay(day, ranges) {
-    if (!this._draft) {
+    if (!this._draft || this._saving) {
       return;
     }
     this._draft = { ...this._draft, [day]: ranges };
@@ -1986,7 +2045,12 @@ let DanfossAllyScheduleCard = class extends i {
     for (const day of this._modified) {
       days[day] = this._draft[day];
     }
-    this._serverValidation = await validateSchedule(this.hass, days);
+    const seq = ++this._validateSeq;
+    const result = await validateSchedule(this.hass, days);
+    if (seq !== this._validateSeq || !this._editing) {
+      return;
+    }
+    this._serverValidation = result;
   }
   // --- Opérations d'édition ---
   _addRange(day) {
@@ -2033,7 +2097,7 @@ let DanfossAllyScheduleCard = class extends i {
     this._copyTargets = this._copyTargets.size === others.length ? /* @__PURE__ */ new Set() : new Set(others);
   }
   _applyCopy() {
-    if (!this._draft || !this._copyFrom || this._copyTargets.size === 0) {
+    if (!this._draft || this._saving || !this._copyFrom || this._copyTargets.size === 0) {
       return;
     }
     this._draft = copyDay(this._draft, this._copyFrom, [...this._copyTargets]);
@@ -2059,12 +2123,18 @@ let DanfossAllyScheduleCard = class extends i {
     }
     try {
       const job = await setSchedule(this.hass, target, days);
+      if (target.id !== this._config?.room_id) {
+        return;
+      }
       this._job = job;
       if (this._schedule) {
-        this._schedule = { ...this._schedule, days: cloneDays(this._draft) };
+        this._schedule = { ...this._schedule, days: { ...this._schedule.days, ...days } };
       }
-      this._leaveEdit(true);
+      this._leaveEdit(true, true);
     } catch (err) {
+      if (target.id !== this._config?.room_id) {
+        return;
+      }
       const code = err instanceof ScheduleCommandError ? err.code : "unknown";
       this._error = errorText(this.hass, code, { max: MAX_TRANSITIONS_PER_DAY });
     } finally {
@@ -2089,7 +2159,7 @@ let DanfossAllyScheduleCard = class extends i {
   }
   // --- Glisser-déposer (pointeur) : déplacer / redimensionner une plage ---
   _onBarPointerDown(day, index, mode, ev) {
-    if (!this._draft) {
+    if (!this._draft || this._saving) {
       return;
     }
     ev.preventDefault();
@@ -2100,6 +2170,7 @@ let DanfossAllyScheduleCard = class extends i {
       return;
     }
     this._drag = {
+      pointerId: ev.pointerId,
       day,
       index,
       mode,
@@ -2110,13 +2181,13 @@ let DanfossAllyScheduleCard = class extends i {
     handle.setPointerCapture?.(ev.pointerId);
     globalThis.addEventListener?.("pointermove", this._onDragMove);
     globalThis.addEventListener?.("pointerup", this._onDragEnd);
-    globalThis.addEventListener?.("pointercancel", this._onDragEnd);
+    globalThis.addEventListener?.("pointercancel", this._onDragCancel);
   }
   _teardownDrag() {
     this._drag = void 0;
     globalThis.removeEventListener?.("pointermove", this._onDragMove);
     globalThis.removeEventListener?.("pointerup", this._onDragEnd);
-    globalThis.removeEventListener?.("pointercancel", this._onDragEnd);
+    globalThis.removeEventListener?.("pointercancel", this._onDragCancel);
   }
   // --- Rendu ---
   render() {
@@ -2154,7 +2225,18 @@ let DanfossAllyScheduleCard = class extends i {
                 ${this._renderEditButtons()}
               </div>
               ${this._renderEditor()}
-            ` : b`<div class="hint">${t(this.hass, "schedule_unavailable")}</div>`}
+            ` : b`
+              <div class="embedded-bar">
+                <span class="read-at">
+                  ${this._ready ? t(this.hass, "schedule_unavailable") : A}
+                </span>
+                <div class="actions">
+                  <button class="btn ghost" @click=${this._cancelEdit}>
+                    ${t(this.hass, "cancel")}
+                  </button>
+                </div>
+              </div>
+            `}
       </div>
     `;
   }
@@ -2240,7 +2322,7 @@ let DanfossAllyScheduleCard = class extends i {
   _renderEditDay(day) {
     const ranges = this._draft[day] ?? [];
     const result = validateDay(ranges, day);
-    const bars = dayBars(ranges);
+    const bars = indexedDayBars(ranges);
     const counterClass = result.valid ? "counter" : "counter invalid";
     const codes = this._dayErrorCodes(day, result.errors.map((e2) => e2.code));
     const indexedRanges = sortIndexedRanges(ranges);
@@ -2249,7 +2331,7 @@ let DanfossAllyScheduleCard = class extends i {
         <div class="eday-row">
           <span class="day-label">${dayLabel(this.hass, day)}</span>
           <div class="track editable">
-            ${bars.map((bar, i2) => this._renderEditBar(day, i2, bar))}
+            ${bars.map((bar) => this._renderEditBar(day, bar))}
           </div>
           <span
             class=${counterClass}
@@ -2268,13 +2350,17 @@ let DanfossAllyScheduleCard = class extends i {
         <div class="ranges">
           ${indexedRanges.map(({ range, index }) => this._rangeRow(day, index, range))}
           <div class="range-tools">
-            <button class="btn tiny" @click=${() => this._addRange(day)}>
+            <button
+              class="btn tiny"
+              @click=${() => this._addRange(day)}
+              ?disabled=${this._saving}
+            >
               ${ICON_PLUS}<span>${t(this.hass, "add_range")}</span>
             </button>
             <button
               class="btn tiny"
               @click=${() => this._openCopy(day)}
-              ?disabled=${ranges.length === 0 && (this._draft[day]?.length ?? 0) === 0}
+              ?disabled=${ranges.length === 0 || this._saving}
               aria-expanded=${this._copyFrom === day ? "true" : "false"}
             >
               ${ICON_COPY}<span>${t(this.hass, "copy_day")}</span>
@@ -2302,7 +2388,8 @@ let DanfossAllyScheduleCard = class extends i {
     }
     return [...codes];
   }
-  _renderEditBar(day, index, bar) {
+  _renderEditBar(day, bar) {
+    const index = bar.index;
     return b`
       <div class="bar edit" style="left:${bar.leftPct}%;width:${bar.widthPct}%">
         <span
@@ -2330,6 +2417,7 @@ let DanfossAllyScheduleCard = class extends i {
             type="time"
             step="300"
             .value=${r2.start}
+            ?disabled=${this._saving}
             @change=${(ev) => this._onTimeInput(day, index, "start", ev)}
           />
         </label>
@@ -2340,12 +2428,14 @@ let DanfossAllyScheduleCard = class extends i {
             type="time"
             step="300"
             .value=${r2.end}
+            ?disabled=${this._saving}
             @change=${(ev) => this._onTimeInput(day, index, "end", ev)}
           />
         </label>
         <button
           class="btn icon"
           @click=${() => this._deleteRange(day, index)}
+          ?disabled=${this._saving}
           aria-label=${t(this.hass, "delete_range")}
           title=${t(this.hass, "delete_range")}
         >
@@ -2385,7 +2475,7 @@ let DanfossAllyScheduleCard = class extends i {
           <button
             class="btn primary tiny"
             @click=${this._applyCopy}
-            ?disabled=${this._copyTargets.size === 0}
+            ?disabled=${this._copyTargets.size === 0 || this._saving}
           >
             ${t(this.hass, "copy_apply")}
           </button>
@@ -2646,6 +2736,9 @@ __decorateClass$2([
 ], DanfossAllyScheduleCard.prototype, "_refreshing", 2);
 __decorateClass$2([
   r()
+], DanfossAllyScheduleCard.prototype, "_ready", 2);
+__decorateClass$2([
+  r()
 ], DanfossAllyScheduleCard.prototype, "_editing", 2);
 __decorateClass$2([
   r()
@@ -2717,6 +2810,7 @@ let DanfossAllyRoomCard = class extends i {
     this._editing = false;
     this._job = null;
     this._unsubscribe = null;
+    this._subscribing = false;
   }
   static getConfigElement() {
     return document.createElement("danfoss-ally-room-card-editor");
@@ -2728,14 +2822,27 @@ let DanfossAllyRoomCard = class extends i {
     if (!config) {
       throw new Error("Configuration invalide");
     }
-    if (config.room_id !== this._config?.room_id) {
+    const roomChanged = config.room_id !== this._config?.room_id;
+    if (roomChanged) {
       this._editing = false;
       this._schedCard = void 0;
     }
     this._config = config;
+    if (roomChanged && this._loaded) {
+      this._schedule = null;
+      this._job = null;
+      this._error = null;
+      void this._load();
+    }
   }
   getCardSize() {
     return this._editing ? 12 : 6;
+  }
+  connectedCallback() {
+    super.connectedCallback();
+    if (this._loaded) {
+      void this._subscribe();
+    }
   }
   disconnectedCallback() {
     super.disconnectedCallback();
@@ -2768,16 +2875,29 @@ let DanfossAllyRoomCard = class extends i {
       return;
     }
     const target = this._target;
+    const roomId = this._config?.room_id;
     const [info, rooms, schedule] = await Promise.all([
       fetchInfo(this.hass),
       fetchRooms(this.hass),
       target ? fetchSchedule(this.hass, target) : Promise.resolve(null)
     ]);
+    if (roomId !== this._config?.room_id) {
+      return;
+    }
     this._info = info;
     this._rooms = rooms;
     this._schedule = schedule;
-    if (!this._unsubscribe) {
+    await this._subscribe();
+  }
+  async _subscribe() {
+    if (!this.hass || this._unsubscribe || this._subscribing) {
+      return;
+    }
+    this._subscribing = true;
+    try {
       this._unsubscribe = await subscribeJobs(this.hass, (job) => this._onJob(job));
+    } finally {
+      this._subscribing = false;
     }
   }
   _onJob(job) {
@@ -2801,7 +2921,7 @@ let DanfossAllyRoomCard = class extends i {
         fetchSchedule(this.hass, target, true),
         this._reloadRooms()
       ]);
-      if (schedule) {
+      if (schedule && target.id === this._config?.room_id) {
         this._schedule = schedule;
       }
     } finally {

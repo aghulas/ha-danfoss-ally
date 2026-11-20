@@ -182,4 +182,26 @@ describe("sortIndexedRanges", () => {
     ]);
     expect(sorted.map((s) => s.index)).toEqual([1, 2, 0]);
   });
+
+  it("garde l'ordre d'origine entre débuts égaux et place les mal formées à la fin", () => {
+    const sorted = sortIndexedRanges([
+      r("xx", "10:00"),
+      r("08:00", "18:00"),
+      r("yy", "11:00"),
+      r("08:00", "09:00"),
+      r("00:00", "01:00"),
+    ]);
+    expect(sorted.map((s) => s.index)).toEqual([4, 1, 3, 0, 2]);
+  });
+
+  it("classe une plage chevauchante ou inversée (passage de minuit) par son seul début", () => {
+    const ranges = [r("22:00", "02:00"), r("09:00", "12:00"), r("08:00", "10:00")];
+    const sorted = sortIndexedRanges(ranges);
+    expect(sorted.map((s) => s.index)).toEqual([2, 1, 0]);
+    // Chaque entrée pointe bien la plage d'origine, et l'entrée n'est pas mutée.
+    for (const { range, index } of sorted) {
+      expect(ranges[index]).toBe(range);
+    }
+    expect(ranges[0]).toEqual(r("22:00", "02:00"));
+  });
 });

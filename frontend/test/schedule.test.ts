@@ -4,6 +4,7 @@ import {
   DAY_KEYS,
   dayBars,
   formatReadAt,
+  indexedDayBars,
   isSetbackOnly,
   parseHHMM,
   summarizeHeads,
@@ -116,5 +117,30 @@ describe("summarizeHeads", () => {
       inconsistent: 1,
       mounting: 1,
     });
+  });
+});
+
+describe("indexedDayBars", () => {
+  it("garde l'indice de la plage d'origine malgré le tri et les plages ignorées", () => {
+    const bars = indexedDayBars([
+      { start: "14:00", end: "18:00" },
+      { start: "10:00", end: "09:00" }, // inversée : pas de barre
+      { start: "08:00", end: "12:00" },
+      { start: "xx", end: "12:00" }, // mal formée : pas de barre
+      { start: "20:00", end: "21:00" },
+    ]);
+    expect(bars.map((b) => [b.start, b.index])).toEqual([
+      ["08:00", 2],
+      ["14:00", 0],
+      ["20:00", 4],
+    ]);
+  });
+
+  it("donne les mêmes barres que dayBars, dans le même ordre", () => {
+    const ranges = [
+      { start: "14:00", end: "18:00" },
+      { start: "08:00", end: "12:00" },
+    ];
+    expect(indexedDayBars(ranges).map(({ index: _index, ...bar }) => bar)).toEqual(dayBars(ranges));
   });
 });

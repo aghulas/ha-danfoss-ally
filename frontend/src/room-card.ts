@@ -91,6 +91,7 @@ export class DanfossAllyRoomCard extends LitElement {
   @state() private _job: WriteJob | null = null;
 
   private _unsubscribe: (() => void) | null = null;
+  private _subscribing = false;
   private _schedCard?: EmbeddedScheduleCard;
 
   public static getConfigElement(): HTMLElement {
@@ -105,15 +106,32 @@ export class DanfossAllyRoomCard extends LitElement {
     if (!config) {
       throw new Error("Configuration invalide");
     }
-    if (config.room_id !== this._config?.room_id) {
+    const roomChanged = config.room_id !== this._config?.room_id;
+    if (roomChanged) {
       this._editing = false;
       this._schedCard = undefined;
     }
     this._config = config;
+    if (roomChanged && this._loaded) {
+      // Rien de l'ancienne pièce ne doit rester affiché sous le nom de la nouvelle.
+      this._schedule = null;
+      this._job = null;
+      this._error = null;
+      void this._load();
+    }
   }
 
   public getCardSize(): number {
     return this._editing ? 12 : 6;
+  }
+
+  public connectedCallback(): void {
+    super.connectedCallback();
+    // Home Assistant détache puis rattache les cartes (changement de colonnes,
+    // mode édition) : sans cela le suivi des lots resterait coupé après coup.
+    if (this._loaded) {
+      void this._subscribe();
+    }
   }
 
   public disconnectedCallback(): void {
@@ -152,16 +170,31 @@ export class DanfossAllyRoomCard extends LitElement {
       return;
     }
     const target = this._target;
+    const roomId = this._config?.room_id;
     const [info, rooms, schedule] = await Promise.all([
       fetchInfo(this.hass),
       fetchRooms(this.hass),
       target ? fetchSchedule(this.hass, target) : Promise.resolve(null),
     ]);
+    if (roomId !== this._config?.room_id) {
+      // La pièce a changé pendant la lecture : cette réponse n'est plus la sienne.
+      return;
+    }
     this._info = info;
     this._rooms = rooms;
     this._schedule = schedule;
-    if (!this._unsubscribe) {
+    await this._subscribe();
+  }
+
+  private async _subscribe(): Promise<void> {
+    if (!this.hass || this._unsubscribe || this._subscribing) {
+      return;
+    }
+    this._subscribing = true;
+    try {
       this._unsubscribe = await subscribeJobs(this.hass, (job) => this._onJob(job));
+    } finally {
+      this._subscribing = false;
     }
   }
 
@@ -188,7 +221,7 @@ export class DanfossAllyRoomCard extends LitElement {
         fetchSchedule(this.hass, target, true),
         this._reloadRooms(),
       ]);
-      if (schedule) {
+      if (schedule && target.id === this._config?.room_id) {
         this._schedule = schedule;
       }
     } finally {
