@@ -29,6 +29,8 @@ Plan: [`../real-validation-plan.md`](../real-validation-plan.md). Preheat curve 
 | Sensor T | A Danfoss room sensor (not a head) |
 | Head U | Isolated head (no room) following its own weekly schedule; test head of the DP 118 / 119 trial |
 | relay 1 / relay 2 | Danfoss relays of Building 1 / Building 2 |
+| Head V | Isolated head (no room), in comfort 08:30–17:30 on weekdays; test head of the 2026-11-20 trials (batch C, tunnel settings) |
+| Area X | Home Assistant area holding four Danfoss heads paired directly to Zigbee2MQTT and one Danfoss room sensor (a transition test) |
 
 Entity ids are written with placeholders, e.g. `switch.<room_a>_child_lock`.
 
@@ -848,3 +850,128 @@ that fast variations go under the radar of the bulk route.
   Mapping: DP 171 → (fallback: mode+settings) → DP 16. R-3 (freshness) left out of this PR.
 - **To restore**: Room A left in manual 21 during R-3 → to put back on schedule.
 - **Config**: `mqtt_mode=discovery` left on for the next morning's observation.
+
+---
+
+## Preheat night trial read-out, 2026-11-20 ~10:00 — trial voided by a night-time revert
+
+Read only (HA history of `danfoss_ally_cloud`, then a tunnel read of both heads at ~10:00).
+
+- **Reverted with no write from us**: the preheat switches, fed by the local survey, show Head R
+  **off → on at 04:54:52** and Head Q **on → off at 04:55:02** (two reads of the same survey pass,
+  10 s apart). No write batch in the connector's journal that night.
+- **Tunnel read at ~10:00**: Head R programming mode 3, preheat on; Head Q programming mode 1,
+  preheat off; schedules and setpoints unchanged. Both heads were already back to their original
+  state: nothing to restore.
+- **Morning curves**, consistent with the reverted state: Head R (preheat back on) valve ≥ 10 % at
+  07:12, 78 min before its slot; Head Q (back off) valve ≥ 10 % at 08:35, the slot + 5 min, no early
+  ramp.
+- **Likely cause**: the tunnel write of 0x0025 did not touch the cloud's DP 1, which kept its
+  original value (also seen on the official `danfoss_ally` integration's switches, unchanged all
+  night). The gateway may re-impose its cached value at a night-time resync. To confirm; if so, a
+  tunnel-only preheat write does not hold (`../preheat-tunnel-durability.md`).
+
+## Deployment of `1.3.0-rc3` (`015fdf5`, #121 → #124) and tunnel settings trial, 2026-11-20 ~14:20–15:07 ✅
+
+Files copied from the tag (the Marketplace still refuses `update.install`), core restart 14:20,
+integration `loaded`, clean log.
+
+**Read only (batches A/B, card by area)** — Head V: the new sensors agree with the official
+`danfoss_ally` integration (radiator covered off/off, programming mode `schedule_with_preheat` /
+preheat on, mounting mode off/off, window state `closed` / window off). The five settings sensors
+disabled by default are disabled. No trial entity while the trials are closed. Panel: the rc3 bundle
+is served, other areas hidden by default. A room card by area mounted in memory (nothing saved) on
+an area holding two `danfoss_ally` thermostats lists them without controls, also with
+`allow_foreign_writes: true` (duplicate guard). ⚠️ Bundle URL `?v=1.3.0` identical for every rc: a
+forced reload was needed (fixed by #126).
+
+**Tunnel settings trial (#124), Head V, one setting armed at a time, owner present.** Initial
+values read through the tunnel: radiator covered off, offset 0, regulation speed 1, valve exercise
+Saturday 10:00.
+
+| Time | Write | `trial_result` | Tunnel read-back |
+|---|---|---|---|
+| 14:41 | radiator covered off → on | confirmed_by_tunnel | on |
+| 14:42 | on → off | confirmed_by_tunnel | off |
+| 14:47 | offset 0 → +0.1 (raw 1) | confirmed_by_tunnel | 1 |
+| 14:47 | → 0 | confirmed_by_tunnel | 0 |
+| 14:48 | offset 0 → +0.5 (raw 5) | confirmed_by_tunnel | 5 |
+| 14:50 | → 0 | confirmed_by_tunnel | 0 |
+| 14:57 | speed 1 → 2 | confirmed_by_tunnel | 2 |
+| 14:58 | → 1 | confirmed_by_tunnel | 1 |
+| 15:03 | valve exercise day Saturday → Sunday (time kept) | confirmed_by_tunnel | Sunday 10:00 |
+| 15:04 | time 10:00 → 11:00 (day kept) | confirmed_by_tunnel | Sunday 11:00 |
+| 15:05 | day → Saturday, then time → 10:00 | confirmed_by_tunnel ×2 | Saturday 10:00 |
+
+Nothing else changed on the head after each write. Closed at 15:05.
+
+- **No independent source**: the app does not show the offset; the official integration's
+  "radiator covered" switch stayed off while the head read on. As with preheat, the cloud may
+  ignore tunnel-only writes and re-impose its value: hold over time not established.
+- **Window state** read `quarantine` (0) after the radiator-covered toggle; read `closed` again at
+  16:02 after a restart. Not persistent.
+
+## Batch C (cloud MQTT), Head V, 2026-11-20 ~15:08–15:22
+
+Armed: `enable_cloud_mqtt` on, Head V designated, one DP at a time. Closed 15:22 (`enable_cloud_mqtt`
+back off): trial entities removed, link back to listen-only.
+
+- **DP 101 (viewing direction) — refused before anything was sent.** The per-device cloud route
+  (`smartlife.m.device.get`) gave no DP 101, so there was no confirmation source; nothing published.
+  Cause found: that route carries the DPs under `dataPointInfo.dps` (fixed in #125, 1.3.0-rc4). To be
+  re-run with the owner at the head's display.
+- **DP 133 (orientation) — validated both ways.** Mapping established before writing: head mounted
+  horizontally, app horizontal, tunnel `0x4014 = false`, cloud `Horizontal` → false = horizontal
+  (Zigbee2MQTT's reading confirmed).
+
+| Time | Write | `trial_result` | Delay | Tunnel | Cloud |
+|---|---|---|---|---|---|
+| 15:20 | horizontal → vertical | confirmed_by_tunnel | 22 s | true | Vertical |
+| 15:21 | vertical → horizontal | confirmed_by_tunnel | 17 s | false | Horizontal |
+
+Nothing else changed on the head; the cloud follows (unlike the tunnel-only writes).
+
+- **Incident**: another session restarted the HA core at 15:13:57. A first write sent 2 s after the
+  core came back found no entity yet: nothing sent (checked). Re-run at 15:20.
+
+## `1.3.0-rc4`, then `1.3.0`, Head V, 2026-11-20 ~15:55–17:05
+
+`1.3.0-rc4` (`040cf8a`) copied at 15:52, core restart; the owner then updated to `1.3.0` through
+HACS (~16:20): the code on the host is identical to the `1.3.0` tag (deploy preview: 0 added,
+0 modified). Bundle check: a single Lovelace resource `danfoss-ally-cloud.js?v=1.3.0-<hash>`, the
+hash matching the shipped bundle; the side panel loads the same URL (#126).
+
+**Setpoint offset, +2.5 °C for 10 min** (V0 = 0). 16:02:44 → +2.5 (raw 25, confirmed_by_tunnel);
+16:13:16 → 0 (confirmed_by_tunnel). Temperature 21.0 → 20.9 → 21.2 °C, valve 38 → 42 → 52 %. The
+reported temperature does not jump: the offset does not shift the measurement.
+
+**Setpoint offset, +2.5 °C for 30 min** (V0 = 0, setpoint 21 °C). 16:34:47 → +2.5 (raw 25,
+confirmed_by_tunnel); 17:05:07 → 0 (confirmed_by_tunnel); trial closed 17:05:17.
+
+| Time | Valve (tunnel) | Temperature |
+|---|---|---|
+| 16:32 | 41 % | 21.4 |
+| 16:37 | 37 % | 21.3 |
+| 16:42 | 52 % | 21.5 |
+| 16:47 | 62 % | 21.8 |
+| 16:52 | 72 % | 22.3 |
+| 16:57 | 84 % | 22.5 |
+
+The head heats above its setpoint while the measurement does not jump: **the offset raises the
+regulation target**, as Zigbee2MQTT's `regulation_setpoint_offset`. Direction confirmed; scale
+(raw 25 = 2.5 °C?) not proven, no plateau reached in 30 min. User-facing consequence: with an
+offset set, the displayed setpoint no longer says how warm the room gets.
+
+**Hold of a tunnel-only setting overnight.** 16:25:15 valve exercise day Saturday → Sunday (time
+10:00 kept), confirmed_by_tunnel; trial closed 16:25:33; independent tunnel read (Danfoss MCP
+connector) at 16:26: Sunday 10:00, everything else unchanged. **To read on 2026-11-21 morning**:
+Sunday = the head keeps a tunnel-only setting; Saturday = the cloud re-imposes it, as with preheat.
+Then restore Saturday 10:00.
+
+**Room card by area on Zigbee2MQTT heads (Area X).** The five Zigbee2MQTT devices were put in the
+area through the HA admin connector (a new area tool). The card, mounted in memory, lists the four
+heads with temperature, action, setpoint and badges read from their Zigbee2MQTT entities (battery,
+valve…); read only by default, "Cooler / Warmer" with `allow_foreign_writes`. Nothing written. The
+heads regulate on the room sensor (`external_measured_room_sensor` ≈ 17.4 °C) and heat at full valve
+while their own measurement reads 20–24 °C; the card did not show the room sensor → #128. On an
+area with two Tuya thermostats the card works the same way.
