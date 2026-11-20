@@ -355,26 +355,47 @@ def _relay_home_gid(
     return home_gids[0] if home_gids else None
 
 
-def _gateway_home_gid(coordinator: DanfossCoordinator, gateway, home_gids: list[str]) -> str | None:
-    """Home of a gateway: the home of the heads it carries (``mesh_id`` = the gateway).
+def _gateway_carried(coordinator: DanfossCoordinator, gateway) -> list[DanfossDevice]:
+    """Sub-devices a gateway carries (``mesh_id`` = the gateway): heads, relays, sensors."""
+    return [
+        dev
+        for dev in coordinator.data.values()
+        if dev.mesh_id == gateway.id and dev.id != gateway.id
+    ]
 
-    Each head's home is exact (per-home device list); the heads vote, a tie going to the earlier
-    home. A gateway carrying no head of a known home falls back to its own entry in the per-home
-    device lists, then to the first home (kept visible rather than dropped).
+
+def _gateway_home_gid(coordinator: DanfossCoordinator, gateway, home_gids: list[str]) -> str | None:
+    """Home of a gateway: the home of the sub-devices it carries (``mesh_id`` = the gateway).
+
+    Each sub-device's home is exact (per-home device list); they all vote (heads, relays, sensors:
+    a gateway may carry a boiler relay and no head), a tie going to the earlier home. A gateway
+    carrying nothing of a known home falls back to its own entry in the per-home device lists,
+    then to the first home (kept visible rather than dropped).
     """
     order = {gid: i for i, gid in enumerate(home_gids)}
     votes: dict[str, int] = {}
-    for dev in coordinator.data.values():
-        if dev.is_head and dev.mesh_id == gateway.id:
-            home = coordinator.head_home(dev.id)
-            if home in order:
-                votes[home] = votes.get(home, 0) + 1
+    for dev in _gateway_carried(coordinator, gateway):
+        home = coordinator.head_home(dev.id)
+        if home in order:
+            votes[home] = votes.get(home, 0) + 1
     if votes:
         return min(votes, key=lambda gid: (-votes[gid], order[gid]))
     own = coordinator.head_home(gateway.id)
     if own in order:
         return own
     return home_gids[0] if home_gids else None
+
+
+def _gateway_overview(coordinator: DanfossCoordinator, gateway) -> dict[str, Any]:
+    carried = _gateway_carried(coordinator, gateway)
+    return {
+        "device_id": gateway.id,
+        "name": gateway.name,
+        "online": gateway.online,
+        # What the gateway carries: tells why it sits under a home (e.g. no head, one relay).
+        "head_count": sum(1 for d in carried if d.is_head),
+        "relay_count": sum(1 for d in carried if d.is_relay),
+    }
 
 
 def overview_payload(store: dict) -> dict:
@@ -413,9 +434,7 @@ def overview_payload(store: dict) -> dict:
             if _relay_home_gid(coordinator, d, home_gids, home_by_name) == gid
         ]
         home_gateways = [
-            {"device_id": g.id, "name": g.name, "online": g.online}
-            for g in gateways
-            if gateway_home[g.id] == gid
+            _gateway_overview(coordinator, g) for g in gateways if gateway_home[g.id] == gid
         ]
         homes.append(
             {

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Building overview: a gateway's home is voted by everything it carries.** Since 1.2.0 a gateway
+  is listed under the home of its heads; relays and sensors now vote too, so a gateway that
+  carries only a boiler relay follows that relay's home instead of a fallback (seen on a real
+  install, 2026-11-20: the listing was already right there, by fallback). Each gateway of
+  `get_overview` also says what it carries (`head_count`, `relay_count`). No frontend change.
+  Not replayed on real hardware.
+
 ## 1.2.0 — Cloud-MQTT channel for isolated heads (gated), non-blocking local start, stale cleanup, reauth
 
 Minor release. It gathers the sections previously listed as unreleased: the gated cloud-MQTT write
