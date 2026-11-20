@@ -24,6 +24,18 @@
      "device_id": "Identifiant d'appareil (deviceId) — seulement s'il a changé",
      "ch_key": "Clé de canal (chKey) — seulement si elle a changé"
     }
+   },
+   "reconfigure": {
+    "title": "Reconfigurer Danfoss Ally (Cloud)",
+    "description": "Mettez à jour l'indicatif pays, le datacenter, le mot de passe ou les secrets d'installation. Laissez un champ secret vide pour conserver sa valeur actuelle.",
+    "data": {
+     "country_code": "Indicatif pays (ex. 33 pour la France)",
+     "region": "Datacenter (eu, us, cn, in)",
+     "password": "Mot de passe — seulement s'il a changé",
+     "sign_key": "Clé de signature (sign_key) — seulement si elle a changé",
+     "device_id": "Identifiant d'appareil (deviceId) — seulement s'il a changé",
+     "ch_key": "Clé de canal (chKey) — seulement si elle a changé"
+    }
    }
   },
   "error": {
@@ -34,6 +46,7 @@
   "abort": {
    "already_configured": "Ce compte est déjà configuré",
    "reauth_successful": "Reconnexion réussie",
+   "reconfigure_successful": "Reconfiguration réussie",
    "wrong_account": "Ce n'est pas le compte de cette entrée : connectez-vous avec le même compte, ou ajoutez l'autre compte comme nouvelle entrée"
   }
  },
@@ -693,6 +706,16 @@
   "action_type": {
    "set_temperature": "Régler la consigne de {entity_name}",
    "restore_schedule": "Rétablir le programme hebdomadaire"
+  }
+ },
+ "issues": {
+  "gateway_offline": {
+   "title": "Passerelle Danfoss Ally hors ligne : {name}",
+   "description": "La passerelle **{name}** est vue hors ligne par le cloud Danfoss. Ses têtes restent injoignables tant qu'elle ne s'est pas reconnectée."
+  },
+  "head_fault": {
+   "title": "Défaut matériel Danfoss Ally sur {name}",
+   "description": "La tête thermostatique **{name}** signale un ou plusieurs défauts actifs : **{faults}**. Vérifiez le montage, les piles ou le pointeau sur place."
   }
  }
 }

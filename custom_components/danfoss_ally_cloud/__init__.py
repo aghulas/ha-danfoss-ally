@@ -8,6 +8,8 @@ docs/architecture.md).
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -78,11 +80,33 @@ from .device_links import async_link_heads_to_rooms
 from .frontend import async_register_frontend, async_unregister_frontend
 from .mqtt_coverage import CoverageStats
 from .mqtt_publisher import MqttPublisher
+from .repairs import clear_repairs, sync_repairs
 from .services import async_register_services
 from .websocket_api import async_register as async_register_ws
 from .writejob import JobManager
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class DanfossRuntimeData:
+    """Typed runtime container stored on ``entry.runtime_data``."""
+
+    coordinator: DanfossCoordinator
+    local_coordinator: DanfossLocalCoordinator | None
+    mqtt_publisher: MqttPublisher | None
+    jobs: JobManager
+    schedules: dict[str, Any] = field(default_factory=dict)
+    vacation_write: bool = False
+    head_unbind: bool = False
+    cloud_mqtt: bool = False
+    mqtt_link: CloudMqttLink | None = None
+    mqtt_coverage: CoverageStats | None = None
+    mqtt_supervised_dps: frozenset[int] = field(default_factory=frozenset)
+    mqtt_supervised_head: str | None = None
+
+
+DanfossConfigEntry = ConfigEntry[DanfossRuntimeData]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -140,22 +164,44 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, entry, coordinator, gateways=gateways
     )
 
+    jobs = JobManager()
+    schedules: dict[str, Any] = {}
+    vacation_write = bool(
+        entry.options.get(CONF_ENABLE_VACATION_WRITE, DEFAULT_ENABLE_VACATION_WRITE)
+    )
+    head_unbind = bool(entry.options.get(CONF_ENABLE_HEAD_UNBIND, DEFAULT_ENABLE_HEAD_UNBIND))
+    cloud_mqtt = bool(entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT))
+    trial = _supervised_trial(entry)
+
+    entry.runtime_data = DanfossRuntimeData(
+        coordinator=coordinator,
+        local_coordinator=local_coordinator,
+        mqtt_publisher=publisher,
+        jobs=jobs,
+        schedules=schedules,
+        vacation_write=vacation_write,
+        head_unbind=head_unbind,
+        cloud_mqtt=cloud_mqtt,
+        mqtt_link=mqtt_link,
+        mqtt_coverage=mqtt_coverage,
+        mqtt_supervised_dps=trial[DATA_MQTT_SUPERVISED_DPS],  # type: ignore[arg-type]
+        mqtt_supervised_head=trial[DATA_MQTT_SUPERVISED_HEAD],  # type: ignore[arg-type]
+    )
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         DATA_COORDINATOR: coordinator,
         DATA_LOCAL: local_coordinator,
         DATA_MQTT: publisher,
-        DATA_JOBS: JobManager(),
-        DATA_SCHEDULES: {},
-        DATA_VACATION_WRITE: entry.options.get(
-            CONF_ENABLE_VACATION_WRITE, DEFAULT_ENABLE_VACATION_WRITE
-        ),
-        DATA_HEAD_UNBIND: entry.options.get(CONF_ENABLE_HEAD_UNBIND, DEFAULT_ENABLE_HEAD_UNBIND),
-        DATA_CLOUD_MQTT: entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT),
+        DATA_JOBS: jobs,
+        DATA_SCHEDULES: schedules,
+        DATA_VACATION_WRITE: vacation_write,
+        DATA_HEAD_UNBIND: head_unbind,
+        DATA_CLOUD_MQTT: cloud_mqtt,
         # Live MQTT link: present only when enable_cloud_mqtt or cloud_mqtt_probe is on (both OFF
         # by default). The switches treat None as "no cloud-MQTT path", and a listen-only link
         # (probe without the write option) refuses every publish.
         DATA_MQTT_LINK: mqtt_link,
-        **_supervised_trial(entry),
+        **trial,
         DATA_MQTT_COVERAGE: mqtt_coverage,
     }
     await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
@@ -167,11 +213,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Head -> room device links (via_device_id), now that the devices exist, then on each
     # update so attach / detach follows.
     async_link_heads_to_rooms(hass, coordinator, entry.entry_id)
+    sync_repairs(hass, entry.entry_id, coordinator.data)
 
     @callback
     def _relink_heads() -> None:
         _cleanup_orphaned_head_climates(hass, entry, coordinator)
         async_link_heads_to_rooms(hass, coordinator, entry.entry_id)
+        sync_repairs(hass, entry.entry_id, coordinator.data)
 
     entry.async_on_unload(coordinator.async_add_listener(_relink_heads))
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
@@ -399,6 +447,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload an entry (close session, tunnel, MQTT publisher)."""
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
+        clear_repairs(hass, entry.entry_id)
         data = hass.data[DOMAIN].pop(entry.entry_id, None)
         if data:
             publisher: MqttPublisher | None = data.get(DATA_MQTT)
