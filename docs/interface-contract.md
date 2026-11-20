@@ -893,7 +893,9 @@ stable.
   they differ, it offers to reload the page.
 - Declared elements: `danfoss-ally-schedule-card` (Schedule card) and, since 0.6.0 (axis D),
   `danfoss-ally-room-card` (Room card, §8) and the `danfoss-ally-panel` side panel (§8).
-- The frontend calls **only** the commands of section 5.3 and the entities; never the cloud.
+- The frontend calls **only** the commands of section 5.3 and the entities; never the cloud. It
+  also reads the frontend registries (`hass.states`, `hass.entities`, `hass.devices`,
+  `hass.areas`) for the area view (§8.3).
 - A non-administrator user (`is_admin` false) sees the cards read-only.
 
 ## 7. Out of contract for now
@@ -911,6 +913,7 @@ Axis B (0.5.0) brought holiday **read** (§4.5), the boiler relay **read** + roo
 - **Firmware management.** The subject of a later addition.
 
 Axis D (0.6.0) brought the **UI layer** into contract: the per-room card and the side panel (§8).
+1.3.0 extended both to climate entities of other integrations, grouped by Home Assistant area (§8.3).
 
 ## 8. UI layer (axis D, 0.6.0)
 
@@ -921,7 +924,8 @@ adds **no new cloud/local write primitive**. Its only writes reuse already-valid
 
 ### 8.1 Room card (`danfoss-ally-room-card`)
 
-One room at a glance and its day-to-day actions. Configured by `room_id` (= `group_id`). Reads
+One room at a glance and its day-to-day actions. Configured by `room_id` (= `group_id`), or by
+`area_id` (§8.3). Reads
 `room/get` (Room §3.4 + Schedule §3.2) and subscribes to `jobs/subscribe`.
 
 - **Shows**: room name; current temperature, mode and active setpoint; comfort / setback chips; a
@@ -949,3 +953,45 @@ sidebar entry; `require_admin` is false (read-only view). Reads `overview` (§3.
   have none); the boiler relays (on/off, online, number of rooms calling for heat). A
   totals header gives building-wide health at a glance.
 - Read-only: it surfaces state and links out; any change is made from the room card or the entities.
+
+### 8.3 Any climate, by Home Assistant area (1.3.0)
+
+The room card and the panel also show `climate` entities of **other integrations** (for example
+Danfoss heads paired directly to Zigbee2MQTT), so one interface covers both. Everything below is
+read from the frontend registries; no WebSocket command is added.
+
+- **Area membership**: an entity's own `area_id`, else its device's. Hidden entities are skipped.
+  An entity is "of this integration" when its registry `platform` is `danfoss_ally_cloud`.
+- **Room card with `area_id`**:
+  - The Ally room of the area is the first room (`rooms` order) whose `climate_entity_id` sits in
+    the area; `room_id`, when also given, takes precedence. That room keeps all of §8.1 (schedule
+    strip, comfort / setback, back to schedule, write jobs, its own setpoint rules).
+  - Every other climate of the area is a row: name, current temperature (`current_temperature`,
+    else a non-diagnostic temperature sensor of the same device), target temperature,
+    `hvac_action`, availability. A climate of this integration other than the room's (an isolated
+    head, a second room) is a **read-only** row: no generic write ever reaches it.
+  - **Per-head extras**, from the other entities of the climate's **device** (never another
+    device), matched by `device_class` first, then by key (translation key, or the entity id
+    equal to or ending in `_<key>`), unavailable states ignored: battery (`sensor` device class
+    `battery`, or key `battery`; low at ≤ 10 % or a `binary_sensor` device class `battery` /
+    `battery_low` on), valve opening (`pi_heating_demand`, `valve_opening`), window
+    (`binary_sensor` device class `window`, `window_open_internal` in `open` / `external_open`, or
+    `window_open_external` on), heat demand (`heat_required`), link quality (`linkquality`).
+  - **Write**: the only one is `climate.set_temperature` on a climate **not** of this integration,
+    **off by default**: offered only when the card config has `allow_foreign_writes: true`, the
+    user is an administrator (`info.is_admin`, else the frontend user), the climate is not a
+    Danfoss Ally head seen through another integration (registry `platform` in
+    `DUPLICATE_PLATFORMS`, today `danfoss_ally`: same heads, through a channel this integration
+    has not proven), and the climate is available, not `off`, supports a single target
+    temperature (feature bit 1) and has one. The value moves by `target_temp_step` (default 0.5) and stays within `min_temp` /
+    `max_temp`; the button is disabled at a bound. One send at a time per card, no optimistic
+    state (Home Assistant pushes the new state).
+- **Panel, other areas**: below the homes, one tile per area holding climates of other
+  integrations (climates of this integration excluded): count, mean measured temperature, target
+  (or its range), heating / offline / low-battery / open-window counts. Read only. A toggle in the
+  panel header shows or hides the section; **hidden by default** (where another integration also
+  drives the Ally heads, it would list them all a second time), remembered per browser
+  (`localStorage`, best-effort).
+- **Areas of this integration's devices**: the Ally room of an area is found through its room
+  thermostat's area. An install whose Ally devices have no area shows no Ally section in an area
+  card; give the devices an area first.

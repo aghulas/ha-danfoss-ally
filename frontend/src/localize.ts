@@ -143,6 +143,32 @@ const STRINGS = {
     room_ok: "OK",
     room_single_head: "Single head, no group",
     room_named_after_head: "Room not found in the app: head's name",
+    // --- Carte par zone, autres zones du panneau (§8.3) ---
+    pick_area: "Area (any thermostat)",
+    allow_foreign_writes: "Allow setpoint changes on thermostats of other integrations",
+    allow_foreign_writes_hint:
+      "Off by default: those thermostats are then read only. Administrators only, and never for a Danfoss Ally head seen through another integration.",
+    pick_hint: "Pick a Danfoss Ally room, or a Home Assistant area to show every thermostat in it.",
+    areas_unavailable: "No area holds a thermostat.",
+    unknown_area: "Unknown area ({id})",
+    area_ally_room: "Danfoss Ally room: {name}",
+    area_climates: "Thermostats",
+    area_other_climates: "Other thermostats in this area",
+    area_no_climate: "No thermostat in this area.",
+    area_ally_climate: "Danfoss Ally: set from its room card",
+    climate_write_failed: "{name}: the setpoint could not be sent",
+    head_heat_required: "Heat required",
+    head_linkquality: "Link quality {value}",
+    action_heating: "Heating",
+    action_preheating: "Preheating",
+    action_idle: "Idle",
+    action_off: "Off",
+    panel_other_areas: "Other thermostats by area",
+    panel_other_areas_hint: "Climate entities of other integrations, grouped by Home Assistant area. Read only.",
+    panel_show_other_areas: "Other areas",
+    panel_no_other_areas: "No area holds a thermostat of another integration.",
+    area_thermostats_n: "{n} thermostats",
+    area_heating_n: "{n} heating",
   },
   fr: {
     card_name: "Danfoss Ally — Programme",
@@ -281,6 +307,32 @@ const STRINGS = {
     room_ok: "OK",
     room_single_head: "Tête seule, sans groupe",
     room_named_after_head: "Pièce de l'app non retrouvée : nom de la tête",
+    // --- Carte par zone, autres zones du panneau (§8.3) ---
+    pick_area: "Zone (tout thermostat)",
+    allow_foreign_writes: "Autoriser le réglage de la consigne des thermostats d'autres intégrations",
+    allow_foreign_writes_hint:
+      "Désactivé par défaut : ces thermostats sont alors en lecture seule. Réservé aux administrateurs, et jamais pour une tête Danfoss Ally vue par une autre intégration.",
+    pick_hint: "Choisissez une pièce Danfoss Ally, ou une zone Home Assistant pour en montrer tous les thermostats.",
+    areas_unavailable: "Aucune zone ne contient de thermostat.",
+    unknown_area: "Zone inconnue ({id})",
+    area_ally_room: "Pièce Danfoss Ally : {name}",
+    area_climates: "Thermostats",
+    area_other_climates: "Autres thermostats de la zone",
+    area_no_climate: "Aucun thermostat dans cette zone.",
+    area_ally_climate: "Danfoss Ally : se règle depuis sa carte pièce",
+    climate_write_failed: "{name} : la consigne n'a pas pu être envoyée",
+    head_heat_required: "Demande de chauffe",
+    head_linkquality: "Qualité du lien {value}",
+    action_heating: "Chauffe",
+    action_preheating: "Préchauffe",
+    action_idle: "Au repos",
+    action_off: "Arrêt",
+    panel_other_areas: "Autres thermostats par zone",
+    panel_other_areas_hint: "Entités climate des autres intégrations, regroupées par zone Home Assistant. Lecture seule.",
+    panel_show_other_areas: "Autres zones",
+    panel_no_other_areas: "Aucune zone ne contient de thermostat d'une autre intégration.",
+    area_thermostats_n: "{n} thermostats",
+    area_heating_n: "{n} en chauffe",
   },
 } satisfies Record<"en" | "fr", Dict>;
 
@@ -338,6 +390,19 @@ const MODE_KEYS: Record<string, StringKey> = {
 export function modeLabel(hass: HassLike | undefined, mode: string | null | undefined): string {
   const key = mode ? MODE_KEYS[mode] : undefined;
   return key ? t(hass, key) : (mode ?? "—");
+}
+
+const ACTION_KEYS: Record<string, StringKey> = {
+  heating: "action_heating",
+  preheating: "action_preheating",
+  idle: "action_idle",
+  off: "action_off",
+};
+
+/** Libellé localisé d'un `hvac_action` ; une valeur inconnue retombe sur sa valeur brute. */
+export function actionLabel(hass: HassLike | undefined, action: string): string {
+  const key = ACTION_KEYS[action];
+  return key ? t(hass, key) : action;
 }
 
 const ERROR_KEYS = new Set<StringKey>([

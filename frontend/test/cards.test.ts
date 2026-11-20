@@ -6,9 +6,12 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { DanfossAllyPanel } from "../src/panel";
 import { DanfossAllyRoomCard } from "../src/room-card";
+import { DanfossAllyRoomCardEditor } from "../src/room-card-editor";
 import { DanfossAllyScheduleCard } from "../src/schedule-card";
-import type { DayKey, HassLike, Schedule, TimeRange, WriteJob } from "../src/types";
+import type { DayKey, HassLike, RoomCardConfig, Schedule, TimeRange, WriteJob } from "../src/types";
+import { building } from "./area-fixture";
 
 const r = (start: string, end: string): TimeRange => ({ start, end });
 
@@ -565,6 +568,231 @@ describe("carte pièce", () => {
     expect(sent).toEqual([{ entity_id: "climate.salle", temperature: 21 }]);
     expect(el._error).not.toBeNull();
     expect(el._room.setpoint).toBe(20.5);
+  });
+});
+
+describe("carte pièce par zone", () => {
+  function areaHass(isAdmin = true): {
+    hass: HassLike;
+    calls: Record<string, unknown>[];
+    sent: Record<string, unknown>[];
+  } {
+    const sent: Record<string, unknown>[] = [];
+    const { hass, calls } = fakeHass(
+      {
+        rooms: () => ({
+          rooms: [
+            {
+              id: "13000000",
+              name: "Salle Ally",
+              product_id: "synthetic00",
+              heads: [],
+              comfort: 21,
+              setback: 16,
+              setpoint: 21,
+              mode: "at_home",
+              writable: true,
+              climate_entity_id: "climate.bureau",
+            },
+          ],
+        }),
+        "schedule/get": (msg) => schedule((msg.target as { id: string }).id, []),
+      },
+      isAdmin,
+    );
+    Object.assign(hass, building());
+    hass.callService = async (domain, service, data) => {
+      sent.push({ domain, service, ...(data ?? {}) });
+    };
+    return { hass, calls, sent };
+  }
+
+  async function loaded(hass: HassLike, config: RoomCardConfig): Promise<Internals> {
+    const el = new DanfossAllyRoomCard() as Internals;
+    el.setConfig(config);
+    el.hass = hass;
+    el._loaded = true;
+    await el._load();
+    return el;
+  }
+
+  it("une zone qui contient une pièce Ally garde la pièce et son programme", async () => {
+    const { hass, calls } = areaHass();
+    const el = await loaded(hass, { area_id: "bureau" });
+    expect(el._roomId).toBe("13000000");
+    expect(el._room.name).toBe("Salle Ally");
+    expect(el._schedule.target.id).toBe("13000000");
+    expect(calls.filter((c) => c.type === "danfoss_ally_cloud/schedule/get")).toHaveLength(1);
+    // Les lots de la pièce de la zone sont suivis.
+    el._onJob(job("13000000"));
+    expect(el._job?.target.id).toBe("13000000");
+    // La ligne « autres thermostats » ne reprend pas le thermostat de la pièce.
+    const text = templateText(el._renderAreaClimates(el._room));
+    expect(text).toContain("bureau_tete");
+    expect(text).not.toContain(">Bureau<");
+  });
+
+  it("une zone sans pièce Ally ne lit aucun programme et liste ses climates", async () => {
+    const { hass, calls } = areaHass();
+    const el = await loaded(hass, { area_id: "salon" });
+    expect(el._roomId).toBeUndefined();
+    expect(el._schedule).toBeNull();
+    expect(calls.some((c) => c.type === "danfoss_ally_cloud/schedule/get")).toBe(false);
+    const text = templateText(el._renderAreaClimates(undefined));
+    expect(text).toContain("salon_fenetre");
+    expect(text).toContain("salon_porte");
+    expect(el._title(undefined)).toBe("Salon");
+  });
+
+  it("± sur un climate hors Ally : set_temperature au pas, un seul envoi à la fois", async () => {
+    const { hass, sent } = areaHass();
+    const el = await loaded(hass, { area_id: "salon", allow_foreign_writes: true });
+    const a = el._adjustClimate("climate.salon_fenetre", 1);
+    const b = el._adjustClimate("climate.salon_fenetre", 1);
+    await Promise.all([a, b]);
+    expect(sent).toEqual([
+      {
+        domain: "climate",
+        service: "set_temperature",
+        entity_id: "climate.salon_fenetre",
+        temperature: 20.5,
+      },
+    ]);
+  });
+
+  it("aucune écriture générique sur un climate Ally, indisponible, ou sans droits", async () => {
+    const admin = areaHass();
+    const el = await loaded(admin.hass, { area_id: "bureau", allow_foreign_writes: true });
+    await el._adjustClimate("climate.bureau", 1);
+    await el._adjustClimate("climate.salon_porte", 1);
+    expect(admin.sent).toEqual([]);
+
+    const user = areaHass(false);
+    const ro = await loaded(user.hass, { area_id: "salon", allow_foreign_writes: true });
+    await ro._adjustClimate("climate.salon_fenetre", 1);
+    expect(user.sent).toEqual([]);
+  });
+
+  it("sans `allow_foreign_writes`, la carte est en lecture seule pour les autres intégrations", async () => {
+    const { hass, sent } = areaHass();
+    const el = await loaded(hass, { area_id: "salon" });
+    await el._adjustClimate("climate.salon_fenetre", 1);
+    expect(sent).toEqual([]);
+    expect(el._canWriteForeign).toBe(false);
+  });
+
+  it("une tête Ally vue par une autre intégration n'est jamais écrite, même autorisée", async () => {
+    const { hass, sent } = areaHass();
+    const entry = (hass.entities as Record<string, { platform?: string }>)["climate.salon_fenetre"];
+    entry.platform = "danfoss_ally";
+    const el = await loaded(hass, { area_id: "salon", allow_foreign_writes: true });
+    await el._adjustClimate("climate.salon_fenetre", 1);
+    expect(sent).toEqual([]);
+  });
+
+  it("sans `info`, le droit d'écrire vient de l'utilisateur du frontend", async () => {
+    const { hass, sent } = areaHass();
+    const el = await loaded(hass, { area_id: "salon", allow_foreign_writes: true });
+    el._info = null;
+    hass.user = { is_admin: false };
+    await el._adjustClimate("climate.salon_fenetre", 1);
+    expect(sent).toEqual([]);
+    hass.user = { is_admin: true };
+    await el._adjustClimate("climate.salon_fenetre", 1);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("un échec d'écriture s'affiche avec le nom du climate", async () => {
+    const { hass } = areaHass();
+    hass.callService = async () => {
+      throw new Error("refusé");
+    };
+    const el = await loaded(hass, { area_id: "salon", allow_foreign_writes: true });
+    await el._adjustClimate("climate.salon_fenetre", -1);
+    expect(el._error).toContain("salon_fenetre");
+    expect(el._busyClimate).toBeNull();
+  });
+
+  it("passer d'une zone à une autre jette le programme de l'ancienne pièce", async () => {
+    const { hass } = areaHass();
+    const el = await loaded(hass, { area_id: "bureau" });
+    expect(el._schedule).not.toBeNull();
+    el.setConfig({ area_id: "salon" });
+    expect(el._schedule).toBeNull();
+    await flush();
+    expect(el._schedule).toBeNull();
+  });
+
+  it("une zone inconnue le dit", async () => {
+    const { hass } = areaHass();
+    const el = await loaded(hass, { area_id: "grenier" });
+    expect(el._title(undefined)).toContain("grenier");
+  });
+});
+
+describe("éditeur de la carte pièce", () => {
+  it("choisir une zone retire la pièce, et inversement", () => {
+    const el = new DanfossAllyRoomCardEditor() as Internals;
+    const emitted: RoomCardConfig[] = [];
+    el.dispatchEvent = (ev: CustomEvent<{ config: RoomCardConfig }>) => {
+      emitted.push(ev.detail.config);
+      return true;
+    };
+    el.setConfig({ type: "custom:danfoss-ally-room-card", room_id: "13000000" });
+    el._pick("area_id", "salon");
+    el._pick("room_id", "13000001");
+    expect(emitted).toEqual([
+      { type: "custom:danfoss-ally-room-card", area_id: "salon" },
+      { type: "custom:danfoss-ally-room-card", room_id: "13000001" },
+    ]);
+  });
+
+  it("ne propose que les zones qui contiennent un climate", () => {
+    const el = new DanfossAllyRoomCardEditor() as Internals;
+    el.hass = { callWS: async () => ({}), ...building() };
+    expect(el._areas.map((a: { area_id: string }) => a.area_id)).toEqual(["bureau", "salon"]);
+  });
+});
+
+describe("panneau — autres zones", () => {
+  it("résume les zones des climates d'autres intégrations, sans ceux de l'intégration", () => {
+    const el = new DanfossAllyPanel() as Internals;
+    el.hass = { callWS: async () => ({}), language: "en", ...building() };
+    const text = templateText(el._renderOtherAreas());
+    expect(text).toContain("Salon");
+    expect(text).toContain("Bureau");
+    expect(text).toContain("1 offline");
+    expect(text).toContain("1 low battery");
+    // Bureau : seule la tête Zigbee2MQTT compte (1×), pas le thermostat de pièce Ally.
+    expect(text).toMatch(/Bureau[\s\S]*1×/);
+  });
+
+  it("le bouton masque la section, et le choix se garde dans le navigateur", () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    });
+    const el = new DanfossAllyPanel() as Internals;
+    expect(el._showOtherAreas).toBe(false); // masquée par défaut
+    el._toggleOtherAreas();
+    expect(el._showOtherAreas).toBe(true);
+    expect(new DanfossAllyPanel()["_showOtherAreas" as keyof DanfossAllyPanel]).toBe(true);
+  });
+
+  it("sans stockage (navigation privée), la section reste masquée", () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    });
+    const el = new DanfossAllyPanel() as Internals;
+    expect(el._showOtherAreas).toBe(false);
+    el._toggleOtherAreas();
+    expect(el._showOtherAreas).toBe(true);
   });
 });
 

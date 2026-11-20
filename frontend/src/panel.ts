@@ -10,10 +10,16 @@
  * les autres. Un bandeau de totaux donne la santé du bâtiment
  * d'un coup d'œil. N'appelle que la commande WebSocket `overview` (§5.3), jamais le
  * cloud, et se dégrade proprement.
+ *
+ * Sous les pièces de l'intégration, une section « autres zones » (§8.3, affichable
+ * ou non par un bouton, affichée par défaut) résume, zone HA par zone, les `climate`
+ * des AUTRES intégrations (p. ex. des têtes appairées à Zigbee2MQTT), lus dans les
+ * registres du frontend. Lecture seule, comme le reste du panneau.
  */
 import { LitElement, type TemplateResult, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
+import { type AreaClimates, areaClimateLine, areaSummary, areasWithClimates } from "./area";
 import { climateLine, headNameHint, isHealthy, isSingleHead, namedAfterHead } from "./fleet";
 import { t } from "./localize";
 import type { FleetHome, FleetOverview, FleetRelay, FleetRoom, HassLike } from "./types";
@@ -28,6 +34,7 @@ export class DanfossAllyPanel extends LitElement {
   @state() private _overview: FleetOverview | null = null;
   @state() private _loaded = false;
   @state() private _refreshing = false;
+  @state() private _showOtherAreas = readShowOtherAreas();
 
   protected updated(changed: Map<string, unknown>): void {
     if (changed.has("hass") && this.hass && !this._loaded) {
@@ -57,17 +64,33 @@ export class DanfossAllyPanel extends LitElement {
     }
   }
 
+  private _toggleOtherAreas(): void {
+    this._showOtherAreas = !this._showOtherAreas;
+    writeShowOtherAreas(this._showOtherAreas);
+  }
+
   protected render(): TemplateResult {
     const overview = this._overview;
     return html`
       <div class="page">
         <header class="bar">
           <h1>${t(this.hass, "panel_title")}</h1>
-          <button class="refresh" @click=${this._refresh} ?disabled=${this._refreshing}>
-            ${t(this.hass, "refresh")}
-          </button>
+          <span class="bar-actions">
+            <button
+              class="refresh toggle ${this._showOtherAreas ? "on" : ""}"
+              role="switch"
+              aria-checked=${this._showOtherAreas ? "true" : "false"}
+              @click=${this._toggleOtherAreas}
+            >
+              ${t(this.hass, "panel_show_other_areas")}
+            </button>
+            <button class="refresh" @click=${this._refresh} ?disabled=${this._refreshing}>
+              ${t(this.hass, "refresh")}
+            </button>
+          </span>
         </header>
         ${overview ? this._renderBody(overview) : this._renderUnavailable()}
+        ${this._showOtherAreas ? this._renderOtherAreas() : nothing}
         <footer class="foot">${t(this.hass, "version", { version: CARD_VERSION })}</footer>
       </div>
     `;
@@ -163,6 +186,46 @@ export class DanfossAllyPanel extends LitElement {
     `;
   }
 
+  /** Zones qui contiennent des climates d'autres intégrations (lecture seule). */
+  private _renderOtherAreas(): TemplateResult {
+    const areas = this.hass ? areasWithClimates(this.hass, true) : [];
+    return html`
+      <section class="home other-areas">
+        <div class="home-head">
+          <h2>${t(this.hass, "panel_other_areas")}</h2>
+        </div>
+        <div class="room-sub wrap">${t(this.hass, "panel_other_areas_hint")}</div>
+        ${areas.length === 0
+          ? html`<div class="unavailable">${t(this.hass, "panel_no_other_areas")}</div>`
+          : html`<div class="rooms">${areas.map((area) => this._renderArea(area))}</div>`}
+      </section>
+    `;
+  }
+
+  private _renderArea(area: AreaClimates): TemplateResult {
+    const sum = areaSummary(this.hass as HassLike, area.entity_ids);
+    const line = areaClimateLine(sum);
+    const healthy = sum.offline === 0 && sum.low_battery === 0 && sum.window_open === 0;
+    return html`
+      <div class="room ${healthy ? "ok" : "attn"}">
+        <div class="room-top">
+          <span class="room-name" title=${area.name}>${area.name}</span>
+          <span class="heads-count">${sum.count}×</span>
+        </div>
+        ${line ? html`<div class="room-climate">${line}</div>` : nothing}
+        <div class="flags">
+          ${sum.heating
+            ? html`<span class="flag hot">${t(this.hass, "area_heating_n", { n: sum.heating })}</span>`
+            : nothing}
+          ${sum.window_open ? html`<span class="flag warn">${t(this.hass, "room_window")}</span>` : nothing}
+          ${sum.offline ? html`<span class="flag warn">${t(this.hass, "room_offline_n", { n: sum.offline })}</span>` : nothing}
+          ${sum.low_battery ? html`<span class="flag warn">${t(this.hass, "room_low_battery_n", { n: sum.low_battery })}</span>` : nothing}
+          ${healthy ? html`<span class="flag ok">${t(this.hass, "room_ok")}</span>` : nothing}
+        </div>
+      </div>
+    `;
+  }
+
   private _renderRelay(relay: FleetRelay): TemplateResult {
     // An offline relay's on/off is its last known (stale) state: show it as offline, not "On".
     const offline = relay.online === false;
@@ -211,6 +274,20 @@ export class DanfossAllyPanel extends LitElement {
       color: var(--primary-text-color);
       font: inherit;
       font-size: 0.85rem;
+    }
+    .bar-actions {
+      display: inline-flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .toggle.on {
+      background: var(--primary-color, #03a9f4);
+      border-color: var(--primary-color, #03a9f4);
+      color: var(--text-primary-color, #fff);
+    }
+    .room-sub.wrap {
+      white-space: normal;
+      margin: -4px 0 10px;
     }
     .refresh:disabled {
       opacity: 0.6;
@@ -419,6 +496,29 @@ export class DanfossAllyPanel extends LitElement {
       margin-top: 12px;
     }
   `;
+}
+
+/**
+ * Préférence locale du bouton « autres zones » (confort par navigateur). Défaut :
+ * masquée, car sur une installation où une autre intégration pilote aussi les têtes Ally,
+ * la section les montrerait toutes une seconde fois.
+ */
+const OTHER_AREAS_KEY = "danfoss-ally-panel.show-other-areas";
+
+export function readShowOtherAreas(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(OTHER_AREAS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeShowOtherAreas(show: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(OTHER_AREAS_KEY, show ? "1" : "0");
+  } catch {
+    // Stockage indisponible (navigation privée) : le choix vaut pour la session.
+  }
 }
 
 declare global {

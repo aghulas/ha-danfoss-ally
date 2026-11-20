@@ -35,7 +35,7 @@ const CARDS: CustomCardEntry[] = [
     type: "danfoss-ally-room-card",
     name: "Danfoss Ally — Pièce / Room",
     description:
-      "Une pièce Danfoss Ally : climat, programme, têtes et actions. / A Danfoss Ally room: climate, schedule, thermostats and actions.",
+      "Une pièce Danfoss Ally ou une zone (tout thermostat) : climat, programme, têtes et actions. / A Danfoss Ally room or an area (any thermostat): climate, schedule, thermostats and actions.",
     preview: false,
     documentationURL: DOC_URL,
   },
