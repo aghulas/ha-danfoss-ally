@@ -26,6 +26,9 @@ DP_PREHEAT = 1
 DP_CHILD_LOCK = 30
 DP_WINDOW_DETECT = 116
 DP_HEAT_DEMAND = 162
+DP_VIEWING_DIRECTION = 101  # ViewingDirection (bool): display orientation of the head
+DP_ORIENTATION = 133  # vertical_mounting (enum "Horizontal" / "Vertical")
+ORIENTATION_VALUES = ("Horizontal", "Vertical")  # exact strings of the app's frame
 
 # Setpoint write: current mode (DP 2) -> DP of the setting to write.
 # Proven on real hardware: writing DP16 temp_set DOES NOT HOLD on a head on schedule (the schedule

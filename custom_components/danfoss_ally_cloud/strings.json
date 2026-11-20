@@ -184,6 +184,9 @@
       },
       "preheat": {
         "name": "Pre-heating"
+      },
+      "viewing_direction": {
+        "name": "Viewing direction"
       }
     },
     "number": {
@@ -201,6 +204,15 @@
       },
       "pause_setpoint": {
         "name": "Pause setpoint"
+      }
+    },
+    "select": {
+      "orientation_setting": {
+        "name": "Mounting orientation",
+        "state": {
+          "horizontal": "Horizontal",
+          "vertical": "Vertical"
+        }
       }
     }
   },

@@ -99,6 +99,17 @@ cloud's value were back to the cloud's value by about 05:00, with no write from 
   after a preheat survey; on a large site that pass delays the next preheat survey once a day.
   Each value carries the time it was read. Not yet seen on a real install.
 
+- **Supervised trial of two new head settings over Tuya cloud MQTT, closed by default**:
+  viewing direction (DP 101) and orientation (DP 133, mounting vertical / horizontal), written as
+  the Danfoss app does for an isolated head. They can be ticked in `cloud_mqtt_supervised_dps`
+  like preheat; only then, on the designated isolated head, a config `switch` "Viewing direction"
+  and a config `select` "Mounting orientation" appear (removed again when the trial is disarmed).
+  The values are checked before sending (a boolean; exactly `"Vertical"` or `"Horizontal"`), the
+  gateway's echo is never taken as confirmation: orientation is read back through the local
+  tunnel (attribute `0x4014`, also the select's state), viewing direction through the per-device
+  cloud route. Each attempt is reported in `trial_result`. **Not validated on real hardware**;
+  procedure in `docs/viewing-orientation-trial.md`.
+
 ### Changed
 
 - The head's battery sensor is now in the diagnostic category, as in Zigbee2MQTT. Its entity id

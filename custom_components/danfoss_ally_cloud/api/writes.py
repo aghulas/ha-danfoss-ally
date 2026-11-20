@@ -7,7 +7,7 @@ before sending and from entities being unavailable rather than lying (see CLAUDE
 from __future__ import annotations
 
 from .client import CloudWriteError
-from .const import WRITE_VERIFIED_PRODUCTS
+from .const import ORIENTATION_VALUES, WRITE_VERIFIED_PRODUCTS
 from .decode import DanfossDevice
 
 
@@ -35,18 +35,29 @@ def write_allowed(dev: DanfossDevice) -> bool:
 # app. DP 16 also sets the head's current setpoint at once; the head returns to its schedule's
 # value by itself within five minutes (contract §4.2).
 MQTT_WRITE_DPS = frozenset({30, 116, 18, 27, 120, 118, 16, 119})
-# 1 preheat (see below). Contract §4.2. Its supervised trial has not been run yet.
-MQTT_CANDIDATE_DPS = frozenset({1})
+# 1 preheat (see below), 101 viewing direction and 133 orientation (mounting vertical /
+# horizontal), the three as the app publishes them for an isolated head (contract §4.2). None of
+# their supervised trials has passed yet (101 and 133: docs/viewing-orientation-trial.md).
+MQTT_CANDIDATE_DPS = frozenset({1, 101, 133})
 # DPs whose write the gateway's echo and the cloud read CANNOT confirm: both may answer from the
 # gateway's cache while the head has not changed. DP 1 (preheat) is the known case: over HTTP it
 # only ever changed that cache; the head's real preheat is bit 1 of Zigbee attribute 0x0025. A
 # write of such a DP is confirmed only by reading the head through the local tunnel, so a caller
-# without a tunnel read must not send it (docs/cloud-mqtt-preheat-proposal.md).
-MQTT_TUNNEL_CONFIRMED_DPS = frozenset({1})
+# without a tunnel read must not send it (docs/cloud-mqtt-preheat-proposal.md). DP 133 is in the
+# same case by caution: the head's orientation flag (Danfoss attribute 0x4014) is read through
+# the tunnel, so that read, not the cloud's echo of the label, is what confirms it.
+MQTT_TUNNEL_CONFIRMED_DPS = frozenset({1, 133})
+# DPs whose write the gateway's ECHO cannot confirm, and that have no tunnel read: confirmed only
+# by the per-device cloud route, read until it shows the value. DP 101 (viewing direction) lives
+# in the user-interface cluster, which the tunnel does not read. The cloud's value is still the
+# gateway's view: the trial's proof is the head's display (docs/viewing-orientation-trial.md).
+MQTT_CLOUD_CONFIRMED_DPS = frozenset({101})
+# Exact string values of the enum DPs of this path (the app's frame, product schema 03wvrwpv).
+MQTT_ENUM_VALUES: dict[int, tuple[str, ...]] = {133: ORIENTATION_VALUES}
 
 # Value rule of each DP this path knows: booleans, or tenths of °C within the product schema's
 # range for that DP (03wvrwpv), on its 0.5 °C step.
-_MQTT_BOOL_DPS = frozenset({30, 116, 1})
+_MQTT_BOOL_DPS = frozenset({30, 116, 1, 101})
 MQTT_TENTHS_RANGE: dict[int, tuple[int, int]] = {
     18: (200, 350),  # upper_temp: 20-35 °C
     27: (50, 200),  # lower_temp: 5-20 °C
@@ -67,7 +78,7 @@ def mqtt_dp_open(dp: int, supervised: frozenset[int] = frozenset()) -> bool:
 
 def mqtt_write_value(
     dp: int, value: object, supervised: frozenset[int] = frozenset()
-) -> bool | int:
+) -> bool | int | str:
     """Validate a value destined for the cloud-MQTT write path and return it as it must be sent.
     Raises CloudWriteError when the DP is not open on this path, or the value is not of the DP's
     type, range or step (a clear error, never a blind send)."""
@@ -81,6 +92,12 @@ def mqtt_write_value(
     if dp in _MQTT_BOOL_DPS:
         if not isinstance(value, bool):
             raise CloudWriteError(f"DP {dp} expects a boolean, got {type(value).__name__}")
+        return value
+    if dp in MQTT_ENUM_VALUES:
+        allowed = MQTT_ENUM_VALUES[dp]
+        # Exact string, case included: the app sends "Vertical" / "Horizontal", nothing else.
+        if not isinstance(value, str) or value not in allowed:
+            raise CloudWriteError(f"DP {dp} expects one of {', '.join(allowed)}, got {value!r}")
         return value
     if dp in MQTT_TENTHS_RANGE:
         low, high = MQTT_TENTHS_RANGE[dp]

@@ -17,15 +17,18 @@ from .api.const import (  # noqa: F401 - re-export for the integration (device/p
     DP_LEAVING_HOME_SETPOINT,
     DP_LOWER_TEMP,
     DP_MANUAL_SETPOINT,
+    DP_ORIENTATION,
     DP_PAUSE_SETPOINT,
     DP_PREHEAT,
     DP_SETBACK_SETPOINT,
     DP_SETPOINT,
     DP_TEMP_SET,
     DP_UPPER_TEMP,
+    DP_VIEWING_DIRECTION,
     DP_WINDOW_DETECT,
     MODE_GROUP_SETPOINT_DP,
     MODE_SETPOINT_DP,
+    ORIENTATION_VALUES,
     SETPOINT_MAX,
     SETPOINT_MIN,
     SETPOINT_STEP,
@@ -38,7 +41,7 @@ DOMAIN = "danfoss_ally_cloud"
 
 # Exposed platforms. v0.2: climate (setpoint) + sensors + switch (child lock, window detection).
 # number comes with other numeric settings (max setpoint...).
-PLATFORMS = ["climate", "sensor", "binary_sensor", "switch", "number"]
+PLATFORMS = ["climate", "sensor", "binary_sensor", "switch", "number", "select"]
 
 # Keys of hass.data[DOMAIN][entry_id].
 DATA_COORDINATOR = "coordinator"

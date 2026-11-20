@@ -196,6 +196,8 @@ class DanfossDevice:
     schedule_active: bool | None = None  # DP 172 bit 0 (R6); None if DP absent
     preheat: bool | None = None  # DP 172 bit 1 (R6); None if DP absent
     mounting: bool | None = None  # DP 149 (mounting mode: not regulating)
+    viewing_direction: bool | None = None  # DP 101 ViewingDirection (cloud's view)
+    orientation: str | None = None  # DP 133 vertical_mounting: "Horizontal" | "Vertical" (cloud's)
     relay_on: bool | None = None  # DP 1 on a boiler relay (category "kg"); None otherwise
     faults: list[dict[str, Any]] = field(default_factory=list)
     dps: dict[str, Any] = field(default_factory=dict)
@@ -318,6 +320,8 @@ def _apply_dps(d: DanfossDevice, dps: dict[str, Any]) -> None:
     d.min_setpoint = _num(dps.get("27"), 10)
     d.schedule_active, d.preheat = decode_operation(dps.get("172"))
     d.mounting = _bool(dps.get("149"))
+    d.viewing_direction = dps.get("101") if isinstance(dps.get("101"), bool) else None
+    d.orientation = dps.get("133") if dps.get("133") in ("Horizontal", "Vertical") else None
     if d.category == "relay":  # DP 1 on a relay = on/off (on a head it is preheat)
         d.relay_on = _bool(dps.get("1"))
     ws = dps.get("25")

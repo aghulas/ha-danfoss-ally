@@ -77,6 +77,7 @@ frames, so neither channel asks anything more of the user.
 | Window detection | Cloud HTTP: room publish (whole room) | Local tunnel when the head answers locally; otherwise cloud MQTT when enabled and connected (proven 2026-11-19); otherwise unavailable |
 | Setpoint bounds (upper, lower) | No path yet | Cloud MQTT when enabled and connected (proven 2026-11-19); otherwise no entity |
 | Preheat | Local tunnel (0x0025) | Local tunnel (0x0025). Cloud MQTT (DP 1) is a **candidate**, closed: on the trial head only, written over cloud MQTT and confirmed by the tunnel read alone; the state always comes from the tunnel |
+| Viewing direction (DP 101), orientation (DP 133) | No path | **Candidates**, closed: on the trial head only, cloud MQTT; orientation confirmed by the tunnel flag 0x4014 and shown from it, viewing direction confirmed by the per-device route (`docs/viewing-orientation-trial.md`); no entity otherwise |
 | Setpoint override until the next schedule change | Local tunnel (DP 171) | Local tunnel (DP 171) |
 | Valve exercise day and time | Local tunnel | Local tunnel |
 | Holiday, room management, relay binding, unbind | Cloud HTTP (holiday and unbind behind options) | — |
@@ -125,6 +126,12 @@ for a DP proven on it; (4) otherwise unavailable.
   it. The tunnel stays the only preheat route: `docs/cloud-mqtt-preheat-proposal.md`. It is an
   incomplete one: the head takes the value, then goes back overnight to the value the cloud holds
   (`docs/preheat-tunnel-durability.md`).
+- Viewing direction (DP 101) and orientation (DP 133), batch C of the Zigbee2MQTT alignment, are
+  closed candidates with their own confirmation and never the echo: DP 133 is in
+  `MQTT_TUNNEL_CONFIRMED_DPS` (the head's flag 0x4014 read through the tunnel); DP 101, which the
+  tunnel cannot read, is in `MQTT_CLOUD_CONFIRMED_DPS` (the per-device route, the head's display
+  being the trial's proof). Their entities exist only while their trial is armed
+  (`docs/viewing-orientation-trial.md`).
 - After a successful write, the entity shows what the channel returns (echo or re-read), with a
   timeout and a clear error. No optimistic state.
 

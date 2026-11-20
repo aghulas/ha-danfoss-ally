@@ -42,8 +42,8 @@ Access: `R` = published and readable, `RW` = also settable.
 | Open-window detection | `window_open_feature` | RW, config | `switch` | `switch` `window_detection`, config | DP 116 / tunnel `0x4051` | Name only |
 | Preheat | `programming_operation_mode` = `schedule_with_preheat` | RW | `select` | `switch` `preheat` | tunnel `0x0025` bit 1 (only proven lever) | Z2M folds preheat into a 4-value mode; ours is a dedicated switch |
 | Programming mode | `programming_operation_mode` (`setpoint`, `schedule`, `schedule_with_preheat`, `eco`) | RW | `select` | `sensor` `programming_mode` (enum, diagnostic, read only), same four value names | tunnel `0x0025` | Read only on our side, on purpose: writing `setpoint` here is the manual switch that erases the schedule (R4) |
-| Viewing direction | `viewing_direction` | RW, config | `switch` | not exposed | cloud MQTT DP 101 (captured from the app, never written by us) | Missing |
-| Orientation (vertical / horizontal) | `thermostat_orientation` | RW, config | `switch` | not exposed; read by the tunnel as `orientation` | tunnel `0x4014` read; cloud MQTT DP 133 captured | Missing |
+| Viewing direction | `viewing_direction` | RW, config | `switch` | `switch` `viewing_direction`, config, **trial head only** (batch C) | cloud MQTT DP 101, candidate, confirmed by the per-device route | Closed until its supervised trial passes |
+| Orientation (vertical / horizontal) | `thermostat_orientation` | RW, config | `switch` | `select` `orientation_setting` (`horizontal` / `vertical`), config, **trial head only** (batch C); `sensor` `orientation` read only | cloud MQTT DP 133, candidate, confirmed by the tunnel flag `0x4014` | Closed until its supervised trial passes; ours is a `select`, the two values being names, not on/off |
 | Radiator covered | `radiator_covered` | RW | `switch` | not exposed; read by the tunnel | tunnel `0x4016` read | Missing |
 | External room sensor | `external_measured_room_sensor` | RW | `number` | not exposed, not read | none | Missing, no channel known |
 | External window contact | `window_open_external` | RW | `switch` | not exposed, not read | none | Missing, no channel known |
@@ -141,9 +141,22 @@ done (entities `heat_required` and `mounting_mode`); item 4 was settled by keepi
   (its raw value is not known here): it reads unknown, with the raw value as an attribute.
 
 **C — new writes**, one at a time, each with a supervised write read back from an independent
-source (`docs/architecture.md`, rules for adding a route): viewing direction (DP 101) and
-orientation (DP 133) over cloud MQTT are the best candidates, since the app's own frames are
-captured. Radiator covered, setpoint offset and regulation speed would be tunnel writes, unproven.
+source (`docs/architecture.md`, rules for adding a route). Radiator covered, setpoint offset and
+regulation speed would be tunnel writes, unproven, not started.
+
+- **C1, implemented, not tried on real hardware.** Viewing direction (DP 101) and orientation
+  (DP 133) over cloud MQTT, as the app's captured frames: closed candidates, selectable for a
+  supervised trial like DP 1, with entities on the designated isolated head only (a config
+  `switch` and a config `select`). Orientation is confirmed by the tunnel flag `0x4014` and shown
+  from it; viewing direction is confirmed by the per-device cloud route (the tunnel does not read
+  the user-interface cluster, so the head's display is the trial's proof). The cloud does carry
+  both DPs in its device list (`"101": false`, `"133": "Horizontal"` on every head of a capture of
+  the app's fleet), so DP 101 has a state to show. Procedure: `docs/viewing-orientation-trial.md`.
+- **Open question: does `false` of attribute `0x4014` mean horizontal?** It is Zigbee2MQTT's
+  reading, not observed here. Until it is settled the orientation write refuses to send when the
+  tunnel's flag and the cloud's DP 133 disagree under that reading, and the trial starts by
+  comparing the head, the flag and the cloud (read only). The answer also fixes the read-only
+  "orientation" sensor of B2.
 
 **Not proposed**: any write to `programming_operation_mode` (R4), load balancing and heat
 available (managed by the gateway and the relay link), LQI (not available).
