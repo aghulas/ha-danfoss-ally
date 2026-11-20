@@ -162,7 +162,12 @@ def test_overview_gateways_listed_under_the_home_of_their_heads():
         "device_id": "gw-2",
         "name": "Gateway 2",
         "online": False,
+        "head_count": 2,
+        "relay_count": 0,
     }
+    # gw-1 carries the three heads of h1 and the two relays of the fixture.
+    gw1 = data["homes"][0]["gateways"][0]
+    assert (gw1["head_count"], gw1["relay_count"]) == (3, 2)
     assert data["totals"]["gateways"] == 2
 
 
@@ -194,6 +199,28 @@ def test_overview_gateway_home_vote_and_fallbacks():
     listed = [g for ids in _gateways_by_home(data).values() for g in ids]
     assert sorted(listed) == ["gw-1", "gw-2", "gw-3"]
     assert data["totals"]["gateways"] == 3
+
+
+def test_gateway_carrying_only_a_relay_follows_the_relay_home():
+    """Real install (2026-11-20): a gateway carries no head, only the boiler relay of the other
+    home. It is listed under the relay's home by what it carries, not by a fallback."""
+    coord = _TwoHomeCoord()
+    homes = ["h1", "h2"]
+    gw3 = _gateway("gw-3", "Gateway 3")
+    coord.data["gw-3"] = gw3
+    coord.data["r2"] = relay("r2", "Hc2 Relay", mesh_id="gw-3")
+    coord.device_home["r2"] = "h2"
+    assert ops._gateway_home_gid(coord, gw3, homes) == "h2"
+    data = ops.overview_payload({DATA_COORDINATOR: coord})
+    listed = {g["device_id"]: g for h in data["homes"] for g in h["gateways"]}
+    assert _gateways_by_home(data)["h2"] == ["gw-3"]
+    assert (listed["gw-3"]["head_count"], listed["gw-3"]["relay_count"]) == (0, 1)
+    # A gateway that lists itself as its own mesh does not count or vote for itself.
+    coord.data["gw-3"] = DanfossDevice(
+        id="gw-3", name="Gateway 3", category="gateway", mesh_id="gw-3"
+    )
+    coord.device_home["gw-3"] = "h1"
+    assert ops._gateway_home_gid(coord, coord.data["gw-3"], homes) == "h2"
 
 
 def test_overview_relays_attached_to_their_own_home():

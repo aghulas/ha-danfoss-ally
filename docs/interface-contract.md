@@ -238,7 +238,7 @@ cached state** — no extra cloud call (added in 0.6.0, axis D).
       "name": "Home",
       "holiday_active": false,
       "gateways": [
-        { "device_id": "<devId>", "name": "Gateway", "online": true }
+        { "device_id": "<devId>", "name": "Gateway", "online": true, "head_count": 3, "relay_count": 1 }
       ],
       "rooms": [
         {
@@ -293,11 +293,14 @@ cached state** — no extra cloud call (added in 0.6.0, axis D).
   without this kind it was missing from the panel and from every total (99-head fleet shown as 66).
   A single-head room is **not** a room write target: no group publish, no room schedule; its writes
   are those of an isolated head (§4.2, §5.2, `target.type = device`).
-- **Home of a gateway**: the home of the heads it carries (a head's `meshId` is its gateway, and
-  a head's home is exact). The heads vote, a tie going to the earlier home. A gateway carrying no
-  head of a known home is listed under its own home in the per-home device lists, else under the
-  first home. Every gateway is listed once, so `totals.gateways` is the gateway count. (Until
-  1.2.0-rc4 every gateway was listed under the first home.)
+- **Home of a gateway**: the home of the sub-devices it carries (a sub-device's `meshId` is its
+  gateway, and its home is exact). Heads, relays and sensors all vote, a tie going to the earlier
+  home: a gateway may carry a boiler relay and no head (seen on real hardware, 2026-11-20: a
+  gateway named after a building of one home carries only the relay of the other, and belongs
+  there). A gateway carrying nothing of a known home is listed under its own home in the per-home
+  device lists, else under the first home. Every gateway is listed once, so `totals.gateways` is
+  the gateway count. `head_count` / `relay_count` say what the gateway carries. (Until 1.2.0-rc4
+  every gateway was listed under the first home.)
 - **Home of a single head**: exact, from the per-home device list (`tuya.m.my.group.device.list`
   with `gid`). A head of unknown home goes to the first home (kept visible and counted).
 - **Name of a single-head room**: the app room (type 4) of a head **cannot be read**. Observed on

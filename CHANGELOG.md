@@ -130,6 +130,9 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   to the earlier home); one that carries no head of a known home falls back to its own home in the
   per-home device lists, then to the first home as before. `totals.gateways` is unchanged. No
   frontend change: the panel already reads `gateways` per home.
+  Relays and sensors vote too, so a gateway that carries only a boiler relay follows that relay's
+  home (real install, 2026-11-20), and each gateway of the overview now says what it carries
+  (`head_count`, `relay_count`).
 - **An offline boiler relay showed `off` instead of unavailable.** The relay binary sensor stayed
   available while the relay was offline and served the last DP 1 the cloud kept (seen on a real
   install, 2026-11-19, while the relay's MQTT availability said offline). It is now unavailable
