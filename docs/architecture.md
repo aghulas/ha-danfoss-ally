@@ -38,7 +38,9 @@ Established on real hardware; these cases are why a single channel is not enough
   R1–R7 and calls: `docs/interface-contract.md`.
 - Preheat: writing DP 1 on the cloud side only changes the gateway cache. The real lever is the
   Zigbee attribute **0x0025** (bit 0 schedule, bit 1 preheat), reachable only through the local
-  tunnel.
+  tunnel. **That write alone is not durable** (2026-11-20): four heads whose bit differed from the
+  cloud's DP 1 were back at the cloud's value within one night. Finding and change plan:
+  `docs/preheat-tunnel-durability.md`.
 - `update_time` is an event-driven registration timestamp: never infer freshness from it. `online`
   is authoritative for connectivity.
 - Head settings of an **isolated** head (child lock, window detection): the HTTP `settings.change`
@@ -103,7 +105,9 @@ for a DP proven on it; (4) otherwise unavailable.
   closed candidate with that rule built in (`api.writes.MQTT_TUNNEL_CONFIRMED_DPS`: the echo and
   the cloud read are refused as confirmation). Supervised write of 2026-11-20: **not passed** —
   the publish changed the cloud's DP 1 and not the head, although the app's own toggle does reach
-  it. The tunnel stays the only preheat route: `docs/cloud-mqtt-preheat-proposal.md`.
+  it. The tunnel stays the only preheat route: `docs/cloud-mqtt-preheat-proposal.md`. It is an
+  incomplete one: the head takes the value, then goes back overnight to the value the cloud holds
+  (`docs/preheat-tunnel-durability.md`).
 - After a successful write, the entity shows what the channel returns (echo or re-read), with a
   timeout and a clear error. No optimistic state.
 

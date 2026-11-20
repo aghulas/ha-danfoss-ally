@@ -17,6 +17,12 @@ is not it, or not all of it. **Why is not known.** DP 1 stays in `api.writes.MQT
 only proven preheat route. Sheet:
 `docs/first-write-procedure.md`, "DP 1 — preheat".
 
+**Later the same day**: the tunnel route is proven for the write, not for its durability. Four
+heads whose `0x0025` bit differed from the cloud's DP 1 went back to the cloud's value within one
+night (`docs/preheat-tunnel-durability.md`). This changes the assessment at the end of this page:
+the cloud's value is not a side matter, and the two calls of the second trial design (the DP 1
+publish and the settings block) are the first candidates to align it after a tunnel write.
+
 ## Why this DP is last
 
 Preheat is the known trap of this integration (`docs/architecture.md`):
@@ -25,7 +31,8 @@ Preheat is the known trap of this integration (`docs/architecture.md`):
   new value while the head's real preheat did not move;
 - the head's real preheat is **bit 1 of Zigbee attribute `0x0025`** (programming operation mode),
   readable and writable only through the local tunnel — the path the preheat switch uses today,
-  validated on real hardware;
+  validated on real hardware for the write and its read-back, not for its durability
+  (`docs/preheat-tunnel-durability.md`);
 - the app does publish `{"1": bool}` over cloud MQTT for an isolated head (contract §4.2), and also
   posts DP 1 in its settings block over HTTP.
 
