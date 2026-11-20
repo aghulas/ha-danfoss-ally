@@ -35,13 +35,19 @@ cloud's value were back to the cloud's value by about 05:00, with no write from 
   `window_open_external`), heat demand (`heat_required`) and link quality. A Danfoss Ally room
   whose room thermostat sits in the area keeps everything the card does for it (schedule strip,
   comfort / setback, back to schedule, write jobs). The only new write is
-  `climate.set_temperature` on a climate of another integration, for administrators, within its
-  `min_temp` / `max_temp` and at its `target_temp_step`; no new WebSocket command, no new cloud
-  or tunnel write. The card editor picks a room or an area.
+  `climate.set_temperature` on a climate of another integration, **off by default**: it needs
+  `allow_foreign_writes: true` in the card (a checkbox in the editor), and is then offered to
+  administrators, within the climate's `min_temp` / `max_temp` and at its `target_temp_step`. A
+  Danfoss Ally head seen through another integration (`danfoss_ally`, the official Danfoss cloud
+  API) is never written by the card, even then: it is the same head this integration drives. No
+  new WebSocket command, no new cloud or tunnel write. The card editor picks a room or an area.
+  The Ally section appears only when this integration's room thermostat is in the area: devices
+  of this integration have to be given an area first.
 - **Panel: other areas.** Below the integration's rooms, the side panel summarises the areas
   holding climate entities of other integrations (temperature, setpoint, heating, offline, low
-  battery, window), read only, behind an "Other areas" toggle (on by default, remembered by the
-  browser).
+  battery, window), read only, behind an "Other areas" toggle (**off by default**, remembered by
+  the browser): where another integration also drives the Ally heads, the section would show
+  them all a second time.
 
 - **Thermostat of an isolated head: setpoint write over Tuya cloud MQTT.** With
   `enable_cloud_mqtt` on and the link connected, the climate of an isolated head writes the

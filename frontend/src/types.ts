@@ -171,6 +171,12 @@ export interface RoomCardConfig {
    * quelle que soit leur intégration, et la pièce Danfoss Ally qui s'y trouve (§8.1).
    */
   area_id?: string;
+  /**
+   * Avec `area_id` : propose ± (`climate.set_temperature`) sur les climates d'AUTRES
+   * intégrations, pour un administrateur. Désactivé par défaut : la carte est alors en
+   * lecture seule pour eux. Jamais pour une tête Ally vue par une autre intégration.
+   */
+  allow_foreign_writes?: boolean;
 }
 
 // --- Registres du frontend HA (sous-ensemble lu par la carte et le panneau, §8.3). ---

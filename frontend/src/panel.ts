@@ -498,14 +498,18 @@ export class DanfossAllyPanel extends LitElement {
   `;
 }
 
-/** Préférence locale du bouton « autres zones » (confort par navigateur, défaut : affiché). */
+/**
+ * Préférence locale du bouton « autres zones » (confort par navigateur). Défaut :
+ * masquée, car sur une installation où une autre intégration pilote aussi les têtes Ally,
+ * la section les montrerait toutes une seconde fois.
+ */
 const OTHER_AREAS_KEY = "danfoss-ally-panel.show-other-areas";
 
 export function readShowOtherAreas(): boolean {
   try {
-    return globalThis.localStorage?.getItem(OTHER_AREAS_KEY) !== "0";
+    return globalThis.localStorage?.getItem(OTHER_AREAS_KEY) === "1";
   } catch {
-    return true;
+    return false;
   }
 }
 

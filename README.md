@@ -124,8 +124,12 @@ On a climate entity of another integration the card reads the climate (current a
 temperature, `hvac_action`, availability) and the other entities of the same device, matched by
 `device_class` first, then by key (Zigbee2MQTT names `battery`, `pi_heating_demand`,
 `window_open_internal` / `window_open_external`, `heat_required`, `linkquality`, or this
-integration's). Its only write is `climate.set_temperature`, for administrators, within the
-entity's `min_temp` / `max_temp` and at its `target_temp_step`.
+integration's). Those climates are **read only** unless the card is configured with
+`allow_foreign_writes: true` (a checkbox in the card editor); the card then offers
+`climate.set_temperature` to administrators, within the entity's `min_temp` / `max_temp` and at
+its `target_temp_step`. A Danfoss Ally head seen through another integration (`danfoss_ally`) is
+never written by the card. The Danfoss Ally room of an area is found through this integration's
+room thermostat, so give this integration's devices an area for the area view to show it.
 
 ### Developing the frontend
 

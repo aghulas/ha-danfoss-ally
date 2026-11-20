@@ -954,13 +954,20 @@ read from the frontend registries; no WebSocket command is added.
     (`binary_sensor` device class `window`, `window_open_internal` in `open` / `external_open`, or
     `window_open_external` on), heat demand (`heat_required`), link quality (`linkquality`).
   - **Write**: the only one is `climate.set_temperature` on a climate **not** of this integration,
-    offered when the user is an administrator (`info.is_admin`, else the frontend user), the
-    climate is available, not `off`, supports a single target temperature (feature bit 1) and has
-    one. The value moves by `target_temp_step` (default 0.5) and stays within `min_temp` /
+    **off by default**: offered only when the card config has `allow_foreign_writes: true`, the
+    user is an administrator (`info.is_admin`, else the frontend user), the climate is not a
+    Danfoss Ally head seen through another integration (registry `platform` in
+    `DUPLICATE_PLATFORMS`, today `danfoss_ally`: same heads, through a channel this integration
+    has not proven), and the climate is available, not `off`, supports a single target
+    temperature (feature bit 1) and has one. The value moves by `target_temp_step` (default 0.5) and stays within `min_temp` /
     `max_temp`; the button is disabled at a bound. One send at a time per card, no optimistic
     state (Home Assistant pushes the new state).
 - **Panel, other areas**: below the homes, one tile per area holding climates of other
   integrations (climates of this integration excluded): count, mean measured temperature, target
   (or its range), heating / offline / low-battery / open-window counts. Read only. A toggle in the
-  panel header shows or hides the section; on by default, remembered per browser (`localStorage`,
-  best-effort).
+  panel header shows or hides the section; **hidden by default** (where another integration also
+  drives the Ally heads, it would list them all a second time), remembered per browser
+  (`localStorage`, best-effort).
+- **Areas of this integration's devices**: the Ally room of an area is found through its room
+  thermostat's area. An install whose Ally devices have no area shows no Ally section in an area
+  card; give the devices an area first.

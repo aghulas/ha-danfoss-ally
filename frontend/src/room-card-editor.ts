@@ -71,6 +71,12 @@ export class DanfossAllyRoomCardEditor extends LitElement {
     this._pick("area_id", (ev.target as HTMLSelectElement).value);
   }
 
+  private _writesChanged(ev: Event): void {
+    const rest: RoomCardConfig = { ...this._config };
+    delete rest.allow_foreign_writes;
+    this._emit((ev.target as HTMLInputElement).checked ? { ...rest, allow_foreign_writes: true } : rest);
+  }
+
   protected render(): TemplateResult {
     const areas = this._areas;
     const roomId = this._config.area_id ? "" : this._config.room_id;
@@ -103,6 +109,20 @@ export class DanfossAllyRoomCardEditor extends LitElement {
         ${areas.length === 0
           ? html`<div class="hint">${t(this.hass, "areas_unavailable")}</div>`
           : nothing}
+        ${this._config.area_id
+          ? html`
+              <label class="check">
+                <input
+                  id="writes"
+                  type="checkbox"
+                  .checked=${this._config.allow_foreign_writes === true}
+                  @change=${this._writesChanged}
+                />
+                ${t(this.hass, "allow_foreign_writes")}
+              </label>
+              <div class="hint">${t(this.hass, "allow_foreign_writes_hint")}</div>
+            `
+          : nothing}
       </div>
     `;
   }
@@ -133,6 +153,12 @@ export class DanfossAllyRoomCardEditor extends LitElement {
     .hint {
       color: var(--secondary-text-color);
       font-size: 0.9rem;
+    }
+    label.check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 400;
     }
   `;
 }

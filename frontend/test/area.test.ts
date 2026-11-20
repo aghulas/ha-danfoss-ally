@@ -142,6 +142,11 @@ describe("écriture d'un climate hors Ally", () => {
   it("réglable : hors Ally, disponible, consigne unique, pas éteint", () => {
     const hass = hassWith(building());
     expect(canAdjustClimate(climateView(hass, "climate.salon_fenetre")!)).toBe(true);
+    // A Danfoss Ally head seen through another integration is never adjustable.
+    const dup = building();
+    dup.entities["climate.salon_fenetre"].platform = "danfoss_ally";
+    expect(climateView(hassWith(dup), "climate.salon_fenetre")!.duplicate).toBe(true);
+    expect(canAdjustClimate(climateView(hassWith(dup), "climate.salon_fenetre")!)).toBe(false);
     expect(canAdjustClimate(climateView(hass, "climate.salon_porte")!)).toBe(false);
     expect(canAdjustClimate(climateView(hass, "climate.bureau")!)).toBe(false);
     const reg = building();

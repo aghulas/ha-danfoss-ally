@@ -646,7 +646,7 @@ describe("carte pièce par zone", () => {
 
   it("± sur un climate hors Ally : set_temperature au pas, un seul envoi à la fois", async () => {
     const { hass, sent } = areaHass();
-    const el = await loaded(hass, { area_id: "salon" });
+    const el = await loaded(hass, { area_id: "salon", allow_foreign_writes: true });
     const a = el._adjustClimate("climate.salon_fenetre", 1);
     const b = el._adjustClimate("climate.salon_fenetre", 1);
     await Promise.all([a, b]);
@@ -662,20 +662,37 @@ describe("carte pièce par zone", () => {
 
   it("aucune écriture générique sur un climate Ally, indisponible, ou sans droits", async () => {
     const admin = areaHass();
-    const el = await loaded(admin.hass, { area_id: "bureau" });
+    const el = await loaded(admin.hass, { area_id: "bureau", allow_foreign_writes: true });
     await el._adjustClimate("climate.bureau", 1);
     await el._adjustClimate("climate.salon_porte", 1);
     expect(admin.sent).toEqual([]);
 
     const user = areaHass(false);
-    const ro = await loaded(user.hass, { area_id: "salon" });
+    const ro = await loaded(user.hass, { area_id: "salon", allow_foreign_writes: true });
     await ro._adjustClimate("climate.salon_fenetre", 1);
     expect(user.sent).toEqual([]);
   });
 
-  it("sans `info`, le droit d'écrire vient de l'utilisateur du frontend", async () => {
+  it("sans `allow_foreign_writes`, la carte est en lecture seule pour les autres intégrations", async () => {
     const { hass, sent } = areaHass();
     const el = await loaded(hass, { area_id: "salon" });
+    await el._adjustClimate("climate.salon_fenetre", 1);
+    expect(sent).toEqual([]);
+    expect(el._canWriteForeign).toBe(false);
+  });
+
+  it("une tête Ally vue par une autre intégration n'est jamais écrite, même autorisée", async () => {
+    const { hass, sent } = areaHass();
+    const entry = (hass.entities as Record<string, { platform?: string }>)["climate.salon_fenetre"];
+    entry.platform = "danfoss_ally";
+    const el = await loaded(hass, { area_id: "salon", allow_foreign_writes: true });
+    await el._adjustClimate("climate.salon_fenetre", 1);
+    expect(sent).toEqual([]);
+  });
+
+  it("sans `info`, le droit d'écrire vient de l'utilisateur du frontend", async () => {
+    const { hass, sent } = areaHass();
+    const el = await loaded(hass, { area_id: "salon", allow_foreign_writes: true });
     el._info = null;
     hass.user = { is_admin: false };
     await el._adjustClimate("climate.salon_fenetre", 1);
@@ -690,7 +707,7 @@ describe("carte pièce par zone", () => {
     hass.callService = async () => {
       throw new Error("refusé");
     };
-    const el = await loaded(hass, { area_id: "salon" });
+    const el = await loaded(hass, { area_id: "salon", allow_foreign_writes: true });
     await el._adjustClimate("climate.salon_fenetre", -1);
     expect(el._error).toContain("salon_fenetre");
     expect(el._busyClimate).toBeNull();
@@ -757,13 +774,13 @@ describe("panneau — autres zones", () => {
       setItem: (k: string, v: string) => void store.set(k, v),
     });
     const el = new DanfossAllyPanel() as Internals;
-    expect(el._showOtherAreas).toBe(true);
+    expect(el._showOtherAreas).toBe(false); // masquée par défaut
     el._toggleOtherAreas();
-    expect(el._showOtherAreas).toBe(false);
-    expect(new DanfossAllyPanel()["_showOtherAreas" as keyof DanfossAllyPanel]).toBe(false);
+    expect(el._showOtherAreas).toBe(true);
+    expect(new DanfossAllyPanel()["_showOtherAreas" as keyof DanfossAllyPanel]).toBe(true);
   });
 
-  it("sans stockage (navigation privée), la section reste affichée", () => {
+  it("sans stockage (navigation privée), la section reste masquée", () => {
     vi.stubGlobal("localStorage", {
       getItem: () => {
         throw new Error("blocked");
@@ -773,9 +790,9 @@ describe("panneau — autres zones", () => {
       },
     });
     const el = new DanfossAllyPanel() as Internals;
-    expect(el._showOtherAreas).toBe(true);
-    el._toggleOtherAreas();
     expect(el._showOtherAreas).toBe(false);
+    el._toggleOtherAreas();
+    expect(el._showOtherAreas).toBe(true);
   });
 });
 

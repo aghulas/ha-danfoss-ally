@@ -703,6 +703,8 @@ const STRINGS = {
     room_named_after_head: "Room not found in the app: head's name",
     // --- Carte par zone, autres zones du panneau (§8.3) ---
     pick_area: "Area (any thermostat)",
+    allow_foreign_writes: "Allow setpoint changes on thermostats of other integrations",
+    allow_foreign_writes_hint: "Off by default: those thermostats are then read only. Administrators only, and never for a Danfoss Ally head seen through another integration.",
     pick_hint: "Pick a Danfoss Ally room, or a Home Assistant area to show every thermostat in it.",
     areas_unavailable: "No area holds a thermostat.",
     unknown_area: "Unknown area ({id})",
@@ -859,6 +861,8 @@ const STRINGS = {
     room_named_after_head: "Pièce de l'app non retrouvée : nom de la tête",
     // --- Carte par zone, autres zones du panneau (§8.3) ---
     pick_area: "Zone (tout thermostat)",
+    allow_foreign_writes: "Autoriser le réglage de la consigne des thermostats d'autres intégrations",
+    allow_foreign_writes_hint: "Désactivé par défaut : ces thermostats sont alors en lecture seule. Réservé aux administrateurs, et jamais pour une tête Danfoss Ally vue par une autre intégration.",
     pick_hint: "Choisissez une pièce Danfoss Ally, ou une zone Home Assistant pour en montrer tous les thermostats.",
     areas_unavailable: "Aucune zone ne contient de thermostat.",
     unknown_area: "Zone inconnue ({id})",
@@ -2846,6 +2850,7 @@ function roomNeedsRestore(room) {
   return room.heads.some((h2) => h2.schedule_active === false);
 }
 const ALLY_PLATFORM = "danfoss_ally_cloud";
+const DUPLICATE_PLATFORMS = /* @__PURE__ */ new Set(["danfoss_ally"]);
 const FEATURE_TARGET_TEMPERATURE = 1;
 const DEFAULT_STEP = 0.5;
 const KEYS_TEMPERATURE = ["local_temperature", "temperature"];
@@ -3001,6 +3006,7 @@ function climateView(hass, entityId) {
     entity_id: entityId,
     name: climateName(hass, entityId),
     ally: isAllyEntity(hass, entityId),
+    duplicate: DUPLICATE_PLATFORMS.has(hass.entities?.[entityId]?.platform ?? ""),
     available,
     current: num(a2.current_temperature) ?? fallbackTemperature(hass, entityId),
     target: num(a2.temperature),
@@ -3014,7 +3020,7 @@ function climateView(hass, entityId) {
   };
 }
 function canAdjustClimate(view) {
-  return !view.ally && view.available && view.hvac_mode !== "off" && view.supports_target && view.target !== null;
+  return !view.ally && !view.duplicate && view.available && view.hvac_mode !== "off" && view.supports_target && view.target !== null;
 }
 function steppedClimateTarget(view, direction) {
   if (!canAdjustClimate(view) || view.target === null) {
@@ -3162,10 +3168,15 @@ let DanfossAllyRoomCard = class extends i {
     return this._info !== null && this._info.is_admin;
   }
   /**
-   * Droit d'écrire un climate hors Ally : celui que donne `info` (même règle que la
-   * carte), ou à défaut l'utilisateur du frontend. Jamais vrai sans preuve.
+   * Droit d'écrire un climate hors Ally : seulement si la configuration de la carte
+   * l'active (`allow_foreign_writes`, désactivé par défaut), puis celui que donne
+   * `info` (même règle que la carte), ou à défaut l'utilisateur du frontend. Jamais
+   * vrai sans preuve.
    */
   get _canWriteForeign() {
+    if (this._config?.allow_foreign_writes !== true) {
+      return false;
+    }
     if (this._info !== null) {
       return this._info.is_admin;
     }
@@ -4248,9 +4259,9 @@ DanfossAllyPanel = __decorateClass([
 const OTHER_AREAS_KEY = "danfoss-ally-panel.show-other-areas";
 function readShowOtherAreas() {
   try {
-    return globalThis.localStorage?.getItem(OTHER_AREAS_KEY) !== "0";
+    return globalThis.localStorage?.getItem(OTHER_AREAS_KEY) === "1";
   } catch {
-    return true;
+    return false;
   }
 }
 function writeShowOtherAreas(show) {

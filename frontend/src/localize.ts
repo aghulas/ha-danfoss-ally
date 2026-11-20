@@ -145,6 +145,9 @@ const STRINGS = {
     room_named_after_head: "Room not found in the app: head's name",
     // --- Carte par zone, autres zones du panneau (§8.3) ---
     pick_area: "Area (any thermostat)",
+    allow_foreign_writes: "Allow setpoint changes on thermostats of other integrations",
+    allow_foreign_writes_hint:
+      "Off by default: those thermostats are then read only. Administrators only, and never for a Danfoss Ally head seen through another integration.",
     pick_hint: "Pick a Danfoss Ally room, or a Home Assistant area to show every thermostat in it.",
     areas_unavailable: "No area holds a thermostat.",
     unknown_area: "Unknown area ({id})",
@@ -306,6 +309,9 @@ const STRINGS = {
     room_named_after_head: "Pièce de l'app non retrouvée : nom de la tête",
     // --- Carte par zone, autres zones du panneau (§8.3) ---
     pick_area: "Zone (tout thermostat)",
+    allow_foreign_writes: "Autoriser le réglage de la consigne des thermostats d'autres intégrations",
+    allow_foreign_writes_hint:
+      "Désactivé par défaut : ces thermostats sont alors en lecture seule. Réservé aux administrateurs, et jamais pour une tête Danfoss Ally vue par une autre intégration.",
     pick_hint: "Choisissez une pièce Danfoss Ally, ou une zone Home Assistant pour en montrer tous les thermostats.",
     areas_unavailable: "Aucune zone ne contient de thermostat.",
     unknown_area: "Zone inconnue ({id})",

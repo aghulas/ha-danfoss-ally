@@ -217,10 +217,15 @@ export class DanfossAllyRoomCard extends LitElement {
   }
 
   /**
-   * Droit d'écrire un climate hors Ally : celui que donne `info` (même règle que la
-   * carte), ou à défaut l'utilisateur du frontend. Jamais vrai sans preuve.
+   * Droit d'écrire un climate hors Ally : seulement si la configuration de la carte
+   * l'active (`allow_foreign_writes`, désactivé par défaut), puis celui que donne
+   * `info` (même règle que la carte), ou à défaut l'utilisateur du frontend. Jamais
+   * vrai sans preuve.
    */
   private get _canWriteForeign(): boolean {
+    if (this._config?.allow_foreign_writes !== true) {
+      return false;
+    }
     if (this._info !== null) {
       return this._info.is_admin;
     }

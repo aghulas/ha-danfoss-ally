@@ -21,6 +21,14 @@ import type { HassEntityEntry, HassEntityState, HassLike, Room } from "./types";
 /** Domaine de cette intégration dans le registre des entités. */
 export const ALLY_PLATFORM = "danfoss_ally_cloud";
 
+/**
+ * Intégrations qui pilotent les MÊMES têtes Danfoss Ally par un autre chemin (l'API
+ * cloud officielle de Danfoss). Leurs climates sont montrés mais JAMAIS écrits par
+ * ces cartes : ce serait écrire la consigne d'une tête Ally par un canal que cette
+ * intégration n'a pas prouvé, à côté du programme de sa pièce.
+ */
+export const DUPLICATE_PLATFORMS: ReadonlySet<string> = new Set(["danfoss_ally"]);
+
 /** Bit `TARGET_TEMPERATURE` de `ClimateEntityFeature` (consigne unique réglable). */
 const FEATURE_TARGET_TEMPERATURE = 1;
 
@@ -57,6 +65,8 @@ export interface ClimateView {
   name: string;
   /** Le climate est de cette intégration (aucune écriture générique pour lui). */
   ally: boolean;
+  /** Le climate pilote une tête Ally par une autre intégration (`DUPLICATE_PLATFORMS`). */
+  duplicate: boolean;
   available: boolean;
   current: number | null;
   target: number | null;
@@ -284,6 +294,7 @@ export function climateView(hass: HassLike, entityId: string): ClimateView | nul
     entity_id: entityId,
     name: climateName(hass, entityId),
     ally: isAllyEntity(hass, entityId),
+    duplicate: DUPLICATE_PLATFORMS.has(hass.entities?.[entityId]?.platform ?? ""),
     available,
     current: num(a.current_temperature) ?? fallbackTemperature(hass, entityId),
     target: num(a.temperature),
@@ -299,12 +310,15 @@ export function climateView(hass: HassLike, entityId: string): ClimateView | nul
 
 /**
  * La carte peut-elle proposer ± sur ce climate ? Jamais pour un climate de cette
- * intégration (ses règles d'écriture sont celles de la pièce, §8.1), ni s'il est
- * indisponible, éteint, sans consigne unique réglable ou sans consigne.
+ * intégration (ses règles d'écriture sont celles de la pièce, §8.1), ni pour une tête
+ * Ally vue par une autre intégration (`DUPLICATE_PLATFORMS`), ni s'il est indisponible,
+ * éteint, sans consigne unique réglable ou sans consigne. La carte exige en plus que
+ * l'écriture soit activée dans sa configuration (`allow_foreign_writes`).
  */
 export function canAdjustClimate(view: ClimateView): boolean {
   return (
     !view.ally &&
+    !view.duplicate &&
     view.available &&
     view.hvac_mode !== "off" &&
     view.supports_target &&
