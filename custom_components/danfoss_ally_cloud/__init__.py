@@ -1,8 +1,8 @@
 """Danfoss Ally (Cloud) integration.
 
-Entry point: sets up the cloud client (path-1a cloud API), the refresh coordinator, and -
-eventually - the local tunnel and the MQTT publisher. Cloud-first; local fallback for the
-operations the cloud misses (see docs/architecture.md). v0.1: cloud read only.
+Entry point: sets up the cloud client (path-1a cloud API), the refresh coordinator, the optional
+local Zigbee tunnel, the optional Tuya cloud-MQTT link, and the MQTT publisher (see
+docs/architecture.md).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
-from .api import MQTT_CANDIDATE_DPS, CloudClient, async_fetch_gateway_keys
+from .api import MQTT_CANDIDATE_DPS, CloudClient, GatewayKey, async_fetch_gateway_keys
 from .api.local.manager import LocalTunnelManager
 from .api.mqtt_client import (
     CloudMqttLink,
@@ -127,7 +127,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
 
     # Local fallback (optional): best-effort, must never prevent the cloud from starting.
-    local_coordinator = await _async_setup_local(hass, entry, coordinator)
+    local_coordinator, gateways = await _async_setup_local_and_keys(hass, entry, coordinator)
 
     # MQTT publishing (optional).
     publisher = await _async_setup_mqtt(hass, entry, coordinator)
@@ -136,7 +136,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # ``enable_cloud_mqtt`` (write path for isolated heads: a toggle then publishes a DP — the first
     # such write must be supervised; see docs/first-write-procedure.md) and/or by
     # ``cloud_mqtt_probe`` (coverage measure; listen-only when the write option is off).
-    mqtt_link, mqtt_coverage = await _async_setup_mqtt_link(hass, entry, coordinator)
+    mqtt_link, mqtt_coverage = await _async_setup_mqtt_link(
+        hass, entry, coordinator, gateways=gateways
+    )
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         DATA_COORDINATOR: coordinator,
@@ -168,6 +170,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     @callback
     def _relink_heads() -> None:
+        _cleanup_orphaned_head_climates(hass, entry, coordinator)
         async_link_heads_to_rooms(hass, coordinator, entry.entry_id)
 
     entry.async_on_unload(coordinator.async_add_listener(_relink_heads))
@@ -228,20 +231,21 @@ async def _async_setup_mqtt(
     return publisher
 
 
-async def _async_setup_local(
+async def _async_setup_local_and_keys(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: DanfossCoordinator
-) -> DanfossLocalCoordinator | None:
-    """Prepare the local tunnel if the option is on. Best-effort: returns None on failure."""
+) -> tuple[DanfossLocalCoordinator | None, dict[str, GatewayKey] | None]:
+    """Prepare the local tunnel if the option is on, returning ``(local_coordinator, gateways)``.
+    Best-effort: returns ``(None, None)`` on failure so the cloud starts anyway."""
     if not entry.options.get(CONF_ENABLE_LOCAL):
-        return None
+        return None, None
     try:
         gateways = await async_fetch_gateway_keys(coordinator.client)
     except Exception as err:  # noqa: BLE001 - le repli local ne bloque jamais le cloud
         _LOGGER.warning("Local fallback unavailable (key fetch): %s", err)
-        return None
+        return None, None
     if not gateways:
         _LOGGER.warning("Local fallback enabled but no gateway with a local key found.")
-        return None
+        return None, gateways
     manager = LocalTunnelManager(gateways)
     local = DanfossLocalCoordinator(hass, manager, coordinator, DEFAULT_LOCAL_SCAN_INTERVAL)
     # First survey in the BACKGROUND, tied to the entry (cancelled on unload and on Home Assistant
@@ -251,24 +255,34 @@ async def _async_setup_local(
     entry.async_create_background_task(
         hass, local.async_refresh(), name=f"{DOMAIN} first local survey"
     )
-    return local
+    return local, gateways
 
 
 async def _async_mqtt_creds_and_gateways(
-    entry: ConfigEntry, client: CloudClient, *, context: str
+    entry: ConfigEntry,
+    client: CloudClient,
+    *,
+    context: str,
+    gateways: dict[str, GatewayKey] | None = None,
 ) -> tuple[MqttCredentials, dict[str, GatewayRef]] | None:
     """Build the MQTT credentials (from the integration's OWN session — no secret taken from HA
-    storage) and the gateway refs. Forces a fresh login so uid/partnerIdentity are known. Returns
-    None (logged) if the session is incomplete or no gateway has a local key."""
-    await client.async_login()
+    storage) and the gateway refs. Reuses the session opened by the first refresh when uid and
+    partnerIdentity are already present, otherwise logs in. Reuses ``gateways`` when already
+    fetched by ``_async_setup_local_and_keys``. Returns None (logged) if the session is incomplete
+    or no gateway has a local key."""
     ident = client.mqtt_identity
     sess = client.session
+    if not (ident["uid"] and ident["partner_identity"] and sess["sid"] and sess["ecode"]):
+        await client.async_login()
+        ident = client.mqtt_identity
+        sess = client.session
     if not (ident["uid"] and ident["partner_identity"] and sess["sid"] and sess["ecode"]):
         _LOGGER.warning(
             "Cloud-MQTT %s: session incomplete (uid/partnerIdentity); skipped.", context
         )
         return None
-    gateways = await async_fetch_gateway_keys(client)
+    if gateways is None:
+        gateways = await async_fetch_gateway_keys(client)
     if not gateways:
         _LOGGER.warning("Cloud-MQTT %s: no gateway with a local key; skipped.", context)
         return None
@@ -288,7 +302,11 @@ async def _async_mqtt_creds_and_gateways(
 
 
 async def _async_setup_mqtt_link(
-    hass: HomeAssistant, entry: ConfigEntry, coordinator: DanfossCoordinator
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: DanfossCoordinator,
+    *,
+    gateways: dict[str, GatewayKey] | None = None,
 ) -> tuple[CloudMqttLink | None, CoverageStats | None]:
     """Open the live cloud-MQTT link if ``enable_cloud_mqtt`` or ``cloud_mqtt_probe`` is on (both
     OFF by default). Best-effort: returns ``(None, None)`` on failure, never blocks setup. Uses the
@@ -315,7 +333,9 @@ async def _async_setup_mqtt_link(
         return None, None
     coverage = CoverageStats() if probe else None
     try:
-        built = await _async_mqtt_creds_and_gateways(entry, client, context="link")
+        built = await _async_mqtt_creds_and_gateways(
+            entry, client, context="link", gateways=gateways
+        )
         if built is None:
             return None, None
 

@@ -13,6 +13,7 @@ import {
   resizeRange,
   setRangeTime,
   snapMinutes,
+  sortIndexedRanges,
   sortRanges,
 } from "../src/edit";
 import { DAY_KEYS } from "../src/schedule";
@@ -169,5 +170,16 @@ describe("modifiedDays", () => {
     const original = emptyWeek();
     original.mon = [r("08:00", "17:00")];
     expect(modifiedDays(original, cloneDays(original), DAY_KEYS)).toEqual([]);
+  });
+});
+
+describe("sortIndexedRanges", () => {
+  it("conserve les index distincts même si deux plages sont identiques", () => {
+    const sorted = sortIndexedRanges([
+      r("14:00", "18:00"),
+      r("08:00", "12:00"),
+      r("08:00", "12:00"),
+    ]);
+    expect(sorted.map((s) => s.index)).toEqual([1, 2, 0]);
   });
 });

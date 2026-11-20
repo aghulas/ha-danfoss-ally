@@ -1,8 +1,9 @@
-"""Refresh coordinator.
+"""Refresh coordinators: cloud HTTP polling (``DanfossCoordinator``) and local Zigbee tunnel
+survey (``DanfossLocalCoordinator``).
 
-Polls the cloud (path-1a cloud API) at a conservative interval and normalises the devices into
-``{device_id: DanfossDevice}``. The local tunnel (v0.3) will later correct the fields the cloud
-reports wrong (e.g. the real preheat 0x0025); here, cloud read only.
+Polls the cloud (path-1a cloud API) at a conservative interval, overlays fresh per-device DPs for
+recently commanded heads (R-3), and aggregates rooms, holidays and relay linkage. The optional
+local tunnel coordinator surveys the real preheat state (attribute 0x0025) in the background.
 """
 
 from __future__ import annotations

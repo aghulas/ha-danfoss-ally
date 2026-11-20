@@ -9,10 +9,16 @@ longer sets heads individually. So we expose **one climate per room**:
   hardware.
 
 Heads stay exposed as sub-devices (sensors, switches, local preheat). An **isolated** head (outside
-a group) keeps a **read-only** climate: no proven path-1a write method outside a room (a
-non-lying entity rather than a false one). It still shows its ACTIVE setpoint as
-``target_temperature`` (Home Assistant only publishes it when TARGET_TEMPERATURE is declared), and
-refuses a setpoint change with a clear error.
+a group) keeps its own ``DanfossHeadClimate``:
+
+- with ``enable_cloud_mqtt`` off (the default), it is **read-only**: no proven path-1a HTTP write
+  method outside a room (a non-lying entity rather than a false one). It still shows its ACTIVE
+  setpoint as ``target_temperature`` (Home Assistant only publishes it when TARGET_TEMPERATURE is
+  declared), and refuses a setpoint change with a clear error;
+- with ``enable_cloud_mqtt`` on and connected, in schedule modes (``at_home`` / ``leaving_home``),
+  ``async_set_temperature`` writes the current mode's setpoint over Tuya cloud MQTT (DP 118 + 16
+  for comfort, DP 119 for setback) followed by the settings block over HTTP, the exact path proven
+  on real hardware for ``DanfossHeadSetpoint``.
 
 State attributes: ``active_setpoint`` is the setpoint in force (DP 171 OccupiedSetpoint, the value
 the Danfoss app shows); ``setpoints`` holds the per-mode settings (``comfort`` = DP 118,
@@ -31,23 +37,31 @@ from homeassistant.components.climate import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import CloudError, encode_setpoint
+from .api import CloudError, DanfossDevice, encode_setpoint, mqtt_dp_open, write_allowed
+from .api.mqtt_client import CloudMqttLink
 from .api.rooms import RoomState
 from .const import (
+    DATA_CLOUD_MQTT,
     DATA_COORDINATOR,
+    DATA_MQTT_LINK,
     DOMAIN,
+    DP_AT_HOME_SETPOINT,
+    DP_LEAVING_HOME_SETPOINT,
+    DP_TEMP_SET,
     MODE_GROUP_SETPOINT_DP,
     SETPOINT_STEP,
     WRITE_VERIFIED_PRODUCTS,
 )
 from .coordinator import DanfossCoordinator
 from .entity import DanfossEntity
+from .mqtt_write import async_mqtt_write, settings_block, supervised_for
 
 # Mode DP 2 -> readable label (state attribute).
 _MODES = {
@@ -57,6 +71,12 @@ _MODES = {
     "pause": "pause",
     "holiday": "holiday",
     "holiday_sat": "holiday",
+}
+
+# Mode DP 2 -> (setting DP, companion DPs) for an isolated head written over Tuya cloud MQTT.
+_HEAD_MQTT_MODE_DPS: dict[str, tuple[int, tuple[int, ...]]] = {
+    "at_home": (DP_AT_HOME_SETPOINT, (DP_TEMP_SET,)),
+    "leaving_home": (DP_LEAVING_HOME_SETPOINT, ()),
 }
 
 _MIN_TEMP = 5.0
@@ -84,17 +104,61 @@ def _setpoint_attributes(active: float | None, setpoints: dict[str, float]) -> d
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    coordinator: DanfossCoordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
-    entities: list[ClimateEntity] = [
-        DanfossRoomClimate(coordinator, group_id) for group_id in coordinator.rooms
-    ]
-    # Isolated heads (outside a group): read-only climate.
-    entities += [
-        DanfossHeadClimate(coordinator, dev.id)
-        for dev in coordinator.data.values()
-        if dev.is_head and dev.id not in coordinator.grouped_ids
-    ]
-    async_add_entities(entities)
+    data = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DanfossCoordinator = data[DATA_COORDINATOR]
+    link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
+    cloud_mqtt_on = bool(data.get(DATA_CLOUD_MQTT))
+
+    known_rooms: set[str] = set()
+    known_heads: set[str] = set()
+
+    def _collect_new_entities() -> list[ClimateEntity]:
+        new_entities: list[ClimateEntity] = []
+        for group_id in coordinator.rooms:
+            if group_id not in known_rooms:
+                known_rooms.add(group_id)
+                new_entities.append(DanfossRoomClimate(coordinator, group_id))
+        for dev in coordinator.data.values():
+            if dev.is_head and dev.id not in coordinator.grouped_ids and dev.id not in known_heads:
+                known_heads.add(dev.id)
+                new_entities.append(
+                    DanfossHeadClimate(
+                        coordinator,
+                        dev.id,
+                        link=link,
+                        cloud_mqtt_enabled=cloud_mqtt_on,
+                        supervised_dps=supervised_for(data, dev.id),
+                    )
+                )
+        return new_entities
+
+    async_add_entities(_collect_new_entities())
+
+    @callback
+    def _async_sync_topology() -> None:
+        """Create or retire climate entities when rooms or group memberships change at runtime."""
+        registry = er.async_get(hass)
+        for group_id in list(known_rooms):
+            if group_id not in coordinator.rooms:
+                known_rooms.discard(group_id)
+                ent_id = registry.async_get_entity_id("climate", DOMAIN, group_id)
+                if ent_id is not None:
+                    ent = registry.async_get(ent_id)
+                    if ent is not None and ent.config_entry_id == entry.entry_id:
+                        registry.async_remove(ent_id)
+        for head_id in list(known_heads):
+            if head_id in coordinator.grouped_ids:
+                known_heads.discard(head_id)
+                ent_id = registry.async_get_entity_id("climate", DOMAIN, head_id)
+                if ent_id is not None:
+                    ent = registry.async_get(ent_id)
+                    if ent is not None and ent.config_entry_id == entry.entry_id:
+                        registry.async_remove(ent_id)
+        added = _collect_new_entities()
+        if added:
+            async_add_entities(added)
+
+    entry.async_on_unload(coordinator.async_add_listener(_async_sync_topology))
 
 
 class DanfossRoomClimate(CoordinatorEntity[DanfossCoordinator], ClimateEntity):
@@ -218,13 +282,17 @@ class DanfossRoomClimate(CoordinatorEntity[DanfossCoordinator], ClimateEntity):
 
 
 class DanfossHeadClimate(DanfossEntity, ClimateEntity):
-    """Thermostat of an ISOLATED head (outside a group), READ-ONLY.
+    """Thermostat of an ISOLATED head (outside a group).
 
-    No proven path-1a write method outside a room. TARGET_TEMPERATURE is declared only so that Home
-    Assistant publishes the ACTIVE setpoint (DP 171, the one the Danfoss app shows) as the target
-    temperature, as on the room climate; ``async_set_temperature`` refuses with a clear error rather
-    than pretending to write. Grouped heads are driven through their room (see
-    ``DanfossRoomClimate``) and have no climate of their own.
+    With ``enable_cloud_mqtt`` off (default), no setpoint write is proven outside a room:
+    TARGET_TEMPERATURE is declared so that Home Assistant publishes the ACTIVE setpoint (DP 171,
+    the one the Danfoss app shows) as the target temperature, and ``async_set_temperature`` refuses
+    with a clear error rather than pretending to write.
+
+    With ``enable_cloud_mqtt`` on and connected, in schedule modes (``at_home`` / ``leaving_home``),
+    ``async_set_temperature`` writes the active mode's setpoint over Tuya cloud MQTT (DP 118 + 16
+    for comfort, DP 119 for setback) and posts the settings block over HTTP, matching
+    ``DanfossHeadSetpoint``.
     """
 
     _attr_name = None
@@ -234,6 +302,20 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
     _attr_min_temp = _MIN_TEMP
     _attr_max_temp = _MAX_TEMP
+
+    def __init__(
+        self,
+        coordinator: DanfossCoordinator,
+        device_id: str,
+        *,
+        link: CloudMqttLink | None = None,
+        cloud_mqtt_enabled: bool = False,
+        supervised_dps: frozenset[int] = frozenset(),
+    ) -> None:
+        super().__init__(coordinator, device_id)
+        self._link = link
+        self._cloud_mqtt_enabled = cloud_mqtt_enabled
+        self._supervised_dps = supervised_dps
 
     @property
     def unique_id(self) -> str:
@@ -273,6 +355,16 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
             return None
         return HVACAction.HEATING if heating else HVACAction.IDLE
 
+    def _mqtt_ready(self, dev: DanfossDevice | None) -> bool:
+        """True if this isolated head can be written over the Tuya cloud-MQTT link right now."""
+        if not (self._cloud_mqtt_enabled and self._link is not None):
+            return False
+        if dev is None or not write_allowed(dev) or not dev.node_id or not dev.mesh_id:
+            return False
+        if self.coordinator.group_of(dev.id) is not None:
+            return False
+        return self._link.can_publish(dev.mesh_id)
+
     @property
     def extra_state_attributes(self) -> dict:
         dev = self.device
@@ -285,12 +377,47 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
         return attrs
 
     async def async_set_temperature(self, **kwargs) -> None:
-        """Refuse: an isolated head has no proven path-1a setpoint write (read-only entity)."""
-        raise HomeAssistantError(
-            "Read-only: this head is not in a Danfoss room, and no setpoint write is proven for a "
-            "head outside a room. Add it to a room in the Danfoss app to drive it from Home "
-            "Assistant."
+        """Write an isolated head's setpoint over Cloud MQTT when enabled, else refuse cleanly."""
+        dev = self.device
+        if not self._mqtt_ready(dev) or dev is None or self._link is None:
+            raise HomeAssistantError(
+                "Read-only: this head is not in a Danfoss room, and no HTTP setpoint write is "
+                "proven for a head outside a room. Add it to a room in the Danfoss app, or enable "
+                "the cloud-MQTT write path for isolated heads in the integration options."
+            )
+        temp = kwargs.get(ATTR_TEMPERATURE)
+        if temp is None:
+            return
+        mode_spec = _HEAD_MQTT_MODE_DPS.get(dev.mode or "")
+        if mode_spec is None:
+            raise HomeAssistantError(
+                "Setpoint editable only in comfort (at_home) or setback "
+                f"(leaving_home) mode; current mode: {dev.mode!r}."
+            )
+        setting_dp, companions = mode_spec
+        all_dps = (setting_dp, *companions)
+        if not all(mqtt_dp_open(dp, self._supervised_dps) for dp in all_dps):
+            raise HomeAssistantError("setpoint write unavailable for this head")
+        try:
+            raw = encode_setpoint(temp, self.min_temp, self.max_temp, SETPOINT_STEP)
+        except CloudError as err:
+            raise HomeAssistantError(f"setpoint refused: {err}") from err
+        block = settings_block(dev, {setting_dp: raw})
+        await async_mqtt_write(
+            self.coordinator,
+            self._link,
+            dev,
+            dict.fromkeys(all_dps, raw),
+            supervised=self._supervised_dps,
+            confirm_dps=(setting_dp,),
         )
+        try:
+            await self.coordinator.client.async_write_setting(dev.id, dev.product_id or "", block)
+        except CloudError as err:
+            raise HomeAssistantError(
+                "setpoint written on the head and confirmed, but the cloud-side settings block "
+                f"was refused ({err}): the cloud may hold the previous value"
+            ) from err
 
 
 # Climate temperature API. HA 2026.11 reads `native_*` (unit-converted) and deprecates the legacy

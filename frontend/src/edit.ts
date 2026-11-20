@@ -45,6 +45,17 @@ export function sortRanges(ranges: TimeRange[]): TimeRange[] {
   );
 }
 
+/** Trie les plages par heure de début tout en conservant l'index d'origine dans `ranges`. */
+export function sortIndexedRanges(
+  ranges: TimeRange[],
+): { range: TimeRange; index: number }[] {
+  return ranges
+    .map((range, index) => ({ range, index }))
+    .sort(
+      (a, b) => (parseHHMM(a.range.start) ?? Infinity) - (parseHHMM(b.range.start) ?? Infinity),
+    );
+}
+
 /**
  * Premier créneau libre d'au moins `durationMin` minutes, ou `null` si la
  * journée est pleine. Sert à placer une nouvelle plage sans chevauchement.

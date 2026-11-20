@@ -33,7 +33,32 @@ def _store(hass: HomeAssistant, msg: dict) -> dict | None:
     entry_id = msg.get("entry_id")
     if entry_id is not None:
         return entries.get(entry_id)
-    return next(iter(entries.values())) if len(entries) == 1 else None
+    if len(entries) == 1:
+        return next(iter(entries.values()))
+    if not entries:
+        return None
+    # Multiple config entries without an explicit entry_id (e.g. from the Lovelace cards): resolve
+    # the entry that owns the targeted room, device, or home, falling back to the first entry.
+    target = msg.get("target")
+    if isinstance(target, dict):
+        t_type = target.get("type")
+        t_id = str(target.get("id") or "")
+        for store in entries.values():
+            coord = store[DATA_COORDINATOR]
+            if t_type == "room" and t_id in getattr(coord, "rooms", {}):
+                return store
+            if t_type == "device" and t_id in getattr(coord, "data", {}):
+                return store
+    home = msg.get("home")
+    if home is not None:
+        h_gid = str(home)
+        for store in entries.values():
+            coord = store[DATA_COORDINATOR]
+            if h_gid in getattr(coord, "holidays", {}) or any(
+                coord.home_of(g) == h_gid for g in getattr(coord, "rooms", {})
+            ):
+                return store
+    return next(iter(entries.values()))
 
 
 def _send_op_error(connection, msg_id: int, err: ops.OperationError) -> None:

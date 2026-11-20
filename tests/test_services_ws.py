@@ -551,3 +551,71 @@ async def test_service_set_relay_room(hass: HomeAssistant):
     assert ("relay_bind", "relay-1", "r9", True) in fake.writes
     await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
+
+
+async def test_dynamic_topology_sync_adds_and_removes_room_and_head_entities(setup):
+    """When a room is created or dissolved at runtime, the climate and number platforms add and
+    remove the room and isolated-head entities dynamically without an entry reload."""
+    from homeassistant.helpers import entity_registry as er
+
+    hass, entry, fake = setup
+    reg = er.async_get(hass)
+    # Initial state: room 13000000 exists with heads a & b (no per-head climate for a or b).
+    assert reg.async_get_entity_id("climate", DOMAIN, "13000000") is not None
+    assert reg.async_get_entity_id("number", DOMAIN, "13000000_comfort_setpoint") is not None
+    assert reg.async_get_entity_id("climate", DOMAIN, "a") is None
+
+    # Dissolve the room in the cloud topology and refresh: room entities are retired, and
+    # isolated-head climates are created for a & b.
+    fake._groups = []
+    fake._members = {}
+    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator.invalidate_topology()
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert reg.async_get_entity_id("climate", DOMAIN, "13000000") is None
+    assert reg.async_get_entity_id("number", DOMAIN, "13000000_comfort_setpoint") is None
+    assert reg.async_get_entity_id("climate", DOMAIN, "a") is not None
+    assert reg.async_get_entity_id("climate", DOMAIN, "b") is not None
+
+    # Recreate a room grouping a & b: the isolated-head climates are retired and the new room
+    # climate + setpoints appear.
+    fake._groups = [{"group_id": "24000000", "name": "Salle 2", "pid": "03wvrwpv", "head_count": 2}]
+    fake._members = {"24000000": ["a", "b"]}
+    coordinator.invalidate_topology()
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert reg.async_get_entity_id("climate", DOMAIN, "24000000") is not None
+    assert reg.async_get_entity_id("number", DOMAIN, "24000000_comfort_setpoint") is not None
+    assert reg.async_get_entity_id("climate", DOMAIN, "a") is None
+    assert reg.async_get_entity_id("climate", DOMAIN, "b") is None
+
+
+def test_ws_store_resolves_target_and_home_across_multiple_entries(hass: HomeAssistant):
+    """With multiple config entries and no explicit entry_id, _store resolves by room target,
+    device target, or home gid, and falls back to the first entry for fleet queries."""
+    from custom_components.danfoss_ally_cloud.const import DATA_COORDINATOR
+
+    c1 = SimpleNamespace(
+        rooms={"r1": object()},
+        data={"d1": object()},
+        holidays={"h1": {}},
+        home_of=lambda g: "h1" if g == "r1" else None,
+    )
+    c2 = SimpleNamespace(
+        rooms={"r2": object()},
+        data={"d2": object()},
+        holidays={"h2": {}},
+        home_of=lambda g: "h2" if g == "r2" else None,
+    )
+    s1 = {DATA_COORDINATOR: c1}
+    s2 = {DATA_COORDINATOR: c2}
+    hass.data[DOMAIN] = {"e1": s1, "e2": s2}
+
+    assert ws._store(hass, {"entry_id": "e2"}) is s2
+    assert ws._store(hass, {"target": {"type": "room", "id": "r2"}}) is s2
+    assert ws._store(hass, {"target": {"type": "device", "id": "d2"}}) is s2
+    assert ws._store(hass, {"home": "h2"}) is s2
+    assert ws._store(hass, {}) is s1

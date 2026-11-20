@@ -26,6 +26,7 @@ good after ``MAX_AUTH_REFUSALS`` attempts instead of retrying forever.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -179,8 +180,10 @@ class CloudMqttLink:
     _connected: bool = False
     _client: Any = field(default=None, repr=False)
     # Pending write confirmations: (node_id, dp_str, value, loop, future). Resolved true when an
-    # inbound frame echoes that DP for that cid (the gateway's protocol-4 report).
+    # inbound frame echoes that DP for that cid (the gateway's protocol-4 report). Guarded by
+    # ``_waiters_lock`` across the asyncio loop thread and paho's network thread.
     _waiters: list[tuple[str, str, Any, Any, Any]] = field(default_factory=list, repr=False)
+    _waiters_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     # --- pure logic (unit-tested offline) ---
 
@@ -217,7 +220,9 @@ class CloudMqttLink:
         cid = data.get("cid")
         raw_dps = data.get("dps")
         dps: dict[Any, Any] = raw_dps if isinstance(raw_dps, dict) else {}
-        for node_id, dp_str, value, loop, fut in list(self._waiters):
+        with self._waiters_lock:
+            snapshot = list(self._waiters)
+        for node_id, dp_str, value, loop, fut in snapshot:
             if cid == node_id and dp_str in dps and dps[dp_str] == value and not fut.done():
                 loop.call_soon_threadsafe(fut.set_result, True)
         if self.on_frame is not None:
@@ -233,14 +238,16 @@ class CloudMqttLink:
         loop = asyncio.get_running_loop()
         fut: Any = loop.create_future()
         waiter = (node_id, str(dp), value, loop, fut)
-        self._waiters.append(waiter)
+        with self._waiters_lock:
+            self._waiters.append(waiter)
         try:
             return bool(await asyncio.wait_for(fut, timeout_s))
         except TimeoutError:
             return False
         finally:
-            if waiter in self._waiters:
-                self._waiters.remove(waiter)
+            with self._waiters_lock:
+                if waiter in self._waiters:
+                    self._waiters.remove(waiter)
 
     def seq_for(self, gateway_id: str) -> mp.SeqOrigin:
         if gateway_id not in self._seq:
@@ -396,6 +403,12 @@ class CloudMqttLink:
         self._connected = False
         if self._state != STATE_IDLE:
             self._state = STATE_STOPPED
+        with self._waiters_lock:
+            pending = list(self._waiters)
+            self._waiters.clear()
+        for _, _, _, loop, fut in pending:
+            if not fut.done():
+                loop.call_soon_threadsafe(fut.set_result, False)
         client = self._client
         self._client = None
         if client is None:
