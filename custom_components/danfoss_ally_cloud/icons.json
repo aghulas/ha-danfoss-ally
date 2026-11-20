@@ -1,0 +1,112 @@
+{
+  "entity": {
+    "sensor": {
+      "valve_opening": {
+        "default": "mdi:valve",
+        "state": {
+          "0": "mdi:valve-closed"
+        }
+      },
+      "fault": {
+        "default": "mdi:alert-circle-outline",
+        "state": {
+          "0": "mdi:check-circle-outline"
+        }
+      },
+      "holiday_setpoint": {
+        "default": "mdi:beach"
+      },
+      "relay_rooms": {
+        "default": "mdi:radiator"
+      }
+    },
+    "binary_sensor": {
+      "online": {
+        "default": "mdi:lan-disconnect",
+        "state": {
+          "on": "mdi:lan-connect"
+        }
+      },
+      "window": {
+        "default": "mdi:window-closed-variant",
+        "state": {
+          "on": "mdi:window-open-variant"
+        }
+      },
+      "holiday": {
+        "default": "mdi:home-thermometer",
+        "state": {
+          "on": "mdi:beach"
+        }
+      },
+      "boiler_relay": {
+        "default": "mdi:fire-off",
+        "state": {
+          "on": "mdi:fire"
+        }
+      }
+    },
+    "switch": {
+      "child_lock": {
+        "default": "mdi:lock-open-outline",
+        "state": {
+          "on": "mdi:lock"
+        }
+      },
+      "window_detection": {
+        "default": "mdi:window-closed-variant",
+        "state": {
+          "on": "mdi:window-open-variant"
+        }
+      },
+      "preheat": {
+        "default": "mdi:heat-wave"
+      }
+    },
+    "number": {
+      "comfort_setpoint": {
+        "default": "mdi:home-thermometer"
+      },
+      "setback_setpoint": {
+        "default": "mdi:thermometer-low"
+      },
+      "upper_bound": {
+        "default": "mdi:thermometer-chevron-up"
+      },
+      "lower_bound": {
+        "default": "mdi:thermometer-chevron-down"
+      },
+      "pause_setpoint": {
+        "default": "mdi:snowflake-thermometer"
+      }
+    }
+  },
+  "services": {
+    "get_rooms": "mdi:floor-plan",
+    "get_room": "mdi:door",
+    "create_room": "mdi:plus-box-outline",
+    "rename_room": "mdi:rename-box",
+    "delete_room": "mdi:delete-outline",
+    "attach_heads": "mdi:link-plus",
+    "detach_heads": "mdi:link-off",
+    "disconnect_head": "mdi:connection",
+    "set_relay_room": "mdi:fire",
+    "get_holiday": "mdi:beach",
+    "get_relays": "mdi:electric-switch",
+    "get_overview": "mdi:view-dashboard-outline",
+    "get_local_survey": "mdi:zigbee",
+    "set_descaling": "mdi:calendar-sync",
+    "set_override": "mdi:thermometer-plus",
+    "clear_override": "mdi:thermometer-auto",
+    "set_window_detection": "mdi:window-open-variant",
+    "get_schedule": "mdi:calendar-clock",
+    "set_schedule": "mdi:calendar-edit",
+    "copy_schedule": "mdi:content-copy",
+    "restore_schedule": "mdi:calendar-refresh",
+    "get_write_job": "mdi:progress-clock",
+    "set_vacation": "mdi:beach",
+    "set_vacation_at_home": "mdi:home-heart",
+    "cancel_vacation": "mdi:calendar-remove",
+    "end_vacation": "mdi:calendar-check"
+  }
+}
