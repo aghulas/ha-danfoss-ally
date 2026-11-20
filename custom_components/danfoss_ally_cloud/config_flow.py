@@ -18,6 +18,11 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.selector import (
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 
 from .api import MQTT_CANDIDATE_DPS, CloudAuthError, CloudClient, CloudError, write_allowed
 from .const import (
@@ -65,6 +70,9 @@ def _schema(schema: vol.Schema) -> Any:
 
 
 _REGIONS = ["eu", "us", "cn", "in"]
+
+# Password and installation secrets are typed in a masked field, never shown on screen.
+_SECRET = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
 # Installation secrets the reauth step may replace (left empty = keep the entry's value).
 _INSTALL_SECRETS = (CONF_SIGN_KEY, CONF_DEVICE_ID, CONF_CH_KEY)
@@ -123,12 +131,12 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(
             {
                 vol.Required(CONF_USERNAME): str,
-                vol.Required(CONF_PASSWORD): str,
+                vol.Required(CONF_PASSWORD): _SECRET,
                 vol.Required(CONF_COUNTRY_CODE, default="33"): str,
                 vol.Required(CONF_REGION, default="eu"): vol.In(_REGIONS),
-                vol.Required(CONF_SIGN_KEY): str,
-                vol.Required(CONF_DEVICE_ID): str,
-                vol.Required(CONF_CH_KEY): str,
+                vol.Required(CONF_SIGN_KEY): _SECRET,
+                vol.Required(CONF_DEVICE_ID): _SECRET,
+                vol.Required(CONF_CH_KEY): _SECRET,
             }
         )
         return self.async_show_form(step_id="user", data_schema=_schema(schema), errors=errors)
@@ -183,10 +191,10 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(
             {
                 vol.Required(CONF_USERNAME, default=entry.data.get(CONF_USERNAME, "")): str,
-                vol.Required(CONF_PASSWORD): str,
-                vol.Optional(CONF_SIGN_KEY): str,
-                vol.Optional(CONF_DEVICE_ID): str,
-                vol.Optional(CONF_CH_KEY): str,
+                vol.Required(CONF_PASSWORD): _SECRET,
+                vol.Optional(CONF_SIGN_KEY): _SECRET,
+                vol.Optional(CONF_DEVICE_ID): _SECRET,
+                vol.Optional(CONF_CH_KEY): _SECRET,
             }
         )
         return self.async_show_form(
@@ -242,13 +250,13 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_COUNTRY_CODE, default=entry.data.get(CONF_COUNTRY_CODE, "33")
                 ): str,
-                vol.Required(
-                    CONF_REGION, default=entry.data.get(CONF_REGION, "eu")
-                ): vol.In(["eu", "us", "cn", "in"]),
-                vol.Optional(CONF_PASSWORD): str,
-                vol.Optional(CONF_SIGN_KEY): str,
-                vol.Optional(CONF_DEVICE_ID): str,
-                vol.Optional(CONF_CH_KEY): str,
+                vol.Required(CONF_REGION, default=entry.data.get(CONF_REGION, "eu")): vol.In(
+                    _REGIONS
+                ),
+                vol.Optional(CONF_PASSWORD): _SECRET,
+                vol.Optional(CONF_SIGN_KEY): _SECRET,
+                vol.Optional(CONF_DEVICE_ID): _SECRET,
+                vol.Optional(CONF_CH_KEY): _SECRET,
             }
         )
         return self.async_show_form(

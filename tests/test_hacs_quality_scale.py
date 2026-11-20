@@ -33,11 +33,7 @@ from custom_components.danfoss_ally_cloud.const import (
 from custom_components.danfoss_ally_cloud.repairs import clear_repairs, sync_repairs
 from tests.common import FakeCloudClient, head
 
-_COMP_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "custom_components"
-    / "danfoss_ally_cloud"
-)
+_COMP_DIR = Path(__file__).resolve().parent.parent / "custom_components" / "danfoss_ally_cloud"
 
 _ENTRY_DATA = {
     CONF_USERNAME: "user@example.test",
@@ -50,12 +46,22 @@ _ENTRY_DATA = {
 }
 
 
-def test_manifest_loggers_and_flexible_requirements() -> None:
-    """manifest.json declares loggers and avoids strict == pins that conflict in HA OS."""
+# Requirements kept on an exact version on purpose: the local tunnel rides tinytuya for a
+# reverse-engineered protocol, and nothing here would catch a behaviour change of a new release.
+_EXACT_PINS = {"tinytuya"}
+
+
+def test_manifest_loggers_and_requirements() -> None:
+    """manifest.json declares loggers; requirements are ranges, except the deliberate exact
+    pins (``_EXACT_PINS``), which stay pinned."""
     manifest = json.loads((_COMP_DIR / "manifest.json").read_text(encoding="utf-8"))
     assert "custom_components.danfoss_ally_cloud" in manifest.get("loggers", [])
     for req in manifest["requirements"]:
-        assert "==" not in req, f"Avoid strict pin in HACS manifest: {req}"
+        name = req.split("=")[0].split(">")[0].split("<")[0].strip()
+        if name in _EXACT_PINS:
+            assert "==" in req, f"{name} must stay on an exact version: {req}"
+        else:
+            assert "==" not in req, f"Avoid strict pin in HACS manifest: {req}"
 
 
 def test_reconfigure_and_issue_translations_present() -> None:
@@ -194,3 +200,20 @@ async def test_setup_entry_sets_typed_runtime_data(hass: HomeAssistant) -> None:
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
+
+
+def test_password_and_installation_secrets_are_masked_in_every_form() -> None:
+    """The password and the three installation secrets are typed in a masked field in the
+    user, reauth and reconfigure steps: never shown on screen."""
+    import inspect
+
+    from homeassistant.helpers.selector import TextSelector, TextSelectorType
+
+    from custom_components.danfoss_ally_cloud import config_flow
+
+    assert isinstance(config_flow._SECRET, TextSelector)
+    assert config_flow._SECRET.config["type"] == TextSelectorType.PASSWORD
+    src = inspect.getsource(config_flow)
+    for key in ("CONF_PASSWORD", "CONF_SIGN_KEY", "CONF_DEVICE_ID", "CONF_CH_KEY"):
+        assert f"({key}): str" not in src, f"{key} is typed in clear text in a form"
+        assert f"({key}): _SECRET" in src
