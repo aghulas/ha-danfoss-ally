@@ -158,27 +158,26 @@ async def async_setup_entry(
 
     async_add_entities(_collect_new_entities())
 
-    if hasattr(coordinator, "async_add_listener") and hasattr(entry, "async_on_unload"):
+    @callback
+    def _async_sync_topology() -> None:
+        """Create or retire number entities when rooms or group memberships change at runtime."""
+        registry = er.async_get(hass)
+        for group_id in list(known_rooms):
+            # Never on a mere absence from ``rooms`` (a partial device list empties it).
+            if coordinator.room_retired(group_id):
+                known_rooms.discard(group_id)
+                for desc in SETPOINTS:
+                    uid = f"{group_id}_{desc.key}"
+                    ent_id = registry.async_get_entity_id("number", DOMAIN, uid)
+                    if ent_id is not None:
+                        ent = registry.async_get(ent_id)
+                        if ent is not None and ent.config_entry_id == entry.entry_id:
+                            registry.async_remove(ent_id)
+        added = _collect_new_entities()
+        if added:
+            async_add_entities(added)
 
-        @callback
-        def _async_sync_topology() -> None:
-            registry = er.async_get(hass)
-            for group_id in list(known_rooms):
-                # Never on a mere absence from ``rooms`` (a partial device list empties it).
-                if coordinator.room_retired(group_id):
-                    known_rooms.discard(group_id)
-                    for desc in SETPOINTS:
-                        uid = f"{group_id}_{desc.key}"
-                        ent_id = registry.async_get_entity_id("number", DOMAIN, uid)
-                        if ent_id is not None:
-                            ent = registry.async_get(ent_id)
-                            if ent is not None and ent.config_entry_id == entry.entry_id:
-                                registry.async_remove(ent_id)
-            added = _collect_new_entities()
-            if added:
-                async_add_entities(added)
-
-        entry.async_on_unload(coordinator.async_add_listener(_async_sync_topology))
+    entry.async_on_unload(coordinator.async_add_listener(_async_sync_topology))
 
 
 def remove_closed_head_numbers(

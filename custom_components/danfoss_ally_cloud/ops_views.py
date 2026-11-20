@@ -125,7 +125,15 @@ def _single_head_overview(dev: DanfossDevice, room: dict | None) -> dict[str, An
 def _single_head_rooms(
     coordinator: DanfossCoordinator, home_gids: list[str]
 ) -> dict[str, list[dict[str, Any]]]:
-    """Single-head rooms per home gid: every head that belongs to no schedule-group."""
+    """Single-head rooms per home gid: every head that belongs to no schedule-group.
+
+    A room of the app with one head has no schedule-group (type 5), so it is absent from
+    ``coordinator.rooms``. Its home is exact (the per-home device list). Its app room cannot be read
+    from the cloud (the room membership is empty, contract §3.6), so it is matched **by name**: a
+    room of the same home whose normalised name equals the head's, not already claimed by a
+    schedule-group nor by another single head. Otherwise the head's name is used, flagged.
+    A head of unknown home goes to the first home (kept visible and counted rather than dropped).
+    """
     singles = [
         dev
         for dev in coordinator.data.values()
@@ -141,6 +149,8 @@ def _single_head_rooms(
 
     out: dict[str, list[dict[str, Any]]] = {}
     for home, devs in by_home.items():
+        # A room already named by a schedule-group of this home (with or without the " Group"
+        # label Tuya adds to an API-created room, §4.7) is not a single head's room.
         claimed = {
             key
             for group_id, rs in coordinator.rooms.items()
@@ -160,6 +170,7 @@ def _single_head_rooms(
         for dev in devs:
             key = _norm_name(dev.name)
             match = candidates.get(key, [])
+            # Unambiguous only: one room of that name, wanted by this head alone.
             room: dict | None = None
             if len(match) == 1 and wanted[key] == 1:
                 room = {"room_id": str(match[0]["room_id"]), "name": match[0]["name"]}
@@ -211,7 +222,15 @@ def _relay_home_gid(
     home_gids: list[str],
     home_by_name: dict[str, str | None],
 ) -> str | None:
-    """Home of a boiler relay, by majority vote of the rooms that drive it."""
+    """Home of a boiler relay, by majority vote of the rooms that drive it.
+
+    The relay -> room link (``relay_rooms``) carries Tuya *room* ids (type 4), a different id space
+    from the schedule *groups* (type 5) that ``home_of`` knows, so rooms are matched by name (the
+    same rule as group <-> room elsewhere). Names do not always match exactly ("D0" / "D-0", typos),
+    hence a vote over all the linked rooms rather than the first one. Linked rooms vote; if none is
+    linked, all listed rooms do. With a single home every relay belongs to it. Unresolvable: first
+    home (kept visible rather than dropped).
+    """
     if len(home_gids) == 1:
         return home_gids[0]
     listed = coordinator.relay_rooms.get(relay.id, [])
@@ -224,6 +243,7 @@ def _relay_home_gid(
         if home:
             votes[home] = votes.get(home, 0) + 1
     if votes:
+        # Highest vote wins; ties go to the earlier home (stable, deterministic).
         order = {gid: i for i, gid in enumerate(home_gids)}
         return min(votes, key=lambda gid: (-votes[gid], order.get(gid, len(order))))
     return home_gids[0] if home_gids else None
@@ -239,7 +259,13 @@ def _gateway_carried(coordinator: DanfossCoordinator, gateway) -> list[DanfossDe
 
 
 def _gateway_home_gid(coordinator: DanfossCoordinator, gateway, home_gids: list[str]) -> str | None:
-    """Home of a gateway: the home of the sub-devices it carries (``mesh_id`` = the gateway)."""
+    """Home of a gateway: the home of the sub-devices it carries (``mesh_id`` = the gateway).
+
+    Each sub-device's home is exact (per-home device list); they all vote (heads, relays, sensors:
+    a gateway may carry a boiler relay and no head), a tie going to the earlier home. A gateway
+    carrying nothing of a known home falls back to its own entry in the per-home device lists,
+    then to the first home (kept visible rather than dropped).
+    """
     order = {gid: i for i, gid in enumerate(home_gids)}
     votes: dict[str, int] = {}
     for dev in _gateway_carried(coordinator, gateway):
@@ -260,13 +286,17 @@ def _gateway_overview(coordinator: DanfossCoordinator, gateway) -> dict[str, Any
         "device_id": gateway.id,
         "name": gateway.name,
         "online": gateway.online,
+        # What the gateway carries: tells why it sits under a home (e.g. no head, one relay).
         "head_count": sum(1 for d in carried if d.is_head),
         "relay_count": sum(1 for d in carried if d.is_relay),
     }
 
 
 def overview_payload(store: dict) -> dict:
-    """Building / fleet overview (contract §3.6). Read-only, from the coordinator cache only."""
+    """Building / fleet overview (contract §3.6). Read-only, from the coordinator cache only.
+
+    No extra cloud call: homes, gateways, rooms and relays all come from the already-polled state.
+    """
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     home_gids = _home_gids(coordinator)
     names = {gid: (h.get("name") or f"Home {gid}") for gid, h in coordinator.holidays.items()}

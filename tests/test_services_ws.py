@@ -593,29 +593,143 @@ async def test_dynamic_topology_sync_adds_and_removes_room_and_head_entities(set
     assert reg.async_get_entity_id("climate", DOMAIN, "b") is None
 
 
-def test_ws_store_resolves_target_and_home_across_multiple_entries(hass: HomeAssistant):
-    """With multiple config entries and no explicit entry_id, _store resolves by room target,
-    device target, or home gid, and falls back to the first entry for fleet queries."""
+def _two_accounts(hass: HomeAssistant):
+    """Two synthetic accounts in ``hass.data`` (no entry_id in the messages)."""
     from custom_components.danfoss_ally_cloud.const import DATA_COORDINATOR
 
     c1 = SimpleNamespace(
         rooms={"r1": object()},
-        data={"d1": object()},
+        data={"d1": object(), "relay1": object()},
         holidays={"h1": {}},
         home_of=lambda g: "h1" if g == "r1" else None,
     )
     c2 = SimpleNamespace(
         rooms={"r2": object()},
-        data={"d2": object()},
+        data={"d2": object(), "d3": object(), "relay2": object()},
         holidays={"h2": {}},
         home_of=lambda g: "h2" if g == "r2" else None,
     )
     s1 = {DATA_COORDINATOR: c1}
     s2 = {DATA_COORDINATOR: c2}
     hass.data[DOMAIN] = {"e1": s1, "e2": s2}
+    return s1, s2
+
+
+def test_ws_store_resolves_target_and_home_across_multiple_entries(hass: HomeAssistant):
+    """With multiple config entries and no explicit entry_id, _store resolves by room target,
+    device target, or home gid, and falls back to the first entry for fleet queries."""
+    s1, s2 = _two_accounts(hass)
 
     assert ws._store(hass, {"entry_id": "e2"}) is s2
     assert ws._store(hass, {"target": {"type": "room", "id": "r2"}}) is s2
     assert ws._store(hass, {"target": {"type": "device", "id": "d2"}}) is s2
     assert ws._store(hass, {"home": "h2"}) is s2
     assert ws._store(hass, {}) is s1
+    # A read whose target nobody owns still falls back to the first entry.
+    assert ws._store(hass, {"target": {"type": "room", "id": "nowhere"}}) is s1
+    assert ws._store(hass, {"entry_id": "unknown"}) is None
+
+
+def test_ws_store_write_never_falls_back_to_an_arbitrary_account(hass: HomeAssistant):
+    """A write resolves to the owning entry or to nothing: never to the first entry."""
+    s1, s2 = _two_accounts(hass)
+
+    # Resolved by what the command addresses.
+    assert ws._store(hass, {"target": {"type": "room", "id": "r2"}}, write=True) is s2
+    assert ws._store(hass, {"target": {"type": "device", "id": "d1"}}, write=True) is s1
+    assert ws._store(hass, {"home": "h2"}, write=True) is s2
+    assert (
+        ws._store(hass, {"relay": "relay2", "target": {"type": "room", "id": "x"}}, write=True)
+        is s2
+    )
+    assert ws._store(hass, {"devices": ["d2", "d3"]}, write=True) is s2  # room/create
+    assert ws._store(hass, {"entry_id": "e1", "target": {"type": "room", "id": "r2"}}) is s1
+
+    # Not resolvable: refused, where a read would have taken the first entry.
+    assert ws._store(hass, {}, write=True) is None
+    assert ws._store(hass, {"target": {"type": "room", "id": "nowhere"}}, write=True) is None
+    assert ws._store(hass, {"home": "nowhere"}, write=True) is None
+    # Devices spread over two accounts belong to neither.
+    assert ws._store(hass, {"devices": ["d1", "d2"]}, write=True) is None
+    # Two entries claiming the command (room of one, home of the other): ambiguous, refused.
+    assert (
+        ws._store(hass, {"target": {"type": "room", "id": "r1"}, "home": "h2"}, write=True) is None
+    )
+
+
+def test_ws_store_single_account_needs_no_resolution(hass: HomeAssistant):
+    """One account: reads and writes go to it, whatever the target (the operation validates it)."""
+    s1, _ = _two_accounts(hass)
+    hass.data[DOMAIN] = {"e1": s1}
+    assert ws._store(hass, {}, write=True) is s1
+    assert ws._store(hass, {"target": {"type": "room", "id": "nowhere"}}, write=True) is s1
+    hass.data[DOMAIN] = {}
+    assert ws._store(hass, {}) is None and ws._store(hass, {}, write=True) is None
+
+
+async def test_ws_write_on_multi_account_resolves_or_is_refused(setup):
+    """Handlers, two accounts, no entry_id: a write on a known room reaches its account; a write
+    whose owner cannot be determined is refused with ``ambiguous_entry`` and sends nothing; the
+    same unresolvable target on a read is answered from the first entry."""
+    from custom_components.danfoss_ally_cloud.const import DATA_COORDINATOR
+
+    hass, entry, fake = setup
+    other = SimpleNamespace(rooms={"r2": object()}, data={}, holidays={}, home_of=lambda g: None)
+    hass.data[DOMAIN]["other"] = {DATA_COORDINATOR: other}
+    try:
+        conn = _FakeConn(is_admin=True)
+        ws.ws_schedule_set(hass, conn, {"id": 40, "target": _ROOM_TARGET, "days": _VALID_DAYS})
+        await hass.async_block_till_done()
+        assert conn.results[40]["kind"] == "set_schedule"
+        assert [w for w in fake.writes if w[0] == "set"]
+        sent = list(fake.writes)
+
+        nowhere = {"type": "room", "id": "nowhere"}
+        calls = (
+            (ws.ws_schedule_set, {"target": nowhere, "days": _VALID_DAYS}),
+            (ws.ws_schedule_restore, {"target": nowhere}),
+            (ws.ws_set_override, {"target": {"type": "device", "id": "zz"}, "temperature": 20.0}),
+            (ws.ws_clear_override, {"target": {"type": "device", "id": "zz"}}),
+            (ws.ws_set_window_detection, {"target": {"type": "device", "id": "zz"}, "enabled": 1}),
+            (
+                ws.ws_set_descaling,
+                {"target": {"type": "device", "id": "zz"}, "day": "mon", "time": "10:00"},
+            ),
+            (ws.ws_room_rename, {"target": nowhere, "name": "X"}),
+            (ws.ws_room_create, {"name": "X", "devices": ["zz"]}),
+            (ws.ws_relay_set_room, {"relay": "zz", "target": nowhere, "linked": True}),
+            (ws.ws_vacation_cancel, {"home": "nowhere", "time_zone": "Europe/Paris"}),
+        )
+        for msg_id, (handler, body) in enumerate(calls, start=50):
+            refused = _FakeConn(is_admin=True)
+            handler(hass, refused, {"id": msg_id, **body})
+            await hass.async_block_till_done()
+            assert refused.results == {}, handler.__name__
+            assert [code for code, _ in refused.errors] == ["ambiguous_entry"], handler.__name__
+            assert "entry_id" in refused.errors[0][1]
+        assert fake.writes == sent  # nothing reached any account
+
+        # Same unresolvable target on a READ: first entry answers (here: it does not know the room).
+        read = _FakeConn()
+        ws.ws_schedule_get(hass, read, {"id": 70, "target": nowhere, "refresh": False})
+        await hass.async_block_till_done()
+        assert "ambiguous_entry" not in [code for code, _ in read.errors]
+        ws.ws_rooms(hass, read, {"id": 71})
+        assert read.results[71]["rooms"][0]["id"] == "13000000"
+
+        # An explicit entry_id always decides.
+        explicit = _FakeConn(is_admin=True)
+        ws.ws_schedule_restore(
+            hass, explicit, {"id": 72, "target": _ROOM_TARGET, "entry_id": entry.entry_id}
+        )
+        await hass.async_block_till_done()
+        assert explicit.results[72]["kind"] == "restore"
+    finally:
+        hass.data[DOMAIN].pop("other", None)
+
+
+async def test_ws_write_without_any_account_keeps_its_error(hass: HomeAssistant):
+    conn = _FakeConn(is_admin=True)
+    ws.ws_schedule_restore(hass, conn, {"id": 80, "target": _ROOM_TARGET})
+    await hass.async_block_till_done()
+    assert [code for code, _ in conn.errors] == ["unknown_target"]

@@ -24,7 +24,51 @@ def _command(schema: dict[Any, Any]) -> Callable[[Any], Any]:
     return websocket_api.websocket_command(schema)
 
 
-def _store(hass: HomeAssistant, msg: dict) -> dict | None:
+def _owners(entries: dict[str, dict], msg: dict) -> list[dict]:
+    """The entries that own what the command addresses (room, head, relay, devices or home)."""
+
+    def owns(store: dict) -> bool:
+        coord = store[DATA_COORDINATOR]
+        rooms = getattr(coord, "rooms", {})
+        data = getattr(coord, "data", {})
+        target = msg.get("target")
+        if isinstance(target, dict):
+            t_type = target.get("type")
+            t_id = str(target.get("id") or "")
+            if t_type == "room" and t_id in rooms:
+                return True
+            if t_type == "device" and t_id in data:
+                return True
+        relay = msg.get("relay")
+        if relay is not None and str(relay) in data:
+            return True
+        devices = msg.get("devices")
+        if devices and all(str(d) in data for d in devices):
+            return True
+        home = msg.get("home")
+        if home is not None:
+            h_gid = str(home)
+            if h_gid in getattr(coord, "holidays", {}) or any(
+                coord.home_of(g) == h_gid for g in rooms
+            ):
+                return True
+        return False
+
+    return [store for store in entries.values() if owns(store)]
+
+
+def _store(hass: HomeAssistant, msg: dict, *, write: bool = False) -> dict | None:
+    """The config entry's store a command applies to, or None.
+
+    An explicit ``entry_id`` always decides, and a single-account install has only one answer. With
+    several accounts and no ``entry_id`` (the Lovelace cards), the entry is the one that owns the
+    targeted room, head, relay, devices or home. When nothing resolves:
+
+    - a **read** falls back to the first entry (the cards then show an account rather than an
+      error);
+    - a **write** (``write=True``) is refused: it must never land on an arbitrary account. It is
+      also refused when more than one entry claims the target.
+    """
     entries = {
         k: v
         for k, v in hass.data.get(DOMAIN, {}).items()
@@ -37,28 +81,35 @@ def _store(hass: HomeAssistant, msg: dict) -> dict | None:
         return next(iter(entries.values()))
     if not entries:
         return None
-    # Multiple config entries without an explicit entry_id (e.g. from the Lovelace cards): resolve
-    # the entry that owns the targeted room, device, or home, falling back to the first entry.
-    target = msg.get("target")
-    if isinstance(target, dict):
-        t_type = target.get("type")
-        t_id = str(target.get("id") or "")
-        for store in entries.values():
-            coord = store[DATA_COORDINATOR]
-            if t_type == "room" and t_id in getattr(coord, "rooms", {}):
-                return store
-            if t_type == "device" and t_id in getattr(coord, "data", {}):
-                return store
-    home = msg.get("home")
-    if home is not None:
-        h_gid = str(home)
-        for store in entries.values():
-            coord = store[DATA_COORDINATOR]
-            if h_gid in getattr(coord, "holidays", {}) or any(
-                coord.home_of(g) == h_gid for g in getattr(coord, "rooms", {})
-            ):
-                return store
-    return next(iter(entries.values()))
+    owners = _owners(entries, msg)
+    if write:
+        return owners[0] if len(owners) == 1 else None
+    return owners[0] if owners else next(iter(entries.values()))
+
+
+def _account_count(hass: HomeAssistant) -> int:
+    return sum(
+        1
+        for v in hass.data.get(DOMAIN, {}).values()
+        if isinstance(v, dict) and DATA_COORDINATOR in v
+    )
+
+
+def _write_store(hass: HomeAssistant, connection, msg: dict) -> dict | None:
+    """Store for a command that writes; sends the error and returns None when it is refused."""
+    store = _store(hass, msg, write=True)
+    if store is not None:
+        return store
+    if msg.get("entry_id") is None and _account_count(hass) > 1:
+        connection.send_error(
+            msg["id"],
+            "ambiguous_entry",
+            "several accounts are configured and none could be matched to this command: "
+            "pass entry_id",
+        )
+    else:
+        connection.send_error(msg["id"], "unknown_target", "no account configured")
+    return None
 
 
 def _send_op_error(connection, msg_id: int, err: ops.OperationError) -> None:
@@ -199,9 +250,8 @@ async def ws_local_survey(hass: HomeAssistant, connection, msg: dict) -> None:
 )
 @websocket_api.async_response
 async def ws_set_descaling(hass: HomeAssistant, connection, msg: dict) -> None:
-    store = _store(hass, msg)
+    store = _write_store(hass, connection, msg)
     if store is None:
-        connection.send_error(msg["id"], "unknown_target", "no account configured")
         return
     try:
         result = await ops.set_descaling(hass, store, msg["target"], msg["day"], msg["time"])
@@ -222,9 +272,8 @@ async def ws_set_descaling(hass: HomeAssistant, connection, msg: dict) -> None:
 )
 @websocket_api.async_response
 async def ws_set_override(hass: HomeAssistant, connection, msg: dict) -> None:
-    store = _store(hass, msg)
+    store = _write_store(hass, connection, msg)
     if store is None:
-        connection.send_error(msg["id"], "unknown_target", "no account configured")
         return
     try:
         result = await ops.set_override(hass, store, msg["target"], msg["temperature"])
@@ -244,9 +293,8 @@ async def ws_set_override(hass: HomeAssistant, connection, msg: dict) -> None:
 )
 @websocket_api.async_response
 async def ws_clear_override(hass: HomeAssistant, connection, msg: dict) -> None:
-    store = _store(hass, msg)
+    store = _write_store(hass, connection, msg)
     if store is None:
-        connection.send_error(msg["id"], "unknown_target", "no account configured")
         return
     try:
         result = await ops.clear_override(hass, store, msg["target"])
@@ -267,9 +315,8 @@ async def ws_clear_override(hass: HomeAssistant, connection, msg: dict) -> None:
 )
 @websocket_api.async_response
 async def ws_set_window_detection(hass: HomeAssistant, connection, msg: dict) -> None:
-    store = _store(hass, msg)
+    store = _write_store(hass, connection, msg)
     if store is None:
-        connection.send_error(msg["id"], "unknown_target", "no account configured")
         return
     try:
         result = await ops.set_window_detection(hass, store, msg["target"], msg["enabled"])
@@ -320,9 +367,8 @@ def ws_schedule_validate(hass: HomeAssistant, connection, msg: dict) -> None:
 )
 @websocket_api.async_response
 async def ws_schedule_set(hass: HomeAssistant, connection, msg: dict) -> None:
-    store = _store(hass, msg)
+    store = _write_store(hass, connection, msg)
     if store is None:
-        connection.send_error(msg["id"], "unknown_target", "no account configured")
         return
     try:
         job = await ops.set_schedule(hass, store, msg["target"], msg["days"])
@@ -342,9 +388,8 @@ async def ws_schedule_set(hass: HomeAssistant, connection, msg: dict) -> None:
 )
 @websocket_api.async_response
 async def ws_schedule_restore(hass: HomeAssistant, connection, msg: dict) -> None:
-    store = _store(hass, msg)
+    store = _write_store(hass, connection, msg)
     if store is None:
-        connection.send_error(msg["id"], "unknown_target", "no account configured")
         return
     try:
         job = await ops.restore_schedule(hass, store, msg["target"])
@@ -354,16 +399,8 @@ async def ws_schedule_restore(hass: HomeAssistant, connection, msg: dict) -> Non
     connection.send_result(msg["id"], job)
 
 
-def _ws_store_or_error(hass: HomeAssistant, connection, msg: dict) -> dict | None:
-    store = _store(hass, msg)
-    if store is None:
-        connection.send_error(msg["id"], "unknown_target", "no account configured")
-        return None
-    return store
-
-
 async def _ws_room_write(hass, connection, msg, func, *args) -> None:
-    store = _ws_store_or_error(hass, connection, msg)
+    store = _write_store(hass, connection, msg)
     if store is None:
         return
     try:
@@ -458,7 +495,7 @@ async def ws_room_detach(hass: HomeAssistant, connection, msg: dict) -> None:
 )
 @websocket_api.async_response
 async def ws_relay_set_room(hass: HomeAssistant, connection, msg: dict) -> None:
-    store = _ws_store_or_error(hass, connection, msg)
+    store = _write_store(hass, connection, msg)
     if store is None:
         return
     try:

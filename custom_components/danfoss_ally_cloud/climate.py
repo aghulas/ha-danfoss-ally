@@ -25,6 +25,16 @@ the Danfoss app shows); ``setpoints`` holds the per-mode settings (``comfort`` =
 ``setback`` = DP 119, ``manual``, ``pause``, ``holiday``) plus ``temp_set`` (DP 16, which reports
 the comfort setpoint whatever the slot). ``setpoints.setpoint`` is a DEPRECATED alias of
 ``temp_set`` kept for existing automations; it is NOT the active setpoint.
+
+An isolated head's climate also says what a setpoint write would do right now: ``write_path``
+(``cloud_mqtt`` or ``none``) and, when a write is possible, ``write_setting`` (``comfort`` or
+``setback``): the setting the write changes. That choice follows the mode the cloud reports
+(DP 2), which is a **label** (R5): it does not tell whether the head is in a comfort slot of its
+schedule. A comfort write also publishes DP 16, as the app does, which sets the head's current
+setpoint at once; outside a comfort slot the head goes back to its schedule's value by itself
+within 1 to 5 minutes (real hardware, 2026-11-19), so such a write causes a few minutes of heat
+demand. ``target_temperature`` stays the ACTIVE setpoint (DP 171): after a write it is not
+necessarily the value just written.
 """
 
 from __future__ import annotations
@@ -81,6 +91,10 @@ _HEAD_MQTT_MODE_DPS: dict[str, tuple[int, tuple[int, ...]]] = {
 
 _MIN_TEMP = 5.0
 _MAX_TEMP = 35.0
+
+# ``write_path`` state attribute of an isolated head's climate (same values as the numbers').
+_PATH_MQTT = "cloud_mqtt"
+_PATH_NONE = "none"
 
 # Deprecated ``setpoints`` key: up to 1.0.1 DP 16 (temp_set) was published as ``setpoint``, a
 # misleading name since it is the comfort setpoint, not the active one. Kept as an alias of
@@ -366,6 +380,23 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
             return False
         return self._link.can_publish(dev.mesh_id)
 
+    def _write_setting(self, dev: DanfossDevice | None) -> str | None:
+        """The setting a setpoint write would change right now, or None when it would be refused.
+
+        ``comfort`` (DP 118 + 16) or ``setback`` (DP 119), picked from the mode the cloud reports
+        (DP 2). That mode is a label (R5), not the head's position in its schedule: the answer says
+        which setting is written, not that the head is in a slot of that kind.
+        """
+        if dev is None or not self._mqtt_ready(dev):
+            return None
+        mode_spec = _HEAD_MQTT_MODE_DPS.get(dev.mode or "")
+        if mode_spec is None:
+            return None
+        setting_dp, companions = mode_spec
+        if not all(mqtt_dp_open(dp, self._supervised_dps) for dp in (setting_dp, *companions)):
+            return None
+        return _MODES[dev.mode or ""]
+
     @property
     def extra_state_attributes(self) -> dict:
         dev = self.device
@@ -375,10 +406,21 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
         if dev.mode is not None:
             attrs["mode"] = _MODES.get(dev.mode, dev.mode)
         attrs.update(_setpoint_attributes(dev.setpoint, dev.setpoints))
+        # What a setpoint write would do now, so that nobody has to guess it from ``mode``.
+        setting = self._write_setting(dev)
+        attrs["write_path"] = _PATH_NONE if setting is None else _PATH_MQTT
+        if setting is not None:
+            attrs["write_setting"] = setting
         return attrs
 
     async def async_set_temperature(self, **kwargs) -> None:
-        """Write an isolated head's setpoint over Cloud MQTT when enabled, else refuse cleanly."""
+        """Write an isolated head's setpoint over Cloud MQTT when enabled, else refuse cleanly.
+
+        The setting written (comfort or setback) is the one ``write_setting`` announces. A comfort
+        write publishes DP 16 with DP 118, as the app does: the head takes the value as its current
+        setpoint at once and, when it is not in a comfort slot, goes back to its schedule's value
+        by itself within 1 to 5 minutes (real hardware, 2026-11-19).
+        """
         dev = self.device
         if not self._mqtt_ready(dev) or dev is None or self._link is None:
             raise HomeAssistantError(
