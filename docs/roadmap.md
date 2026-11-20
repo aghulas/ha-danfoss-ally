@@ -119,9 +119,11 @@ publish over Tuya cloud MQTT, the only path found that applies them (contract §
      (R3). DP 16 sets the current setpoint at once, then the head returns to its schedule within
      five minutes. Not observed on a head in manual mode: the comfort write is refused there.
    - Preheat (DP 1): candidate, code shipped closed, confirmed by the tunnel read of 0x0025 only.
-     **Observation from the app pending**, before any supervised write; if it is negative the
-     candidate is removed. Assessment: probably not worth a second route
-     (`docs/cloud-mqtt-preheat-proposal.md`; sheet in `docs/first-write-procedure.md`).
+     Tried on 2026-11-20: the app's toggle reaches the head (stage A), the integration's
+     `{"1": bool}` publish **does not** (stage B, supervised write not passed: only the cloud's
+     DP 1 changed). Kept as a closed candidate; not to be promoted, and not worth re-trying
+     with the same frame (`docs/cloud-mqtt-preheat-proposal.md`; sheet in
+     `docs/first-write-procedure.md`).
 3. **Measure inbound coverage**: which heads and DPs the broker pushes, and how often, over a full
    day. **Tooling shipped**: the listen-only option `cloud_mqtt_probe` (off by default) accounts the
    pushed reports per head and per DP and serves the aggregates in the diagnostics. The 24 h run on

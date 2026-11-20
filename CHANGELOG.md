@@ -69,8 +69,10 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   then goes out over cloud MQTT and is confirmed **only** by the tunnel's read of the head (never
   by the gateway's echo or the cloud, which answered from the gateway cache over HTTP). While
   armed, the tunnel does not write that head's preheat, and the preheat switch shows
-  `write_path` / `write_trial`. **Not validated on real hardware**: the observation that must
-  come first is in docs/cloud-mqtt-preheat-proposal.md.
+  `write_path` / `write_trial`. **Tried on real hardware (2026-11-20), not passed**: the app's
+  own toggle reaches the head, the integration's publish only changed the cloud's DP 1, and the
+  write was reported "not confirmed" as designed. DP 1 stays closed; the tunnel remains the only
+  preheat route (docs/cloud-mqtt-preheat-proposal.md).
 
 ### Changed (cloud-MQTT link hardening)
 
