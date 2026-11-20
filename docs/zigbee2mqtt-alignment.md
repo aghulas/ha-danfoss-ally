@@ -44,14 +44,14 @@ Access: `R` = published and readable, `RW` = also settable.
 | Programming mode | `programming_operation_mode` (`setpoint`, `schedule`, `schedule_with_preheat`, `eco`) | RW | `select` | `sensor` `programming_mode` (enum, diagnostic, read only), same four value names | tunnel `0x0025` | Read only on our side, on purpose: writing `setpoint` here is the manual switch that erases the schedule (R4) |
 | Viewing direction | `viewing_direction` | RW, config | `switch` | `switch` `viewing_direction`, config, **trial head only** (batch C) | cloud MQTT DP 101, candidate, confirmed by the per-device route | Closed until its supervised trial passes |
 | Orientation (vertical / horizontal) | `thermostat_orientation` | RW, config | `switch` | `select` `orientation_setting` (`horizontal` / `vertical`), config, **trial head only** (batch C); `sensor` `orientation` read only | cloud MQTT DP 133, candidate, confirmed by the tunnel flag `0x4014` | Closed until its supervised trial passes; ours is a `select`, the two values being names, not on/off |
-| Radiator covered | `radiator_covered` | RW | `switch` | not exposed; read by the tunnel | tunnel `0x4016` read | Missing |
-| External room sensor | `external_measured_room_sensor` | RW | `number` | not exposed, not read | none | Missing, no channel known |
-| External window contact | `window_open_external` | RW | `switch` | not exposed, not read | none | Missing, no channel known |
+| Radiator covered | `radiator_covered` | RW | `switch` | `binary_sensor` `radiator_covered` read only; `switch` `radiator_covered_setting`, config, **trial head only** (batch C2) | tunnel `0x4016` read; write implemented, not tried | Closed until its supervised trial passes |
+| External room sensor | `external_measured_room_sensor` | RW | `number` | not exposed, not read | none | **Open**: no channel known (§6) |
+| External window contact | `window_open_external` | RW | `switch` | not exposed, not read | none | **Open**: no channel known (§6) |
 | Load balancing | `load_balancing_enable` | RW | `switch` | not exposed; read by the tunnel as `load_balancing` | tunnel `0x4032` read | Missing. On the Ally gateway this is driven by the room; exposing a write needs care |
 | Room load mean / estimate | `load_room_mean` RW, `load_estimate` R | — | `number` / `sensor` | not exposed, not read | none | Missing; gateway-managed, low value |
-| Regulation speed | `algorithm_scale_factor`, 1–10 | RW | `number` | not exposed; read by the tunnel as `control_speed` | tunnel `0x4020` read | Missing |
-| Setpoint offset | `regulation_setpoint_offset`, −2.5…2.5, 0.1 | RW, config | `number` | not exposed; read by the tunnel as `setpoint_offset` | tunnel `0x404B` read | Missing |
-| Valve exercise day / time | `day_of_week`, `trigger_time` | RW, config | `select` / `text` | not exposed; read by the tunnel as `descale_day` / `descale_time` | tunnel `0x4010` / `0x4011` read | Missing |
+| Regulation speed | `algorithm_scale_factor`, 1–10 | RW | `number` | `sensor` `regulation_speed` read only; `number` `regulation_speed_setting` 1–10, config, **trial head only** (batch C2) | tunnel `0x4020` read; write implemented, not tried | Closed until its supervised trial passes |
+| Setpoint offset | `regulation_setpoint_offset`, −2.5…2.5, 0.1 | RW, config | `number` | `sensor` `setpoint_offset` read only; `number` `setpoint_offset_setting` −2.5…2.5 by 0.1, config, **trial head only** (batch C2) | tunnel `0x404B` read; write implemented, not tried | Closed until its supervised trial passes; tenths-of-°C scale not confirmed |
+| Valve exercise day / time | `day_of_week`, `trigger_time` | RW, config | `select` / `text` | `sensor` `descale_day` / `descale_time` read only; `select` `valve_exercise_day` and `time` `valve_exercise_time`, config, **trial head only** (batch C2) | tunnel `0x4010` / `0x4011` read; write = the `set_descaling` service's frame, not tried through these entities | Closed until its supervised trial passes; ours is a `time`, Z2M's a `text` |
 | Adaptation run | `adaptation_run_control`, `adaptation_run_settings` | RW | `select` / `switch` | not exposed; `adaptation_setting` read by the tunnel | tunnel `0x404E` read | Missing |
 | Heat available | `heat_available` | RW, config | `switch` | not exposed; read by the tunnel | tunnel `0x4030` read | Missing; gateway-managed (boiler relay link) |
 | Heating system mode | `heating_system_mode` | RW, config | `select` | not exposed, not read | none | Missing |
@@ -141,8 +141,7 @@ done (entities `heat_required` and `mounting_mode`); item 4 was settled by keepi
   (its raw value is not known here): it reads unknown, with the raw value as an attribute.
 
 **C — new writes**, one at a time, each with a supervised write read back from an independent
-source (`docs/architecture.md`, rules for adding a route). Radiator covered, setpoint offset and
-regulation speed would be tunnel writes, unproven, not started.
+source (`docs/architecture.md`, rules for adding a route).
 
 - **C1, implemented, not tried on real hardware.** Viewing direction (DP 101) and orientation
   (DP 133) over cloud MQTT, as the app's captured frames: closed candidates, selectable for a
@@ -157,6 +156,20 @@ regulation speed would be tunnel writes, unproven, not started.
   tunnel's flag and the cloud's DP 133 disagree under that reading, and the trial starts by
   comparing the head, the flag and the cloud (read only). The answer also fixes the read-only
   "orientation" sensor of B2.
+
+- **C2, implemented, not tried on real hardware.** Radiator covered (`0x4016`), setpoint offset
+  (`0x404B`), regulation speed (`0x4020`) and valve exercise day / time (`0x4010` / `0x4011`)
+  through the local tunnel, as Zigbee2MQTT writes the same manufacturer attributes (types:
+  boolean, int8, uint8; enum8 / uint16). Closed by default; options `local_supervised_settings`
+  and `local_supervised_head` open them on one head (grouped or isolated), with config entities
+  on that head only. Each write is validated, then read back through the tunnel and shown from
+  the read-back. Procedure: `docs/tunnel-settings-trial.md`.
+- **Open question: the scale of the setpoint offset.** Tenths of °C (raw −25…25) is Zigbee2MQTT's
+  reading; the read-only sensor of B2 and the C2 write both assume it. The trial writes the
+  smallest step first and needs a source that shows the offset in °C to settle it.
+- **Open: external room sensor and external window contact.** Zigbee2MQTT writes them
+  (`external_measured_room_sensor`, `window_open_external`); no channel is known on our side (no
+  attribute read or written through the tunnel, no DP captured from the app). Not started.
 
 **Not proposed**: any write to `programming_operation_mode` (R4), load balancing and heat
 available (managed by the gateway and the relay link), LQI (not available).

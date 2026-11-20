@@ -69,7 +69,13 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
-from .entity import DanfossEntity, DanfossTrialEntity, remove_registry_entries
+from .entity import (
+    DanfossEntity,
+    DanfossLocalTrialEntity,
+    DanfossTrialEntity,
+    remove_registry_entries,
+)
+from .local_write import async_local_write_setting, local_trial_split
 from .mqtt_write import (  # noqa: F401 - timeout re-exported
     DP_PREHEAT,
     DP_VIEWING_DIRECTION,
@@ -172,8 +178,49 @@ async def async_setup_entry(
                     coordinator, dev.id, mqtt_link, supervised_for(data, dev.id)
                 )
             )
-    remove_registry_entries(hass, entry, "switch", closed)
+    # Radiator covered (tunnel 0x4016): only while its local-tunnel trial is armed for this head.
+    armed, closed_local = local_trial_split(
+        data, coordinator.data.values(), local, "radiator_covered", RADIATOR_COVERED_UID
+    )
+    if local is not None:
+        entities += [DanfossRadiatorCoveredSetting(local, coordinator, dev_id) for dev_id in armed]
+    remove_registry_entries(hass, entry, "switch", [*closed, *closed_local])
     async_add_entities(entities)
+
+
+RADIATOR_COVERED_UID = "radiator_covered_setting"
+
+
+class DanfossRadiatorCoveredSetting(DanfossLocalTrialEntity, SwitchEntity):
+    """Radiator covered (Danfoss attribute 0x4016), written through the local tunnel under
+    supervised trial (``local_write``). State: the head's own value read through the tunnel."""
+
+    _attr_translation_key = "radiator_covered_setting"
+    _attribute = "radiator_covered"
+
+    def __init__(
+        self, local: DanfossLocalCoordinator, cloud: DanfossCoordinator, device_id: str
+    ) -> None:
+        super().__init__(local, cloud, device_id, RADIATOR_COVERED_UID)
+
+    @property
+    def is_on(self) -> bool | None:
+        value = self._value(self._attribute)
+        return value if isinstance(value, bool) else None
+
+    async def _async_write(self, state: bool) -> None:
+        head = self._head
+        if head is None:
+            raise HomeAssistantError("radiator covered: the local tunnel cannot reach this head")
+        await self._async_run_trial(
+            async_local_write_setting(self.hass, self.coordinator, head, "radiator_covered", state)
+        )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._async_write(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._async_write(False)
 
 
 class DanfossSwitch(DanfossEntity, SwitchEntity):

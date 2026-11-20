@@ -106,6 +106,12 @@
       },
       "viewing_direction": {
         "default": "mdi:screen-rotation"
+      },
+      "radiator_covered_setting": {
+        "default": "mdi:radiator-off",
+        "state": {
+          "on": "mdi:radiator-disabled"
+        }
       }
     },
     "number": {
@@ -123,11 +129,25 @@
       },
       "pause_setpoint": {
         "default": "mdi:snowflake-thermometer"
+      },
+      "setpoint_offset_setting": {
+        "default": "mdi:thermometer-plus"
+      },
+      "regulation_speed_setting": {
+        "default": "mdi:speedometer"
       }
     },
     "select": {
       "orientation_setting": {
         "default": "mdi:phone-rotate-landscape"
+      },
+      "valve_exercise_day": {
+        "default": "mdi:calendar-week"
+      }
+    },
+    "time": {
+      "valve_exercise_time": {
+        "default": "mdi:clock-outline"
       }
     }
   },

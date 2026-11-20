@@ -58,6 +58,8 @@
           "scan_interval": "Cloud polling interval (seconds)",
           "distinct_device_id": "Use a dedicated device id (coexist with the Danfoss app / MCP connector without logging each other out)",
           "enable_local": "Enable the local Zigbee tunnel (gateways) for writes the cloud misses",
+          "local_supervised_settings": "Supervised trial — head settings written through the LOCAL TUNNEL, NOT yet validated on real hardware, opened for a first write done in person on a test head (see docs/tunnel-settings-trial.md). Needs the local tunnel. Leave empty otherwise",
+          "local_supervised_head": "Supervised trial — the ONE test head the local-tunnel settings ticked above open on. Every other head gets no write entity. Leave on — when no trial is running: nothing is then open",
           "post_command_refresh": "Refresh just-commanded heads via the per-device route (R-3: the bulk poll lags for minutes after a change). Off by default — turn on for a real-hardware validation session",
           "enable_vacation_write": "Enable vacation writes (holiday set/cancel). Off by default — turn on only for a supervised real-hardware validation",
           "enable_head_unbind": "Enable device unbind (disconnect a head, sensor or relay from the network). Destructive — off by default; turn on only for a supervised real-hardware validation",
@@ -187,6 +189,9 @@
       },
       "viewing_direction": {
         "name": "Viewing direction"
+      },
+      "radiator_covered_setting": {
+        "name": "Radiator covered setting"
       }
     },
     "number": {
@@ -204,6 +209,12 @@
       },
       "pause_setpoint": {
         "name": "Pause setpoint"
+      },
+      "setpoint_offset_setting": {
+        "name": "Setpoint offset setting"
+      },
+      "regulation_speed_setting": {
+        "name": "Regulation speed setting"
       }
     },
     "select": {
@@ -213,6 +224,23 @@
           "horizontal": "Horizontal",
           "vertical": "Vertical"
         }
+      },
+      "valve_exercise_day": {
+        "name": "Valve exercise day setting",
+        "state": {
+          "monday": "Monday",
+          "tuesday": "Tuesday",
+          "wednesday": "Wednesday",
+          "thursday": "Thursday",
+          "friday": "Friday",
+          "saturday": "Saturday",
+          "sunday": "Sunday"
+        }
+      }
+    },
+    "time": {
+      "valve_exercise_time": {
+        "name": "Valve exercise time setting"
       }
     }
   },

@@ -40,6 +40,8 @@ from .const import (
     CONF_ENABLE_HEAD_UNBIND,
     CONF_ENABLE_LOCAL,
     CONF_ENABLE_VACATION_WRITE,
+    CONF_LOCAL_SUPERVISED_HEAD,
+    CONF_LOCAL_SUPERVISED_SETTINGS,
     CONF_MQTT_BASE_TOPIC,
     CONF_MQTT_MODE,
     CONF_MQTT_SOURCE,
@@ -54,6 +56,8 @@ from .const import (
     DATA_HEAD_UNBIND,
     DATA_JOBS,
     DATA_LOCAL,
+    DATA_LOCAL_SUPERVISED_HEAD,
+    DATA_LOCAL_SUPERVISED_SETTINGS,
     DATA_MQTT,
     DATA_MQTT_COVERAGE,
     DATA_MQTT_LINK,
@@ -78,6 +82,7 @@ from .const import (
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 from .device_links import async_link_heads_to_rooms
 from .frontend import async_register_frontend, async_unregister_frontend
+from .local_write import LOCAL_TRIAL_SETTINGS
 from .mqtt_coverage import CoverageStats
 from .mqtt_publisher import MqttPublisher
 from .repairs import clear_repairs, sync_repairs
@@ -104,6 +109,8 @@ class DanfossRuntimeData:
     mqtt_coverage: CoverageStats | None = None
     mqtt_supervised_dps: frozenset[int] = field(default_factory=frozenset)
     mqtt_supervised_head: str | None = None
+    local_supervised_settings: frozenset[str] = field(default_factory=frozenset)
+    local_supervised_head: str | None = None
 
 
 DanfossConfigEntry = ConfigEntry[DanfossRuntimeData]
@@ -172,6 +179,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     head_unbind = bool(entry.options.get(CONF_ENABLE_HEAD_UNBIND, DEFAULT_ENABLE_HEAD_UNBIND))
     cloud_mqtt = bool(entry.options.get(CONF_ENABLE_CLOUD_MQTT, DEFAULT_ENABLE_CLOUD_MQTT))
     trial = _supervised_trial(entry)
+    local_trial = _local_trial(entry)
 
     entry.runtime_data = DanfossRuntimeData(
         coordinator=coordinator,
@@ -186,6 +194,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         mqtt_coverage=mqtt_coverage,
         mqtt_supervised_dps=trial[DATA_MQTT_SUPERVISED_DPS],  # type: ignore[arg-type]
         mqtt_supervised_head=trial[DATA_MQTT_SUPERVISED_HEAD],  # type: ignore[arg-type]
+        local_supervised_settings=local_trial[DATA_LOCAL_SUPERVISED_SETTINGS],  # type: ignore[arg-type]
+        local_supervised_head=local_trial[DATA_LOCAL_SUPERVISED_HEAD],  # type: ignore[arg-type]
     )
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
@@ -202,6 +212,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # (probe without the write option) refuses every publish.
         DATA_MQTT_LINK: mqtt_link,
         **trial,
+        **local_trial,
         DATA_MQTT_COVERAGE: mqtt_coverage,
     }
     await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
@@ -259,6 +270,36 @@ def _supervised_trial(entry: ConfigEntry) -> dict[str, object]:
                 dps,
             )
     return {DATA_MQTT_SUPERVISED_DPS: opened, DATA_MQTT_SUPERVISED_HEAD: head}
+
+
+def _local_trial(entry: ConfigEntry) -> dict[str, object]:
+    """The supervised trial of local-tunnel setting writes: the settings opened (option
+    ``local_supervised_settings``, empty by default) and the ONE head they open on (option
+    ``local_supervised_head``, empty by default). Unknown keys are ignored. Without a designated
+    head nothing opens; nothing opens either unless ``enable_local`` is on (the entities need the
+    local coordinator). The head is never logged."""
+    opened = frozenset(
+        str(key)
+        for key in entry.options.get(CONF_LOCAL_SUPERVISED_SETTINGS) or ()
+        if str(key) in LOCAL_TRIAL_SETTINGS
+    )
+    head = str(entry.options.get(CONF_LOCAL_SUPERVISED_HEAD) or "") or None
+    if opened and entry.options.get(CONF_ENABLE_LOCAL):
+        names = ", ".join(sorted(opened))
+        if head is None:
+            _LOGGER.warning(
+                "Local-tunnel supervised trial: setting(s) %s are listed but no trial head is "
+                "designated, so nothing is open.",
+                names,
+            )
+        else:
+            _LOGGER.warning(
+                "Local-tunnel supervised trial open for setting(s) %s on the designated trial "
+                "head only: not validated on real hardware yet, each first write must be "
+                "supervised (docs/tunnel-settings-trial.md).",
+                names,
+            )
+    return {DATA_LOCAL_SUPERVISED_SETTINGS: opened, DATA_LOCAL_SUPERVISED_HEAD: head}
 
 
 async def _async_setup_mqtt(

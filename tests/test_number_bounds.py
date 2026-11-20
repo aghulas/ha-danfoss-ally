@@ -242,8 +242,12 @@ async def _setup(
         DATA_MQTT_SUPERVISED_HEAD: trial_head,
     }
     REMOVED.clear()
-    with patch.object(
-        number, "remove_closed_head_numbers", lambda _hass, _entry, uids: REMOVED.extend(uids)
+    with (
+        patch.object(
+            number, "remove_closed_head_numbers", lambda _hass, _entry, uids: REMOVED.extend(uids)
+        ),
+        # The local-tunnel trial numbers' cleanup (no local tunnel here): not recorded.
+        patch.object(number, "remove_registry_entries", lambda *_args: None),
     ):
         await number.async_setup_entry(_Hass(data), _Entry(), added.extend)
     return [e for e in added if isinstance(e, kind)]

@@ -78,6 +78,7 @@ frames, so neither channel asks anything more of the user.
 | Setpoint bounds (upper, lower) | No path yet | Cloud MQTT when enabled and connected (proven 2026-11-19); otherwise no entity |
 | Preheat | Local tunnel (0x0025) | Local tunnel (0x0025). Cloud MQTT (DP 1) is a **candidate**, closed: on the trial head only, written over cloud MQTT and confirmed by the tunnel read alone; the state always comes from the tunnel |
 | Viewing direction (DP 101), orientation (DP 133) | No path | **Candidates**, closed: on the trial head only, cloud MQTT; orientation confirmed by the tunnel flag 0x4014 and shown from it, viewing direction confirmed by the per-device route (`docs/viewing-orientation-trial.md`); no entity otherwise |
+| Radiator covered (0x4016), setpoint offset (0x404B), regulation speed (0x4020), valve exercise day / time (0x4010 / 0x4011) | **Not proven**, closed: local tunnel on the trial head only (grouped or isolated) | Same |
 | Setpoint override until the next schedule change | Local tunnel (DP 171) | Local tunnel (DP 171) |
 | Valve exercise day and time | Local tunnel | Local tunnel |
 | Holiday, room management, relay binding, unbind | Cloud HTTP (holiday and unbind behind options) | — |
@@ -132,6 +133,12 @@ for a DP proven on it; (4) otherwise unavailable.
   tunnel cannot read, is in `MQTT_CLOUD_CONFIRMED_DPS` (the per-device route, the head's display
   being the trial's proof). Their entities exist only while their trial is armed
   (`docs/viewing-orientation-trial.md`).
+- Radiator covered, setpoint offset, regulation speed and valve exercise (batch C2) are written
+  through the **local tunnel**, as Zigbee2MQTT writes the same attributes. Each is closed unless
+  ticked in `local_supervised_settings`, and then only on the one head of
+  `local_supervised_head` (`local_write.py`). The head is read back through the tunnel after each
+  write; that read is the head's own answer but uses the channel written, so the trial adds the
+  app and the head as independent sources (`docs/tunnel-settings-trial.md`).
 - After a successful write, the entity shows what the channel returns (echo or re-read), with a
   timeout and a clear error. No optimistic state.
 

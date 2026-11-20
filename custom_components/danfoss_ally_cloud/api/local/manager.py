@@ -297,6 +297,60 @@ class LocalTunnelManager:
         finally:
             link.close()
 
+    def write_setting(self, head: Head, setting: str, value: Any) -> int | None:
+        """Write ONE Danfoss setting of ``tunnel.TUNNEL_SETTINGS`` (radiator covered, regulation
+        speed, setpoint offset). The value is validated before anything is sent.
+
+        Returns the head's status (0 = accepted), None without a response: the caller reads the
+        head back either way. Raises LocalError (invalid value) / LocalUnavailable.
+        """
+        records = tunnel.setting_records(setting, value)  # validate before opening the link
+        if head.gateway_id not in self._gateways:
+            raise tunnel.LocalUnavailable(f"unknown gateway: {head.gateway_id}")
+        link = self._open_link(self._gateways[head.gateway_id])
+        try:
+            return tunnel.write_attributes(
+                link, head.dev_id, head.node_id, records, manufacturer=True
+            )
+        finally:
+            link.close()
+
+    def write_valve_exercise(
+        self, head: Head, day: str | None = None, hour: str | None = None
+    ) -> tuple[int | None, str, str]:
+        """Change the valve exercise day OR time (0x4010 / 0x4011), keeping the other one.
+
+        The two attributes are written together (``tunnel.write_descale``, the descale service's
+        path), so the one not given is first read from the head itself on the same link, never
+        taken from a cached value. Returns ``(status, day, hour)`` as written; status 0 = accepted,
+        None without a response. Raises LocalError when the head does not answer the first read,
+        when its day is undefined and only the time is given, or on an invalid value.
+        """
+        if (day is None) == (hour is None):
+            raise tunnel.LocalError("give the valve exercise day or its time, one at a time")
+        if day is not None:
+            tunnel.descale_records(day, "00:00")  # validate before opening the link
+        if hour is not None:
+            tunnel.minutes(hour)
+        if head.gateway_id not in self._gateways:
+            raise tunnel.LocalUnavailable(f"unknown gateway: {head.gateway_id}")
+        link = self._open_link(self._gateways[head.gateway_id])
+        try:
+            current = tunnel.read_valve_exercise(link, head.dev_id, head.node_id)
+            if current is None or not {"descale_day", "descale_time"} <= current.keys():
+                raise tunnel.LocalError("valve exercise unreadable (no answer, or no value)")
+            new_day = day if day is not None else str(current["descale_day"])
+            new_hour = hour if hour is not None else str(current["descale_time"])
+            if new_day not in tunnel.DESCALE_DAYS[:7]:
+                raise tunnel.LocalError(
+                    f"the head's valve exercise day is {new_day!r}: set the day first"
+                )
+            status = tunnel.write_descale(link, head.dev_id, head.node_id, new_day, new_hour)
+            m = tunnel.minutes(new_hour) % 1440  # as encoded by ``tunnel.descale_records``
+            return status, new_day, f"{m // 60:02d}:{m % 60:02d}"
+        finally:
+            link.close()
+
     def descale(self, head: Head, day: str, hour: str) -> bool:
         """Set the weekly valve descaling day/time (0x4010/0x4011).
 

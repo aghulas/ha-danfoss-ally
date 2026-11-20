@@ -37,6 +37,8 @@ from .const import (
     CONF_ENABLE_HEAD_UNBIND,
     CONF_ENABLE_LOCAL,
     CONF_ENABLE_VACATION_WRITE,
+    CONF_LOCAL_SUPERVISED_HEAD,
+    CONF_LOCAL_SUPERVISED_SETTINGS,
     CONF_MQTT_BASE_TOPIC,
     CONF_MQTT_MODE,
     CONF_MQTT_SOURCE,
@@ -59,6 +61,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
+from .local_write import LOCAL_TRIAL_SETTINGS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -90,6 +93,19 @@ _CANDIDATE_DP_LABELS = {
     133: "133 — orientation, vertical / horizontal (confirmed only by the local tunnel, "
     "attribute 0x4014: needs enable_local)",
 }
+
+
+# Labels of the local-tunnel settings in their supervised-trial selector.
+_LOCAL_TRIAL_LABELS = {
+    "radiator_covered": "Radiator covered (attribute 0x4016)",
+    "setpoint_offset": "Setpoint offset, -2.5 to 2.5 °C (attribute 0x404B; scale not confirmed)",
+    "regulation_speed": "Regulation speed, 1 to 10 (attribute 0x4020)",
+    "valve_exercise": "Valve exercise day and time (attributes 0x4010 / 0x4011)",
+}
+
+
+def _local_trial_choices() -> dict[str, str]:
+    return {key: _LOCAL_TRIAL_LABELS.get(key, key) for key in LOCAL_TRIAL_SETTINGS}
 
 
 def _candidate_dp_choices() -> dict[str, str]:
@@ -290,6 +306,21 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
             choices[current] = "(head not available)"
         return choices
 
+    def _local_trial_head_choices(self, current: str) -> dict[str, str]:
+        """Heads a local-tunnel trial may be confined to: the heads of a verified model with a
+        Zigbee node id (grouped or isolated: the tunnel writes one head), by name. Always offers
+        "none", and keeps the current value selectable even when the fleet is not loaded."""
+        choices: dict[str, str] = {"": "—"}
+        data = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id) or {}
+        coordinator = data.get(DATA_COORDINATOR)
+        if coordinator is not None:
+            for dev in coordinator.data.values():
+                if dev.is_head and write_allowed(dev) and dev.node_id:
+                    choices[dev.id] = dev.name or "(unnamed head)"
+        if current and current not in choices:
+            choices[current] = "(head not available)"
+        return choices
+
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
@@ -297,6 +328,11 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
         choices = _candidate_dp_choices()
         heads = self._trial_head_choices(str(o.get(CONF_CLOUD_MQTT_SUPERVISED_HEAD) or ""))
         supervised = [dp for dp in o.get(CONF_CLOUD_MQTT_SUPERVISED_DPS) or [] if dp in choices]
+        local_choices = _local_trial_choices()
+        local_heads = self._local_trial_head_choices(str(o.get(CONF_LOCAL_SUPERVISED_HEAD) or ""))
+        local_supervised = [
+            k for k in o.get(CONF_LOCAL_SUPERVISED_SETTINGS) or [] if k in local_choices
+        ]
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -308,6 +344,13 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
                     default=o.get(CONF_DISTINCT_DEVICE_ID, DEFAULT_DISTINCT_DEVICE_ID),
                 ): bool,
                 vol.Optional(CONF_ENABLE_LOCAL, default=o.get(CONF_ENABLE_LOCAL, False)): bool,
+                vol.Optional(
+                    CONF_LOCAL_SUPERVISED_SETTINGS, default=local_supervised
+                ): cv.multi_select(local_choices),
+                vol.Optional(
+                    CONF_LOCAL_SUPERVISED_HEAD,
+                    default=str(o.get(CONF_LOCAL_SUPERVISED_HEAD) or ""),
+                ): vol.In(local_heads),
                 vol.Optional(
                     CONF_POST_COMMAND_REFRESH,
                     default=o.get(CONF_POST_COMMAND_REFRESH, DEFAULT_POST_COMMAND_REFRESH),
