@@ -395,6 +395,30 @@ async def test_refresh_settings_updates_one_head_and_survives_the_pass(hass: Hom
     local._surveying = False
 
 
+async def test_a_read_back_during_a_pass_survives_the_pass_merge(hass: HomeAssistant):
+    """A daily pass ending just after an orientation write must not put back the pre-write value
+    over the single-head read-back, even when its loop callbacks come late (made no-ops here, the
+    worst case: only the pass's own merge of what the worker collected runs)."""
+    import threading
+
+    from custom_components.danfoss_ally_cloud.coordinator import DanfossLocalCoordinator
+
+    manager = _SettingsManager()
+    cloud = MagicMock()
+    cloud.data = {}
+    local = DanfossLocalCoordinator(hass, manager, cloud, 900)
+    local._async_head_settings = lambda *a: None  # type: ignore[method-assign]
+    h = Head("dev-1", "node-1", "gw-1")
+
+    local._surveying = True  # a pass is running
+    manager.settings["dev-1"] = {"orientation": True}  # read back after the write
+    await local.async_refresh_settings(h)
+    manager.settings["dev-1"] = {"orientation": False}  # what the pass read before the write
+    await local._async_survey_settings([h], threading.Event())
+    local._surveying = False
+    assert local.settings["dev-1"]["orientation"] is True
+
+
 # --- entities (hass harness) --------------------------------------------------------------------
 
 _GW = {"gw-1": GatewayKey("gw-1", "GW", "0123456789abcdef", ip="10.0.0.1")}

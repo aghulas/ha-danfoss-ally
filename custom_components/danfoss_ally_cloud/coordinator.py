@@ -508,9 +508,11 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
             _LOGGER.debug("local settings survey failed (%s)", type(err).__name__)
             failed = True
         # What the heads gave is kept even when the pass failed part-way (best-effort).
+        # A head read back on its own during the pass (after a write) keeps that fresher read.
         now = dt_util.utcnow()
         for dev_id, attrs in collected.items():
-            self.settings[dev_id] = {**attrs, "read_at": now}
+            if dev_id not in self._settings_read_back:
+                self.settings[dev_id] = {**attrs, "read_at": now}
         if not failed:
             self._settings_at = time.monotonic()
 

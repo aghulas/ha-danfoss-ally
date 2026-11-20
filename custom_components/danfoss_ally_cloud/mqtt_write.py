@@ -399,7 +399,7 @@ async def async_mqtt_write_orientation(
     while True:
         await asyncio.sleep(ORIENTATION_CONFIRM_INTERVAL)
         after = await local.async_refresh_settings(head)
-        if after is not None and after.get("orientation") is expected:
+        if after is not None and after.get("orientation") == expected:
             _LOGGER.debug(
                 "cloud-MQTT orientation confirmed by the local tunnel after %.0f s",
                 loop.time() - sent_at,
@@ -460,7 +460,7 @@ async def async_mqtt_write_viewing_direction(
     deadline = sent_at + VIEWING_CONFIRM_TIMEOUT
     while True:
         await asyncio.sleep(VIEWING_CONFIRM_INTERVAL)
-        if await read() is value:
+        if await read() == value:
             await coordinator.async_request_refresh()
             return CONFIRMED_BY_CLOUD
         if loop.time() >= deadline:
