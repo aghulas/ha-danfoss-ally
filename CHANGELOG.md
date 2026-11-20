@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.3.1 — Room sensor in the room card by area
+
+Patch release: frontend only (room card by area), no change to the integration's entities,
+services or writes.
 
 **Added**
 
