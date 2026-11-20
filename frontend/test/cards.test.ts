@@ -723,6 +723,44 @@ describe("carte pièce par zone", () => {
     expect(el._schedule).toBeNull();
   });
 
+  it("montre le capteur de pièce de la zone et la régulation sur capteur externe", async () => {
+    const { hass } = areaHass();
+    const reg = hass as unknown as ReturnType<typeof building>;
+    reg.devices["dev-s"] = { id: "dev-s", area_id: "salon" };
+    reg.entities["sensor.salon_temperature"] = { entity_id: "sensor.salon_temperature", device_id: "dev-s" };
+    reg.states["sensor.salon_temperature"] = {
+      entity_id: "sensor.salon_temperature",
+      state: "17.48",
+      attributes: { device_class: "temperature" },
+    };
+    reg.entities["number.salon_fenetre_external_measured_room_sensor"] = {
+      entity_id: "number.salon_fenetre_external_measured_room_sensor",
+      device_id: "dev-z1",
+    };
+    reg.states["number.salon_fenetre_external_measured_room_sensor"] = {
+      entity_id: "number.salon_fenetre_external_measured_room_sensor",
+      state: "1736",
+      attributes: {},
+    };
+    const el = await loaded(hass, { area_id: "salon" });
+    const header = templateText(el._renderRoomSensors());
+    expect(header).toContain("17.5 °C");
+    expect(header).toContain("Room sensor");
+    const rows = templateText(el._renderAreaClimates(undefined));
+    // The head shows the temperature it regulates on, and its own reading, labelled.
+    expect(rows).toContain("17.4 °C");
+    expect(rows).toContain("head's own reading 19.5 °C");
+    expect(rows).toContain("Regulates on an external room sensor");
+  });
+
+  it("sans capteur de pièce ni capteur externe, rien ne change", async () => {
+    const { hass } = areaHass();
+    const el = await loaded(hass, { area_id: "salon" });
+    expect(templateText(el._renderRoomSensors())).toBe("");
+    const rows = templateText(el._renderAreaClimates(undefined));
+    expect(rows).not.toContain("external");
+  });
+
   it("une zone inconnue le dit", async () => {
     const { hass } = areaHass();
     const el = await loaded(hass, { area_id: "grenier" });

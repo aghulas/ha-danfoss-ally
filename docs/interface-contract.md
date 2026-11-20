@@ -1016,6 +1016,20 @@ read from the frontend registries; no WebSocket command is added.
     `battery_low` on), valve opening (`pi_heating_demand`, `valve_opening`), window
     (`binary_sensor` device class `window`, `window_open_internal` in `open` / `external_open`, or
     `window_open_external` on), heat demand (`heat_required`), link quality (`linkquality`).
+  - **External room sensor** (unreleased): a head whose device has a `number` (or `sensor`)
+    `external_measured_room_sensor`, else a climate attribute of that name, with a numeric value
+    above −8000 and at most 3500 (hundredths of °C, Zigbee2MQTT's range; −8000 = no external
+    sensor) regulates on that sensor. Its row shows that temperature (value / 100, to 0.1 °C) as
+    the reading, a "regulates on an external room sensor" badge, and the head's own
+    `current_temperature` on a line labelled as the head's own reading. Without one, the row is
+    unchanged.
+  - **Room sensors** (unreleased): under the title, the area's room temperature and humidity:
+    `sensor` entities of device class `temperature` / `humidity`, numeric state, in the area
+    (entity or device), not hidden, without entity category, not on a device that carries a
+    `climate` (a head's own reading is not the room's), and not of this integration or of
+    `DUPLICATE_PLATFORMS`. One sensor: its value; several: their mean (temperature to 0.1 °C,
+    humidity to 1 %), captioned with their number and, when they differ, the temperature range.
+    None: nothing is shown.
   - **Write**: the only one is `climate.set_temperature` on a climate **not** of this integration,
     **off by default**: offered only when the card config has `allow_foreign_writes: true`, the
     user is an administrator (`info.is_admin`, else the frontend user), the climate is not a

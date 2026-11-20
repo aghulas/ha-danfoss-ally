@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+**Added**
+
+- Room card by area: the area's **room temperature** (and humidity) under the title, read from the
+  area's `sensor` entities of device class `temperature` / `humidity` that are not on a climate's
+  device (one sensor: its value; several: their average, with their number and range).
+- Room card by area: a head that regulates on an **external room sensor**
+  (`external_measured_room_sensor`, Zigbee2MQTT, hundredths of °C, −8000 = none) shows that
+  temperature as its reading, a "regulates on an external room sensor" badge, and its own reading
+  labelled as such underneath. Ally rooms of this integration are unchanged; no new write, no new
+  WebSocket command.
+
+**Validation**: vitest with synthetic data only; not checked in a real Home Assistant.
+
 ## 1.3.0 — Isolated-head thermostat, runtime topology, embedded schedule editor, safer schedule writes
 
 Minor release. It also carries what was prepared as 1.2.1, which was never released (a

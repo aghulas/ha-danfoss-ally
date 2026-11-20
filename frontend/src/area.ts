@@ -45,6 +45,14 @@ const KEYS_WINDOW_STATE = ["window_open_internal"];
 const KEYS_WINDOW_BINARY = ["window_open_external", "window_open", "window"];
 const KEYS_HEAT = ["heat_required"];
 const KEYS_LINK = ["linkquality"];
+const KEYS_EXTERNAL = ["external_measured_room_sensor"];
+
+/**
+ * `external_measured_room_sensor` (Zigbee2MQTT, Danfoss Ally) : centièmes de °C,
+ * plage −8000…3500 ; −8000 (ou moins) = aucun capteur externe.
+ */
+const EXTERNAL_NONE = -8000;
+const EXTERNAL_MAX = 3500;
 
 /** États de `window_open_internal` (Zigbee2MQTT) qui signifient « ouverte ». */
 const WINDOW_OPEN_STATES = new Set(["open", "external_open"]);
@@ -57,6 +65,23 @@ export interface HeadExtras {
   window_open: boolean | null;
   heat_required: boolean | null;
   linkquality: number | null;
+  /**
+   * Température (°C, au dixième) du capteur de pièce externe sur lequel la tête
+   * régule (`external_measured_room_sensor` / 100), ou `null` sans capteur externe.
+   */
+  external_temperature: number | null;
+}
+
+/** Capteurs de pièce d'une zone (hors appareils de climates), agrégés. */
+export interface RoomSensors {
+  /** Moyenne au dixième des capteurs de température, `null` s'il n'y en a pas. */
+  temperature: number | null;
+  temperature_count: number;
+  temperature_min: number | null;
+  temperature_max: number | null;
+  /** Moyenne entière des capteurs d'humidité, `null` s'il n'y en a pas. */
+  humidity: number | null;
+  humidity_count: number;
 }
 
 /** Vue d'un climate quelconque, prête à afficher. */
@@ -264,6 +289,7 @@ export function headExtras(hass: HassLike, entityId: string): HeadExtras {
   const heat = pick(list, "binary_sensor", [], KEYS_HEAT);
   const link = num(pick(list, "sensor", [], KEYS_LINK)?.state.state);
   return {
+    external_temperature: externalTemperature(hass, entityId, list),
     battery,
     low_battery:
       batteryLow?.state.state === "on" || (battery !== null && battery <= LOW_BATTERY_PERCENT),
@@ -272,6 +298,22 @@ export function headExtras(hass: HassLike, entityId: string): HeadExtras {
     heat_required: heat ? heat.state.state === "on" : null,
     linkquality: link,
   };
+}
+
+/**
+ * Température du capteur externe sur lequel régule la tête : entité `number` (ou
+ * `sensor`) `external_measured_room_sensor` de son appareil, sinon attribut du même
+ * nom sur le climate. Centièmes de °C ; −8000, hors plage ou indisponible = aucun.
+ */
+function externalTemperature(hass: HassLike, entityId: string, list: Sibling[]): number | null {
+  const entity = pick(list, "number", [], KEYS_EXTERNAL) ?? pick(list, "sensor", [], KEYS_EXTERNAL);
+  const raw = num(
+    entity ? entity.state.state : hass.states?.[entityId]?.attributes.external_measured_room_sensor,
+  );
+  if (raw === null || raw <= EXTERNAL_NONE || raw > EXTERNAL_MAX) {
+    return null;
+  }
+  return Math.round(raw / 10) / 10;
 }
 
 /** Température mesurée de repli (capteur de l'appareil), quand le climate n'en publie pas. */
@@ -305,6 +347,66 @@ export function climateView(hass: HassLike, entityId: string): ClimateView | nul
     step: step > 0 ? step : DEFAULT_STEP,
     supports_target: (features & FEATURE_TARGET_TEMPERATURE) !== 0,
     extras: headExtras(hass, entityId),
+  };
+}
+
+/** Appareils qui portent au moins un climate (leurs capteurs ne sont pas « de pièce »). */
+function climateDevices(hass: HassLike): Set<string> {
+  const out = new Set<string>();
+  for (const e of Object.values(hass.entities ?? {})) {
+    if (domainOf(e.entity_id) === "climate" && e.device_id) {
+      out.add(e.device_id);
+    }
+  }
+  return out;
+}
+
+const round1 = (x: number): number => Math.round(x * 10) / 10;
+
+/**
+ * Capteurs de pièce d'une zone : `sensor` de `device_class` `temperature` /
+ * `humidity`, état numérique, dans la zone (l'entité ou son appareil), non masqués,
+ * hors catégorie (diagnostic, configuration), hors appareil qui porte un climate
+ * (la mesure propre d'une tête n'est pas celle de la pièce), et hors entités de cette
+ * intégration ou de `DUPLICATE_PLATFORMS` (les pièces Ally gardent leur affichage).
+ * Plusieurs capteurs : moyenne, avec leur nombre et leur plage.
+ */
+export function roomSensors(hass: HassLike, areaId: string): RoomSensors {
+  const excluded = climateDevices(hass);
+  const temps: number[] = [];
+  const hums: number[] = [];
+  for (const entry of Object.values(hass.entities ?? {})) {
+    if (
+      domainOf(entry.entity_id) !== "sensor" ||
+      entry.hidden ||
+      entry.entity_category ||
+      entry.platform === ALLY_PLATFORM ||
+      DUPLICATE_PLATFORMS.has(entry.platform ?? "") ||
+      (entry.device_id && excluded.has(entry.device_id)) ||
+      entityArea(hass, entry.entity_id) !== areaId
+    ) {
+      continue;
+    }
+    const st = hass.states?.[entry.entity_id];
+    const value = st && !UNAVAILABLE.has(st.state) ? num(st.state) : null;
+    if (value === null) {
+      continue;
+    }
+    const dc = st?.attributes.device_class;
+    if (dc === "temperature") {
+      temps.push(value);
+    } else if (dc === "humidity") {
+      hums.push(value);
+    }
+  }
+  const mean = (xs: number[]): number => xs.reduce((s, x) => s + x, 0) / xs.length;
+  return {
+    temperature: temps.length ? round1(mean(temps)) : null,
+    temperature_count: temps.length,
+    temperature_min: temps.length ? round1(Math.min(...temps)) : null,
+    temperature_max: temps.length ? round1(Math.max(...temps)) : null,
+    humidity: hums.length ? Math.round(mean(hums)) : null,
+    humidity_count: hums.length,
   };
 }
 
