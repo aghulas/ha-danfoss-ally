@@ -457,7 +457,7 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
 
   | 118 + 16 | Comfort setpoint | **Proven** (2026-11-19/20, read back through the local tunnel — current setpoint and weekly schedule — and in the app), on a head following its schedule | tenths of °C within the head's own bounds, 0.5 step; refused unless the head's mode is `at_home` or `leaving_home`. `{"118": v, "16": v}` in one frame; only DP 118's confirmation is required |
   | 119 | Setback setpoint | **Proven** (2026-11-19, tunnel and app), on a head following its schedule | same check. `{"119": v}` alone (no DP 109) |
-  | 1 | Preheat | **Candidate**, not observed on real hardware. Confirmed by the local tunnel only (attribute `0x0025`, bit 1): the gateway's echo and the cloud read are not accepted | boolean; the head must answer through the tunnel before anything is sent |
+  | 1 | Preheat | **Candidate**, supervised write **not passed** (2026-11-20: the publish changed the cloud's DP 1, not the head, while the app's own toggle did reach it). Confirmed by the local tunnel only (attribute `0x0025`, bit 1): the gateway's echo and the cloud read are not accepted | boolean; the head must answer through the tunnel before anything is sent |
   | 120 | Pause setpoint | **Proven** (see above) | same check. `{"120": v}` |
 
   Observed during the 2026-11-19 writes, on an isolated head: raising the lower bound above the

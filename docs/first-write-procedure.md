@@ -209,12 +209,17 @@ Home Assistant and in the app.
 - **Not covered**: the same write during a comfort slot (the value is then not in force; the
   schedule read above is what establishes it), and a head in manual mode.
 
-### DP 1 — preheat (candidate; observation from the app first)
+### DP 1 — preheat (candidate; stage A positive, stage B failed, 2026-11-20)
 
 The known trap: over HTTP, DP 1 only changed the gateway cache while the head's real preheat (bit 1
 of Zigbee attribute `0x0025`) did not move. The gateway's echo and the cloud read therefore confirm
 nothing here; **only `0x0025` read through the local tunnel does**. Background and assessment:
 `docs/cloud-mqtt-preheat-proposal.md`. Two stages; stage B is run only if stage A is positive.
+
+Result on 2026-11-20 (tables in the proposal): stage A positive — the app's toggle reached the head
+within a minute; stage B **not passed** — the integration's `{"1": true}` changed the cloud's DP 1
+and not the head, 15 minutes later still. DP 1 stays a closed candidate. Do not repeat stage B
+with the same frame: change what is sent first (see the proposal's open question).
 
 Preconditions for both, on top of the generic ones: the local tunnel answers **this head** right
 before starting (its preheat switch has a value, not "unavailable"), and a raw read of `0x0025`
@@ -280,9 +285,12 @@ Reading the result:
      **not** fix it: the integration reads the head, finds it already at `V0` and publishes
      nothing (a publish the head does not react to could not be confirmed by the tunnel, so the
      integration never sends one). A tunnel write does not touch that cache either. Resynchronise
-     from the **Danfoss app**, the reference publisher: set its preheat toggle to the head's value
-     (`V0`'s bit 1), then read cloud DP 1 through the per-device route — it must show that value —
-     and raw `0x0025` — it must still equal `V0`. Record both reads.
+     from the **Danfoss app**, the reference publisher. Its preheat toggle does **not** display
+     that cloud DP 1 (2026-11-20: it showed the head's value while cloud DP 1 said the opposite),
+     so setting it "to the head's value" may be a no-op: do a round trip instead — toggle to the
+     trial value, wait a minute, toggle back to the head's value (`V0`'s bit 1). Then read cloud
+     DP 1 through the per-device route — it must show `V0`'s value — and raw `0x0025` — it must
+     equal `V0`. Record both reads. These are two real writes to the head: the owner's to do.
 - **Passed** means only: this publish reaches the head. Promotion is a change of its own, which
   must say when cloud MQTT would be preferred to the tunnel that confirms it.
 

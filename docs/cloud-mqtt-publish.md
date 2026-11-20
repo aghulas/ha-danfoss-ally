@@ -125,9 +125,10 @@ above), but the 5-refusal limit has only been exercised with a faked client.
   its schedule within five minutes. Every call returned in under a second. Build 1.2.0-rc4.
 - **Scope today**: the MQTT write path carries **DP 30, 116, 18, 27, 120, 118, 16 and 119** as
   proven (`api.writes.MQTT_WRITE_DPS`). DP 1 (preheat) is implemented as a **candidate**
-  (`MQTT_CANDIDATE_DPS`), closed until its supervised write, with a rule of its own: its write is
-  confirmed by the local tunnel's read of attribute 0x0025 only, never by the echo or the cloud
-  (docs/cloud-mqtt-preheat-proposal.md). Other DPs (133/101 mounting/orientation) are added one at
+  (`MQTT_CANDIDATE_DPS`), closed, with a rule of its own: its write is
+  confirmed by the local tunnel's read of attribute 0x0025 only, never by the echo or the cloud.
+  Its supervised write of 2026-11-20 was **not passed** (the cloud's DP 1 changed, the head did
+  not), so it stays closed (docs/cloud-mqtt-preheat-proposal.md). Other DPs (133/101 mounting/orientation) are added one at
   a time, each as a candidate first (docs/first-write-procedure.md).
 
 ## Provenance
