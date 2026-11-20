@@ -41,7 +41,7 @@ DOMAIN = "danfoss_ally_cloud"
 
 # Exposed platforms. v0.2: climate (setpoint) + sensors + switch (child lock, window detection).
 # number comes with other numeric settings (max setpoint...).
-PLATFORMS = ["climate", "sensor", "binary_sensor", "switch", "number", "select"]
+PLATFORMS = ["climate", "sensor", "binary_sensor", "switch", "number", "select", "time"]
 
 # Keys of hass.data[DOMAIN][entry_id].
 DATA_COORDINATOR = "coordinator"
@@ -57,6 +57,10 @@ DATA_MQTT_LINK = "cloud_mqtt_link"  # CloudMqttLink | None: live link, created o
 DATA_MQTT_SUPERVISED_DPS = "cloud_mqtt_supervised_dps"
 # str | None: device id of the ONE head the supervised trial is restricted to.
 DATA_MQTT_SUPERVISED_HEAD = "cloud_mqtt_supervised_head"
+# frozenset[str]: Danfoss head settings opened for a supervised trial of their LOCAL-TUNNEL write.
+DATA_LOCAL_SUPERVISED_SETTINGS = "local_supervised_settings"
+# str | None: device id of the ONE head that local-tunnel trial is restricted to.
+DATA_LOCAL_SUPERVISED_HEAD = "local_supervised_head"
 DATA_MQTT_COVERAGE = "cloud_mqtt_coverage"  # CoverageStats | None: only with cloud_mqtt_probe on
 
 # LOCAL survey (Zigbee tunnel) interval: slow, ~8 s per head. Distinct from the cloud polling.
@@ -143,6 +147,16 @@ CONF_CLOUD_MQTT_SUPERVISED_DPS = "cloud_mqtt_supervised_dps"
 # no candidate opens anywhere, whatever is listed. A real device identifier: redacted in the
 # diagnostics, never logged.
 CONF_CLOUD_MQTT_SUPERVISED_HEAD = "cloud_mqtt_supervised_head"
+# Danfoss head settings whose LOCAL-TUNNEL write is opened for a SUPERVISED TRIAL (a list of setting
+# keys, ``local_write.LOCAL_TRIAL_SETTINGS``; EMPTY by default): radiator covered (0x4016),
+# setpoint offset (0x404B), regulation speed (0x4020), valve exercise day / time (0x4010 / 0x4011).
+# None is proven on real hardware: each write entity exists only while its setting is listed here,
+# ``enable_local`` is on, and only for the ONE head chosen below (docs/tunnel-settings-trial.md).
+CONF_LOCAL_SUPERVISED_SETTINGS = "local_supervised_settings"
+# The ONE head that local-tunnel trial applies to (its device id; EMPTY by default). With no head
+# designated nothing opens, whatever is listed. A real device identifier: redacted in the
+# diagnostics, never logged.
+CONF_LOCAL_SUPERVISED_HEAD = "local_supervised_head"
 DEFAULT_CLOUD_MQTT_PROBE = False
 CLOUD_MQTT_PROBE_MAX_SECONDS = 48 * 3600  # a listen-only link closes itself after two days
 # How long a commanded head stays "hot" (refreshed via the per-device route) after a write, and the

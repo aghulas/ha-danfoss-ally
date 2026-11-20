@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import math
 import threading
 import time
 from collections.abc import Callable
@@ -307,6 +308,61 @@ def descale_records(day: str, hour: str) -> list[tuple[int, int, int]]:
     return [(0x4010, 0x30, DESCALE_DAYS.index(d)), (0x4011, 0x21, minutes(hour) % 1440)]
 
 
+# Danfoss settings written through the tunnel, one attribute each, UNDER SUPERVISED TRIAL ONLY
+# (not proven on real hardware): name (as ``name_attributes`` reads it) -> (attribute, ZCL type).
+# Types as Zigbee2MQTT writes them: boolean (0x10), uint8 (0x20), int8 (0x28, signed).
+TUNNEL_SETTINGS: dict[str, tuple[int, int]] = {
+    "radiator_covered": (0x4016, 0x10),
+    "control_speed": (0x4020, 0x20),  # Zigbee2MQTT ``algorithm_scale_factor``
+    "setpoint_offset": (0x404B, 0x28),  # Zigbee2MQTT ``regulation_setpoint_offset``
+}
+# Ranges of Zigbee2MQTT. The offset is carried in TENTHS of °C (raw -25..25): Zigbee2MQTT's scale,
+# NOT confirmed on real hardware here.
+CONTROL_SPEED_MIN, CONTROL_SPEED_MAX = 1, 10
+SETPOINT_OFFSET_MIN, SETPOINT_OFFSET_MAX = -2.5, 2.5
+
+
+def setting_raw(setting: str, value: Any) -> int:
+    """Validate a tunnel setting's value and return the raw integer to write.
+
+    ``radiator_covered``: a bool. ``control_speed``: an integer 1 to 10. ``setpoint_offset``: °C,
+    -2.5 to 2.5 by 0.1, written in tenths (raw -25..25). Raises LocalError otherwise: nothing is
+    sent for a value that does not pass.
+    """
+    if setting == "radiator_covered":
+        if not isinstance(value, bool):
+            raise LocalError(f"radiator_covered expects a boolean, got {value!r}")
+        return int(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise LocalError(f"{setting} expects a number, got {value!r}")
+    if setting == "control_speed":
+        if value != int(value) or not CONTROL_SPEED_MIN <= value <= CONTROL_SPEED_MAX:
+            raise LocalError(
+                f"regulation speed out of range: {value} "
+                f"(integer {CONTROL_SPEED_MIN} to {CONTROL_SPEED_MAX})"
+            )
+        return int(value)
+    if setting == "setpoint_offset":
+        raw = round(float(value) * 10)
+        if abs(raw - float(value) * 10) > 1e-6 or not (
+            SETPOINT_OFFSET_MIN * 10 <= raw <= SETPOINT_OFFSET_MAX * 10
+        ):
+            raise LocalError(
+                f"setpoint offset out of range: {value} "
+                f"({SETPOINT_OFFSET_MIN} to {SETPOINT_OFFSET_MAX} °C by 0.1)"
+            )
+        return int(raw)
+    raise LocalError(f"unknown tunnel setting: {setting} (known: {', '.join(TUNNEL_SETTINGS)})")
+
+
+def setting_records(setting: str, value: Any) -> list[tuple[int, int, int]]:
+    """The write record of one tunnel setting (validated). For ``write_attributes(...,
+    manufacturer=True)``."""
+    raw = setting_raw(setting, value)
+    attribute, typ = TUNNEL_SETTINGS[setting]
+    return [(attribute, typ, raw)]
+
+
 def setpoint_value(celsius: float) -> int:
     """Setpoint override (DP 171) -> integer to publish. Valid 5-35 °C by 0.5.
 
@@ -554,6 +610,24 @@ def write_day(
 def write_descale(link: Any, dev_id: str, node_id: str, day: str, hour: str) -> int | None:
     """Set the valve descaling (0x4010/0x4011, manufacturer). Status 0 = accepted."""
     return write_attributes(link, dev_id, node_id, descale_records(day, hour), manufacturer=True)
+
+
+def write_setting(link: Any, dev_id: str, node_id: str, setting: str, value: Any) -> int | None:
+    """Write ONE Danfoss setting of ``TUNNEL_SETTINGS`` (validated first, LocalError otherwise).
+    Returns the head's status (0 = accepted), None without a response."""
+    return write_attributes(
+        link, dev_id, node_id, setting_records(setting, value), manufacturer=True
+    )
+
+
+# The valve exercise attributes alone, read just before rewriting one of the two.
+ATTRS_VALVE_EXERCISE = [(0x4010, "descale_day"), (0x4011, "descale_time")]
+
+
+def read_valve_exercise(link: Any, dev_id: str, node_id: str, **kw: Any) -> dict[str, Any] | None:
+    """A head's valve exercise day and time (``descale_day`` / ``descale_time``). None if no
+    response."""
+    return read_attributes(link, dev_id, node_id, ATTRS_VALVE_EXERCISE, True, **kw)
 
 
 def write_setpoint(link: Any, dev_id: str, node_id: str, celsius: float) -> int:

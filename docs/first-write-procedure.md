@@ -34,6 +34,11 @@ confirmed by a read of the head through the local tunnel only (its sheet below).
 (DP 101) and orientation (DP 133) do not accept the echo either; they have a sheet of their own,
 `docs/viewing-orientation-trial.md`.
 
+Head settings written through the **local tunnel** rather than cloud MQTT (radiator covered,
+setpoint offset, regulation speed, valve exercise) follow the same discipline with their own
+options (`local_supervised_settings`, `local_supervised_head`) and sheet:
+`docs/tunnel-settings-trial.md`.
+
 ## Generic procedure
 
 Preconditions:

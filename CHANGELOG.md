@@ -109,6 +109,17 @@ cloud's value were back to the cloud's value by about 05:00, with no write from 
   tunnel (attribute `0x4014`, also the select's state), viewing direction through the per-device
   cloud route. Each attempt is reported in `trial_result`. **Not validated on real hardware**;
   procedure in `docs/viewing-orientation-trial.md`.
+- **Supervised trial of four head settings through the local tunnel, closed by default**: radiator
+  covered (`0x4016`), setpoint offset (`0x404B`, −2.5 to 2.5 °C in tenths: Zigbee2MQTT's scale,
+  not confirmed here), regulation speed (`0x4020`, 1 to 10) and valve exercise day / time
+  (`0x4010` / `0x4011`, the `set_descaling` service's write), written as Zigbee attributes as
+  Zigbee2MQTT does. New options `local_supervised_settings` and `local_supervised_head`: only for
+  the ticked settings, on that one head, with `enable_local` on, config entities appear (a
+  `switch`, two `number`, a `select` and a new `time` platform); they are removed when the trial
+  is disarmed. Values are checked before sending; after each write the head is read back through
+  the tunnel and the entity shows what it says, with a clear error on a rejection, a disagreeing
+  read-back or no read-back (the entity then stays unavailable until the head is read again).
+  **Not validated on real hardware**; procedure in `docs/tunnel-settings-trial.md`.
 
 ### Changed
 

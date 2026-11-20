@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Iterable
+from datetime import datetime
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -18,6 +19,12 @@ from .api import DanfossDevice, mqtt_dp_open, write_allowed
 from .api.mqtt_client import CloudMqttLink
 from .const import DOMAIN
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
+from .local_write import (
+    LocalWriteNotConfirmed,
+    LocalWriteRefused,
+    LocalWriteRejected,
+    tunnel_head,
+)
 from .mqtt_write import CONFIRMED_BY_CLOUD, CONFIRMED_BY_TUNNEL, UNCHANGED, WriteNotConfirmed
 
 # Write paths shown in the ``write_path`` attribute of the trial entities.
@@ -243,3 +250,82 @@ class DanfossTrialEntity(DanfossEntity):
 
     def _on_not_confirmed(self) -> None:
         """Hook: a frame went out and nothing confirmed it."""
+
+
+class DanfossLocalTrialEntity(DanfossLocalEntity):
+    """A head setting whose LOCAL-TUNNEL write is under supervised trial (radiator covered,
+    setpoint offset, regulation speed, valve exercise), in the config category. Created only while
+    the trial of its setting is armed for this head (``local_write.local_setting_armed``).
+
+    State: what the head gave through the tunnel, by the daily settings pass or by the read-back
+    after a write (``DanfossLocalEntity``, ``_daily``), never the value written. Unavailable while
+    the head is offline, its gateway unknown to the tunnel, or no read is known; and after a write
+    whose read-back failed, until the head is read again. The last trial write is reported in
+    ``trial_result`` (``confirmed_by_tunnel``, ``refused``, ``rejected``, ``not_confirmed``),
+    ``trial_at`` and ``trial_error``."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _daily = True
+
+    def __init__(
+        self,
+        local: DanfossLocalCoordinator,
+        cloud: DanfossCoordinator,
+        device_id: str,
+        unique_suffix: str,
+    ) -> None:
+        super().__init__(local, cloud, device_id)
+        self._attr_unique_id = f"{device_id}_{unique_suffix}"
+        self._trial: dict[str, Any] = {}
+        # Set when a frame may have reached the head without a read-back: older reads are hidden.
+        self._untrusted_before: datetime | None = None
+
+    @property
+    def _source(self) -> dict[str, Any] | None:
+        source = super()._source
+        if source is None or self._untrusted_before is None:
+            return source
+        read_at = source.get("read_at")
+        if not isinstance(read_at, datetime) or read_at <= self._untrusted_before:
+            return None
+        return source
+
+    def _value(self, attribute: str) -> Any:
+        source = self._source
+        return None if source is None else source.get(attribute)
+
+    @property
+    def _head(self) -> Any:
+        return tunnel_head(self.coordinator, self._cloud.data.get(self._device_id))
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._head is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        attrs = super().extra_state_attributes
+        attrs.update(write_path="local", write_scope="head", write_trial=True)
+        attrs.update(self._trial)
+        return attrs
+
+    async def _async_run_trial(self, write: Awaitable[dict[str, Any]]) -> None:
+        """Run one trial write and keep its outcome in the attributes (the error is re-raised)."""
+        now = dt_util.utcnow()
+        result = "confirmed_by_tunnel"
+        error: HomeAssistantError | None = None
+        try:
+            await write
+        except LocalWriteNotConfirmed as err:
+            result, error = "not_confirmed", err
+            self._untrusted_before = now
+        except LocalWriteRejected as err:
+            result, error = "rejected", err
+        except LocalWriteRefused as err:
+            result, error = "refused", err
+        self._trial = {"trial_result": result, "trial_at": now.isoformat()}
+        if error is not None:
+            self._trial["trial_error"] = str(error)
+        self.async_write_ha_state()
+        if error is not None:
+            raise error

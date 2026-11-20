@@ -566,6 +566,19 @@ reference, over the published product schema.
 > head as `7`, idle — whereas a `10⁰` reading of `700` would have clamped to the upper bound and
 > requested heat). Do not "correct" the code to the schema.
 
+**Head settings written as Zigbee attributes (supervised trial, not proven).** Danfoss
+manufacturer attributes of the thermostat cluster (`0x0201`, code `0x1246`), written with one
+manufacturer-specific Write Attributes frame, as Zigbee2MQTT does, then read back through the
+tunnel (`api/local/tunnel.py` `TUNNEL_SETTINGS`, `local_write.py`). Closed by default, on one
+designated head only (§5.1, `docs/tunnel-settings-trial.md`).
+
+| Attribute | Meaning | ZCL type | Value over the tunnel |
+|---|---|---|---|
+| `0x4016` | radiator covered | boolean (`0x10`) | 0 / 1 |
+| `0x4020` | regulation speed (Zigbee2MQTT `algorithm_scale_factor`) | uint8 (`0x20`) | 1 to 10 |
+| `0x404B` | setpoint offset | int8 (`0x28`) | **tenths of °C**, −25 to 25 (−2.5 to 2.5 °C) — Zigbee2MQTT's scale, **not confirmed on real hardware** |
+| `0x4010` / `0x4011` | valve exercise day / time | enum8 (`0x30`) / uint16 (`0x21`) | 0 Sunday … 6 Saturday (7 undefined) / minutes after midnight; written together (the `set_descaling` service's frame) |
+
 **Multi-gateway survey (`get_local_survey` service, `danfoss_ally_cloud/local_survey` WebSocket
 command).** Read-only, one thread per gateway, the heads of a gateway read one after the other
 (~8 s for a head that answers, about 48 s for one that does not). Response:
@@ -741,6 +754,20 @@ by the MCP connector (`smartlife.m.*` family; the APK also exposes the `thing.m.
   Attributes `write_path`, `write_scope`, `write_trial`, and the last attempt's `trial_result`,
   `trial_at`, `trial_error`. Removed from the registry when the trial is disarmed. Writes and
   their confirmation: §4.2; procedure: docs/viewing-orientation-trial.md.
+- Only on the head designated in `local_supervised_head`, for the settings ticked in
+  `local_supervised_settings`, with `enable_local` on, a verified model and a head the tunnel can
+  address (grouped or isolated), config category: `switch` "radiator covered setting"
+  (`0x4016`), `number` "setpoint offset setting" (−2.5 to 2.5 °C by 0.1, `0x404B`) and
+  "regulation speed setting" (1 to 10, `0x4020`), `select` "valve exercise day setting"
+  (`monday` … `sunday`, `0x4010`) and `time` "valve exercise time setting" (`0x4011`). State =
+  the head's value read through the tunnel (daily pass, or the read-back after a write), never
+  the value written; unavailable while offline, while the tunnel cannot reach the head, and after
+  a write whose read-back failed, until the head is read again. A write validates the value,
+  writes the attribute (day and time together, the other half read from the head first), reads
+  the head back and raises on a rejection, a disagreeing read-back or no read-back. Attributes
+  `write_path: local`, `write_scope: head`, `write_trial: true`, `raw`, `read_at`, and the last
+  attempt's `trial_result`, `trial_at`, `trial_error`. Removed from the registry when the trial
+  is disarmed. Procedure: docs/tunnel-settings-trial.md.
 - **Thermostat (`climate`)**: no `comfort` / `setback` / `holiday` preset tied to DP 2 (R5).
   **Durable setpoint write at the room level**: in modes `comfort` (`at_home`) and `setback`
   (`leaving_home`), changing the temperature publishes the setpoint on the group then rewrites one

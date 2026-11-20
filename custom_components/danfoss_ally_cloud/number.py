@@ -51,11 +51,13 @@ from .api import (
     mqtt_dp_open,
     write_allowed,
 )
+from .api.local import tunnel
 from .api.mqtt_client import CloudMqttLink
 from .api.rooms import RoomState
 from .const import (
     DATA_CLOUD_MQTT,
     DATA_COORDINATOR,
+    DATA_LOCAL,
     DATA_MQTT_LINK,
     DOMAIN,
     DP_AT_HOME_SETPOINT,
@@ -70,8 +72,9 @@ from .const import (
     SETPOINT_STEP,
     WRITE_VERIFIED_PRODUCTS,
 )
-from .coordinator import DanfossCoordinator
-from .entity import DanfossEntity, remove_registry_entries
+from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
+from .entity import DanfossEntity, DanfossLocalTrialEntity, remove_registry_entries
+from .local_write import async_local_write_setting, local_trial_split
 from .mqtt_write import (  # noqa: F401 - block helpers re-exported
     SETTINGS_BLOCK_DPS,
     async_mqtt_write,
@@ -157,6 +160,23 @@ async def async_setup_entry(
         return entities
 
     async_add_entities(_collect_new_entities())
+
+    # Local-tunnel settings under supervised trial (setpoint offset, regulation speed): only on the
+    # designated head while armed; the registry entries of the others are removed.
+    local: DanfossLocalCoordinator | None = data.get(DATA_LOCAL)
+    trial_numbers: list[NumberEntity] = []
+    closed_local: list[str] = []
+    for tdesc in LOCAL_TRIAL_NUMBERS:
+        armed, closed = local_trial_split(
+            data, coordinator.data.values(), local, tdesc.setting, tdesc.key
+        )
+        closed_local += closed
+        if local is not None:
+            trial_numbers += [
+                DanfossLocalSettingNumber(local, coordinator, dev_id, tdesc) for dev_id in armed
+            ]
+    remove_registry_entries(hass, entry, "number", closed_local)
+    async_add_entities(trial_numbers)
 
     @callback
     def _async_sync_topology() -> None:
@@ -574,3 +594,75 @@ class DanfossHeadSetpoint(_HeadMqttNumber):
                 "setpoint written on the head and confirmed, but the cloud-side settings block "
                 f"was refused ({err}): the cloud may hold the previous value"
             ) from err
+
+
+@dataclass(frozen=True, kw_only=True)
+class LocalTrialNumberDescription(NumberEntityDescription):
+    """A head setting written through the local tunnel under supervised trial."""
+
+    setting: str  # key of ``local_write.LOCAL_TRIAL_SETTINGS``
+    attribute: str  # name given by ``tunnel.name_attributes``
+    scale: float = 1.0  # raw value read * scale = value shown
+
+
+LOCAL_TRIAL_NUMBERS: tuple[LocalTrialNumberDescription, ...] = (
+    LocalTrialNumberDescription(
+        key="setpoint_offset_setting",
+        translation_key="setpoint_offset_setting",
+        setting="setpoint_offset",
+        attribute="setpoint_offset",
+        scale=0.1,  # Zigbee2MQTT's tenths of °C, NOT confirmed on real hardware
+        native_min_value=tunnel.SETPOINT_OFFSET_MIN,
+        native_max_value=tunnel.SETPOINT_OFFSET_MAX,
+        native_step=0.1,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        mode=NumberMode.BOX,
+    ),
+    LocalTrialNumberDescription(
+        key="regulation_speed_setting",
+        translation_key="regulation_speed_setting",
+        setting="regulation_speed",
+        attribute="control_speed",
+        native_min_value=tunnel.CONTROL_SPEED_MIN,
+        native_max_value=tunnel.CONTROL_SPEED_MAX,
+        native_step=1,
+        mode=NumberMode.BOX,
+    ),
+)
+
+
+class DanfossLocalSettingNumber(DanfossLocalTrialEntity, NumberEntity):
+    """Setpoint offset (0x404B) or regulation speed (0x4020), written through the local tunnel
+    under supervised trial (``local_write``). Value: the head's own, read through the tunnel."""
+
+    entity_description: LocalTrialNumberDescription
+
+    def __init__(
+        self,
+        local: DanfossLocalCoordinator,
+        cloud: DanfossCoordinator,
+        device_id: str,
+        description: LocalTrialNumberDescription,
+    ) -> None:
+        super().__init__(local, cloud, device_id, description.key)
+        self.entity_description = description
+        self._attribute = description.attribute
+
+    @property
+    def native_value(self) -> float | None:
+        raw = self._value(self._attribute)
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            return None
+        return round(raw * self.entity_description.scale, 2)
+
+    async def async_set_native_value(self, value: float) -> None:
+        head = self._head
+        if head is None:
+            raise HomeAssistantError("the local tunnel cannot reach this head")
+        desc = self.entity_description
+        # HA hands a float: the regulation speed is written as the integer it stands for (a
+        # fractional value is refused by the validation, never rounded silently).
+        sent: float | int = int(value) if desc.native_step == 1 and value == int(value) else value
+        await self._async_run_trial(
+            async_local_write_setting(self.hass, self.coordinator, head, desc.setting, sent)
+        )

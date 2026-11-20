@@ -1,4 +1,5 @@
-"""Selects: the mounting orientation of an isolated head (DP 133), under supervised trial.
+"""Selects under supervised trial: the mounting orientation of an isolated head (DP 133, cloud
+MQTT) and the valve exercise day of a head (attribute 0x4010, local tunnel).
 
 Orientation (Zigbee2MQTT ``thermostat_orientation``, the app's "mounting vertical / horizontal")
 is a CANDIDATE on Tuya cloud MQTT, closed by default. The select exists only while its supervised
@@ -14,6 +15,11 @@ trial is armed for the designated isolated head of a verified model, with the lo
   head is read again: the value shown before can no longer be trusted.
 
 The meaning of the flag (false horizontal, true vertical) is Zigbee2MQTT's, not established here.
+
+Valve exercise day (Zigbee2MQTT ``day_of_week`` of the valve exercise): written through the local
+tunnel with the time it already has (read from the head first), by the descale service's path, and
+read back through the tunnel (``local_write``). Exists only while its local-tunnel trial is armed
+for the designated head. An undefined day (raw 7) reads unknown.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
+from .api.local import tunnel
 from .api.mqtt_client import CloudMqttLink
 from .const import (
     DATA_COORDINATOR,
@@ -37,7 +44,13 @@ from .const import (
     DP_ORIENTATION,
 )
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
-from .entity import TRIAL_PATH_MQTT, DanfossTrialEntity, remove_registry_entries
+from .entity import (
+    TRIAL_PATH_MQTT,
+    DanfossLocalTrialEntity,
+    DanfossTrialEntity,
+    remove_registry_entries,
+)
+from .local_write import async_local_write_valve_exercise, local_trial_split
 from .mqtt_write import (
     ORIENTATION_FLAG,
     async_mqtt_write_orientation,
@@ -76,8 +89,44 @@ async def async_setup_entry(
                 DanfossOrientation(coordinator, local, dev.id, link, supervised_for(data, dev.id))
             )
         # Armed but no link (it failed to start): transient, the registry entry is kept.
-    remove_registry_entries(hass, entry, "select", closed)
+    armed, closed_local = local_trial_split(
+        data, coordinator.data.values(), local, "valve_exercise", VALVE_EXERCISE_DAY_UID
+    )
+    if local is not None:
+        entities += [DanfossValveExerciseDay(local, coordinator, dev_id) for dev_id in armed]
+    remove_registry_entries(hass, entry, "select", [*closed, *closed_local])
     async_add_entities(entities)
+
+
+VALVE_EXERCISE_DAY_UID = "valve_exercise_day"
+
+
+class DanfossValveExerciseDay(DanfossLocalTrialEntity, SelectEntity):
+    """Valve exercise day (Danfoss attribute 0x4010), local-tunnel write under supervised trial."""
+
+    _attr_translation_key = "valve_exercise_day"
+    _attr_options = list(tunnel.WEEKDAYS)
+    _attribute = "descale_day"
+
+    def __init__(
+        self, local: DanfossLocalCoordinator, cloud: DanfossCoordinator, device_id: str
+    ) -> None:
+        super().__init__(local, cloud, device_id, VALVE_EXERCISE_DAY_UID)
+
+    @property
+    def current_option(self) -> str | None:
+        day = self._value(self._attribute)
+        return day if day in tunnel.WEEKDAYS else None
+
+    async def async_select_option(self, option: str) -> None:
+        if option not in tunnel.WEEKDAYS:
+            raise HomeAssistantError(f"unknown day: {option!r}")
+        head = self._head
+        if head is None:
+            raise HomeAssistantError("the local tunnel cannot reach this head")
+        await self._async_run_trial(
+            async_local_write_valve_exercise(self.hass, self.coordinator, head, day=option)
+        )
 
 
 class DanfossOrientation(DanfossTrialEntity, SelectEntity):
