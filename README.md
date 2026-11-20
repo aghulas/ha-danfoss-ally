@@ -60,8 +60,8 @@ is no need to delete and re-add it.
 The integration **ships its own Lovelace cards and sidebar panel**:
 
 - **`danfoss-ally-schedule-card`** — a room's weekly schedule (read and administrator edit).
-- **`danfoss-ally-room-card`** — a room at a glance (live temperature, mode, `±` setpoint adjustment via `climate.set_temperature`, comfort/setback chips, 7-day schedule strip, inline schedule editing, and per-head badges).
-- **`danfoss-ally-panel`** — the **"Danfoss Ally"** sidebar panel showing the building / fleet overview in read-only mode (totals banner, per-home holiday and gateway status, grouped rooms and single-head rooms, boiler relays).
+- **`danfoss-ally-room-card`** — a room at a glance (live temperature, mode, `±` setpoint adjustment via `climate.set_temperature`, comfort/setback chips, 7-day schedule strip, inline schedule editing, and per-head badges). Configured by a Danfoss Ally room (`room_id`) **or by a Home Assistant area** (`area_id`): then it also lists every `climate` entity of the area, whatever its integration (for example Danfoss heads paired directly to Zigbee2MQTT), with the battery, valve opening, window and heat demand of each head's device when present.
+- **`danfoss-ally-panel`** — the **"Danfoss Ally"** sidebar panel showing the building / fleet overview in read-only mode (totals banner, per-home holiday and gateway status, grouped rooms and single-head rooms, boiler relays), and below it, behind an "Other areas" toggle (on by default), the areas holding climate entities of other integrations.
 
 Nothing more to install: after installation via HACS and a restart, the cards appear directly in the
 **card picker** ("Add card") and the panel appears in the Home Assistant sidebar.
@@ -111,6 +111,21 @@ or for the full room card:
 type: custom:danfoss-ally-room-card
 room_id: "13000000" # the room's group_id
 ```
+
+or for every thermostat of a Home Assistant area (any integration; a Danfoss Ally room whose
+room thermostat sits in the area keeps all of the above):
+
+```yaml
+type: custom:danfoss-ally-room-card
+area_id: living_room # the area's id
+```
+
+On a climate entity of another integration the card reads the climate (current and target
+temperature, `hvac_action`, availability) and the other entities of the same device, matched by
+`device_class` first, then by key (Zigbee2MQTT names `battery`, `pi_heating_demand`,
+`window_open_internal` / `window_open_external`, `heat_required`, `linkquality`, or this
+integration's). Its only write is `climate.set_temperature`, for administrators, within the
+entity's `min_temp` / `max_temp` and at its `target_temp_step`.
 
 ### Developing the frontend
 

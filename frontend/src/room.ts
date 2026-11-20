@@ -11,12 +11,15 @@ export const ADJUSTABLE_MODES: ReadonlySet<string> = new Set(["at_home", "leavin
 /** Pas de consigne (°C), aligné sur le thermostat (contrat §3). */
 export const SETPOINT_STEP = 0.5;
 
+/** Seuil de batterie faible (%), partagé avec les climates hors Ally (carte par zone). */
+export const LOW_BATTERY_PERCENT = 10;
+
 /** Une tête est en batterie faible si un défaut E14/E15 est posé, ou batterie ≤ 10 %. */
 export function isLowBattery(head: Pick<HeadState, "battery" | "faults">): boolean {
   if ((head.faults ?? []).some((f) => f.code === "E14" || f.code === "E15")) {
     return true;
   }
-  return head.battery != null && head.battery <= 10;
+  return head.battery != null && head.battery <= LOW_BATTERY_PERCENT;
 }
 
 /**

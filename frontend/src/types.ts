@@ -130,6 +130,16 @@ export interface HassLike {
   ) => Promise<unknown>;
   // Fonction de localisation du frontend HA (clé -> texte). Optionnelle : repli en dur.
   localize?: (key: string, ...args: unknown[]) => string;
+  /**
+   * États et registres du frontend HA (optionnels : absents de la démo et des vieux
+   * tests). Lus pour la carte par zone et la section « autres zones » du panneau.
+   */
+  states?: Record<string, HassEntityState>;
+  entities?: Record<string, HassEntityEntry>;
+  devices?: Record<string, HassDeviceEntry>;
+  areas?: Record<string, HassAreaEntry>;
+  /** Utilisateur courant ; `is_admin` garde l'écriture d'un climate hors Ally. */
+  user?: { is_admin?: boolean };
   language?: string;
   /**
    * Connexion WebSocket de Home Assistant, pour les commandes à abonnement
@@ -156,6 +166,46 @@ export interface RoomCardConfig {
   type?: string;
   /** `group_id` de la pièce (en chaîne). */
   room_id?: string;
+  /**
+   * Zone Home Assistant (`area_id`) : la carte montre tous les `climate` de la zone,
+   * quelle que soit leur intégration, et la pièce Danfoss Ally qui s'y trouve (§8.1).
+   */
+  area_id?: string;
+}
+
+// --- Registres du frontend HA (sous-ensemble lu par la carte et le panneau, §8.3). ---
+
+/** État d'une entité (`hass.states[entity_id]`). */
+export interface HassEntityState {
+  entity_id: string;
+  state: string;
+  attributes: Record<string, unknown>;
+}
+
+/** Entrée du registre des entités telle que le frontend la publie (`hass.entities`). */
+export interface HassEntityEntry {
+  entity_id: string;
+  device_id?: string | null;
+  area_id?: string | null;
+  platform?: string;
+  translation_key?: string | null;
+  entity_category?: string | null;
+  hidden?: boolean;
+  name?: string | null;
+}
+
+/** Entrée du registre des appareils (`hass.devices`). */
+export interface HassDeviceEntry {
+  id: string;
+  area_id?: string | null;
+  name?: string | null;
+  name_by_user?: string | null;
+}
+
+/** Entrée du registre des zones (`hass.areas`). */
+export interface HassAreaEntry {
+  area_id: string;
+  name: string;
 }
 
 // --- Vue d'ensemble de la flotte (contrat §3.6, axe D) : lecture seule. ---

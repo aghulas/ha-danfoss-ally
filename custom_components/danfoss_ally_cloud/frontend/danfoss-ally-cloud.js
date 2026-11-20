@@ -700,7 +700,30 @@ const STRINGS = {
     room_window: "Window open",
     room_ok: "OK",
     room_single_head: "Single head, no group",
-    room_named_after_head: "Room not found in the app: head's name"
+    room_named_after_head: "Room not found in the app: head's name",
+    // --- Carte par zone, autres zones du panneau (§8.3) ---
+    pick_area: "Area (any thermostat)",
+    pick_hint: "Pick a Danfoss Ally room, or a Home Assistant area to show every thermostat in it.",
+    areas_unavailable: "No area holds a thermostat.",
+    unknown_area: "Unknown area ({id})",
+    area_ally_room: "Danfoss Ally room: {name}",
+    area_climates: "Thermostats",
+    area_other_climates: "Other thermostats in this area",
+    area_no_climate: "No thermostat in this area.",
+    area_ally_climate: "Danfoss Ally: set from its room card",
+    climate_write_failed: "{name}: the setpoint could not be sent",
+    head_heat_required: "Heat required",
+    head_linkquality: "Link quality {value}",
+    action_heating: "Heating",
+    action_preheating: "Preheating",
+    action_idle: "Idle",
+    action_off: "Off",
+    panel_other_areas: "Other thermostats by area",
+    panel_other_areas_hint: "Climate entities of other integrations, grouped by Home Assistant area. Read only.",
+    panel_show_other_areas: "Other areas",
+    panel_no_other_areas: "No area holds a thermostat of another integration.",
+    area_thermostats_n: "{n} thermostats",
+    area_heating_n: "{n} heating"
   },
   fr: {
     card_name: "Danfoss Ally — Programme",
@@ -833,7 +856,30 @@ const STRINGS = {
     room_window: "Fenêtre ouverte",
     room_ok: "OK",
     room_single_head: "Tête seule, sans groupe",
-    room_named_after_head: "Pièce de l'app non retrouvée : nom de la tête"
+    room_named_after_head: "Pièce de l'app non retrouvée : nom de la tête",
+    // --- Carte par zone, autres zones du panneau (§8.3) ---
+    pick_area: "Zone (tout thermostat)",
+    pick_hint: "Choisissez une pièce Danfoss Ally, ou une zone Home Assistant pour en montrer tous les thermostats.",
+    areas_unavailable: "Aucune zone ne contient de thermostat.",
+    unknown_area: "Zone inconnue ({id})",
+    area_ally_room: "Pièce Danfoss Ally : {name}",
+    area_climates: "Thermostats",
+    area_other_climates: "Autres thermostats de la zone",
+    area_no_climate: "Aucun thermostat dans cette zone.",
+    area_ally_climate: "Danfoss Ally : se règle depuis sa carte pièce",
+    climate_write_failed: "{name} : la consigne n'a pas pu être envoyée",
+    head_heat_required: "Demande de chauffe",
+    head_linkquality: "Qualité du lien {value}",
+    action_heating: "Chauffe",
+    action_preheating: "Préchauffe",
+    action_idle: "Au repos",
+    action_off: "Arrêt",
+    panel_other_areas: "Autres thermostats par zone",
+    panel_other_areas_hint: "Entités climate des autres intégrations, regroupées par zone Home Assistant. Lecture seule.",
+    panel_show_other_areas: "Autres zones",
+    panel_no_other_areas: "Aucune zone ne contient de thermostat d'une autre intégration.",
+    area_thermostats_n: "{n} thermostats",
+    area_heating_n: "{n} en chauffe"
   }
 };
 function lang(hass) {
@@ -874,6 +920,16 @@ const MODE_KEYS = {
 function modeLabel(hass, mode) {
   const key = mode ? MODE_KEYS[mode] : void 0;
   return key ? t(hass, key) : mode ?? "—";
+}
+const ACTION_KEYS = {
+  heating: "action_heating",
+  preheating: "action_preheating",
+  idle: "action_idle",
+  off: "action_off"
+};
+function actionLabel(hass, action) {
+  const key = ACTION_KEYS[action];
+  return key ? t(hass, key) : action;
 }
 const ERROR_KEYS = /* @__PURE__ */ new Set([
   "err_invalid_time",
@@ -1388,6 +1444,7 @@ const ICON_RESTORE = w`<svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l4
 const ICON_BATTERY = w`<svg viewBox="0 0 24 24"><path d="M16.67 4H15V2H9v2H7.33C6.6 4 6 4.6 6 5.33v15.33C6 21.4 6.6 22 7.33 22h9.33c.74 0 1.34-.6 1.34-1.33V5.33C18 4.6 17.4 4 16.67 4" /></svg>`;
 const ICON_VALVE = w`<svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7.76A4 4 0 1 0 15 16a4 4 0 0 0-2-3.24V5a1 1 0 0 1 2 0h2a3 3 0 0 0-3-3z" /></svg>`;
 const ICON_WINDOW = w`<svg viewBox="0 0 24 24"><path d="M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1m7 2H5v6h6zm2 0v6h6V5zm-2 8H5v6h6zm2 0v6h6v-6z" /></svg>`;
+const ICON_FLAME = w`<svg viewBox="0 0 24 24"><path d="M17.66 11.2c-.23-.3-.51-.56-.77-.82-.67-.6-1.43-1.03-2.07-1.66C13.33 7.26 13 4.85 13.95 3c-.95.23-1.78.75-2.49 1.32-2.59 2.08-3.61 5.75-2.39 8.9.04.1.08.2.08.33 0 .22-.15.42-.35.5-.23.1-.47.04-.66-.12a.6.6 0 0 1-.14-.17c-1.13-1.43-1.31-3.48-.55-5.12C5.78 10 4.87 12.3 5 14.47c.06.5.12 1 .29 1.5.14.6.41 1.2.71 1.73 1.08 1.73 2.95 2.97 4.96 3.22 2.14.27 4.43-.12 6.07-1.6 1.83-1.66 2.47-4.32 1.53-6.6l-.13-.26c-.21-.46-.77-1.26-.77-1.26" /></svg>`;
 const ICON_LOCK = w`<svg viewBox="0 0 24 24"><path d="M12 17a2 2 0 0 0 2-2 2 2 0 0 0-2-2 2 2 0 0 0-2 2 2 2 0 0 0 2 2m6-9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h1V6a5 5 0 0 1 10 0v2zM12 3a3 3 0 0 0-3 3v2h6V6a3 3 0 0 0-3-3" /></svg>`;
 async function fetchInfo(hass) {
   try {
@@ -2769,11 +2826,12 @@ DanfossAllyScheduleCard = __decorateClass$2([
 ], DanfossAllyScheduleCard);
 const ADJUSTABLE_MODES = /* @__PURE__ */ new Set(["at_home", "leaving_home"]);
 const SETPOINT_STEP = 0.5;
+const LOW_BATTERY_PERCENT = 10;
 function isLowBattery(head) {
   if ((head.faults ?? []).some((f2) => f2.code === "E14" || f2.code === "E15")) {
     return true;
   }
-  return head.battery != null && head.battery <= 10;
+  return head.battery != null && head.battery <= LOW_BATTERY_PERCENT;
 }
 function canAdjustSetpoint(room) {
   return Boolean(
@@ -2786,6 +2844,216 @@ function steppedSetpoint(current, direction) {
 }
 function roomNeedsRestore(room) {
   return room.heads.some((h2) => h2.schedule_active === false);
+}
+const ALLY_PLATFORM = "danfoss_ally_cloud";
+const FEATURE_TARGET_TEMPERATURE = 1;
+const DEFAULT_STEP = 0.5;
+const KEYS_TEMPERATURE = ["local_temperature", "temperature"];
+const KEYS_BATTERY = ["battery"];
+const KEYS_BATTERY_LOW = ["battery_low"];
+const KEYS_VALVE = ["pi_heating_demand", "valve_opening"];
+const KEYS_WINDOW_STATE = ["window_open_internal"];
+const KEYS_WINDOW_BINARY = ["window_open_external", "window_open", "window"];
+const KEYS_HEAT = ["heat_required"];
+const KEYS_LINK = ["linkquality"];
+const WINDOW_OPEN_STATES = /* @__PURE__ */ new Set(["open", "external_open"]);
+const UNAVAILABLE = /* @__PURE__ */ new Set(["unavailable", "unknown", ""]);
+function domainOf(entityId) {
+  return entityId.split(".", 1)[0];
+}
+function objectId(entityId) {
+  const dot = entityId.indexOf(".");
+  return dot < 0 ? entityId : entityId.slice(dot + 1);
+}
+function num(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const n3 = Number(value);
+    return Number.isFinite(n3) ? n3 : null;
+  }
+  return null;
+}
+function matchesKey(entry, keys) {
+  const oid = objectId(entry.entity_id);
+  return keys.some(
+    (key) => entry.translation_key === key || oid === key || oid.endsWith(`_${key}`)
+  );
+}
+function entityArea(hass, entityId) {
+  const entry = hass.entities?.[entityId];
+  if (!entry) {
+    return null;
+  }
+  if (entry.area_id) {
+    return entry.area_id;
+  }
+  return entry.device_id && hass.devices?.[entry.device_id]?.area_id || null;
+}
+function isAllyEntity(hass, entityId) {
+  return hass.entities?.[entityId]?.platform === ALLY_PLATFORM;
+}
+function climateName(hass, entityId) {
+  const friendly = hass.states?.[entityId]?.attributes.friendly_name;
+  if (typeof friendly === "string" && friendly) {
+    return friendly;
+  }
+  return hass.entities?.[entityId]?.name || entityId;
+}
+function visibleClimates(hass) {
+  return Object.values(hass.entities ?? {}).filter(
+    (e2) => domainOf(e2.entity_id) === "climate" && !e2.hidden
+  );
+}
+function byName(hass) {
+  return (a2, b2) => climateName(hass, a2).localeCompare(climateName(hass, b2));
+}
+function climatesInArea(hass, areaId) {
+  return visibleClimates(hass).map((e2) => e2.entity_id).filter((id) => entityArea(hass, id) === areaId).sort(byName(hass));
+}
+function areasWithClimates(hass, foreignOnly = false) {
+  const byArea = /* @__PURE__ */ new Map();
+  for (const entry of visibleClimates(hass)) {
+    if (foreignOnly && entry.platform === ALLY_PLATFORM) {
+      continue;
+    }
+    const area = entityArea(hass, entry.entity_id);
+    if (!area || !hass.areas?.[area]) {
+      continue;
+    }
+    byArea.set(area, [...byArea.get(area) ?? [], entry.entity_id]);
+  }
+  return [...byArea.entries()].map(([area_id, ids]) => ({
+    area_id,
+    name: hass.areas?.[area_id]?.name ?? area_id,
+    entity_ids: ids.sort(byName(hass))
+  })).sort((a2, b2) => a2.name.localeCompare(b2.name));
+}
+function allyRoomsInArea(hass, rooms, areaId) {
+  return rooms.filter(
+    (room) => room.climate_entity_id && entityArea(hass, room.climate_entity_id) === areaId
+  );
+}
+function siblings(hass, entityId) {
+  const deviceId = hass.entities?.[entityId]?.device_id;
+  if (!deviceId) {
+    return [];
+  }
+  const out = [];
+  for (const entry of Object.values(hass.entities ?? {})) {
+    if (entry.device_id !== deviceId || entry.entity_id === entityId) {
+      continue;
+    }
+    const state = hass.states?.[entry.entity_id];
+    if (state && !UNAVAILABLE.has(state.state)) {
+      out.push({ entry, state });
+    }
+  }
+  return out;
+}
+function deviceClass(s2) {
+  return s2.state.attributes.device_class;
+}
+function pick(list, domain, deviceClasses, keys) {
+  const inDomain = list.filter((s2) => domainOf(s2.entry.entity_id) === domain);
+  return inDomain.find((s2) => deviceClasses.includes(String(deviceClass(s2)))) ?? inDomain.find((s2) => matchesKey(s2.entry, keys));
+}
+function headExtras(hass, entityId) {
+  const list = siblings(hass, entityId);
+  const battery = num(pick(list, "sensor", ["battery"], KEYS_BATTERY)?.state.state);
+  const batteryLow = pick(list, "binary_sensor", ["battery"], KEYS_BATTERY_LOW);
+  const valve = num(pick(list, "sensor", [], KEYS_VALVE)?.state.state);
+  let window2 = null;
+  const windowBinary = pick(list, "binary_sensor", ["window"], KEYS_WINDOW_BINARY) ?? pick(list, "switch", [], ["window_open_external"]);
+  const windowState = pick(list, "sensor", [], KEYS_WINDOW_STATE);
+  if (windowState) {
+    window2 = WINDOW_OPEN_STATES.has(windowState.state.state);
+  }
+  if (windowBinary) {
+    window2 = Boolean(window2) || windowBinary.state.state === "on";
+  }
+  const heat = pick(list, "binary_sensor", [], KEYS_HEAT);
+  const link = num(pick(list, "sensor", [], KEYS_LINK)?.state.state);
+  return {
+    battery,
+    low_battery: batteryLow?.state.state === "on" || battery !== null && battery <= LOW_BATTERY_PERCENT,
+    valve_opening: valve,
+    window_open: window2,
+    heat_required: heat ? heat.state.state === "on" : null,
+    linkquality: link
+  };
+}
+function fallbackTemperature(hass, entityId) {
+  const list = siblings(hass, entityId).filter((s2) => !s2.entry.entity_category);
+  return num(pick(list, "sensor", ["temperature"], KEYS_TEMPERATURE)?.state.state);
+}
+function climateView(hass, entityId) {
+  const st = hass.states?.[entityId];
+  if (!st) {
+    return null;
+  }
+  const a2 = st.attributes;
+  const available = !UNAVAILABLE.has(st.state);
+  const features = num(a2.supported_features) ?? 0;
+  const step = num(a2.target_temp_step) ?? DEFAULT_STEP;
+  return {
+    entity_id: entityId,
+    name: climateName(hass, entityId),
+    ally: isAllyEntity(hass, entityId),
+    available,
+    current: num(a2.current_temperature) ?? fallbackTemperature(hass, entityId),
+    target: num(a2.temperature),
+    action: typeof a2.hvac_action === "string" ? a2.hvac_action : null,
+    hvac_mode: st.state,
+    min: num(a2.min_temp) ?? 7,
+    max: num(a2.max_temp) ?? 35,
+    step: step > 0 ? step : DEFAULT_STEP,
+    supports_target: (features & FEATURE_TARGET_TEMPERATURE) !== 0,
+    extras: headExtras(hass, entityId)
+  };
+}
+function canAdjustClimate(view) {
+  return !view.ally && view.available && view.hvac_mode !== "off" && view.supports_target && view.target !== null;
+}
+function steppedClimateTarget(view, direction) {
+  if (!canAdjustClimate(view) || view.target === null) {
+    return null;
+  }
+  const raw = Math.round((view.target + direction * view.step) / view.step) * view.step;
+  const next = Number(Math.min(view.max, Math.max(view.min, raw)).toFixed(2));
+  return next === view.target ? null : next;
+}
+function areaSummary(hass, entityIds) {
+  const views = entityIds.map((id) => climateView(hass, id)).filter((v2) => v2 !== null);
+  const live = views.filter((v2) => v2.available);
+  const temps = live.map((v2) => v2.current).filter((x2) => x2 !== null);
+  const targets = live.map((v2) => v2.target).filter((x2) => x2 !== null);
+  return {
+    count: views.length,
+    temperature: temps.length ? Math.round(temps.reduce((s2, x2) => s2 + x2, 0) / temps.length * 10) / 10 : null,
+    setpoint_min: targets.length ? Math.min(...targets) : null,
+    setpoint_max: targets.length ? Math.max(...targets) : null,
+    heating: live.filter((v2) => v2.action === "heating").length,
+    offline: views.length - live.length,
+    low_battery: views.filter((v2) => v2.extras.low_battery).length,
+    window_open: views.filter((v2) => v2.extras.window_open).length
+  };
+}
+function degrees$1(value) {
+  return `${Number.isInteger(value) ? value : value.toFixed(1)} °C`;
+}
+function areaClimateLine(summary) {
+  const { temperature, setpoint_min: lo, setpoint_max: hi } = summary;
+  if (temperature === null && lo === null) {
+    return null;
+  }
+  const left = temperature === null ? "–" : degrees$1(temperature);
+  if (lo === null || hi === null) {
+    return left;
+  }
+  const right = lo === hi ? degrees$1(lo) : `${Number.isInteger(lo) ? lo : lo.toFixed(1)}–${degrees$1(hi)}`;
+  return `${left} → ${right}`;
 }
 var __defProp$1 = Object.defineProperty;
 var __getOwnPropDesc$1 = Object.getOwnPropertyDescriptor;
@@ -2809,6 +3077,8 @@ let DanfossAllyRoomCard = class extends i {
     this._error = null;
     this._editing = false;
     this._job = null;
+    this._busyClimate = null;
+    this._loading = false;
     this._unsubscribe = null;
     this._subscribing = false;
   }
@@ -2822,7 +3092,7 @@ let DanfossAllyRoomCard = class extends i {
     if (!config) {
       throw new Error("Configuration invalide");
     }
-    const roomChanged = config.room_id !== this._config?.room_id;
+    const roomChanged = config.room_id !== this._config?.room_id || config.area_id !== this._config?.area_id;
     if (roomChanged) {
       this._editing = false;
       this._schedCard = void 0;
@@ -2858,36 +3128,90 @@ let DanfossAllyRoomCard = class extends i {
       if (this._schedCard) {
         this._schedCard.hass = this.hass;
       }
+      if (this._loaded && !this._loading && this._config?.area_id && this._roomId !== this._scheduleRoomId) {
+        void this._loadSchedule();
+      }
     }
   }
+  /** Clé de la configuration : une réponse lue pour une autre clé est jetée. */
+  get _configKey() {
+    return `${this._config?.room_id ?? ""}|${this._config?.area_id ?? ""}`;
+  }
+  /**
+   * Pièce Ally de la carte : `room_id` s'il est donné, sinon la première pièce dont
+   * le thermostat de pièce est dans la zone `area_id`.
+   */
+  get _roomId() {
+    if (this._config?.room_id) {
+      return this._config.room_id;
+    }
+    const area = this._config?.area_id;
+    if (!area || !this.hass) {
+      return void 0;
+    }
+    return allyRoomsInArea(this.hass, this._rooms, area)[0]?.id;
+  }
   get _room() {
-    return pickRoom(this._rooms, this._config?.room_id);
+    return pickRoom(this._rooms, this._roomId);
   }
   get _target() {
-    const id = this._config?.room_id;
+    const id = this._roomId;
     return id ? { type: "room", id } : void 0;
   }
   get _isAdmin() {
     return this._info !== null && this._info.is_admin;
   }
+  /**
+   * Droit d'écrire un climate hors Ally : celui que donne `info` (même règle que la
+   * carte), ou à défaut l'utilisateur du frontend. Jamais vrai sans preuve.
+   */
+  get _canWriteForeign() {
+    if (this._info !== null) {
+      return this._info.is_admin;
+    }
+    return this.hass?.user?.is_admin === true;
+  }
   async _load() {
     if (!this.hass) {
       return;
     }
+    const key = this._configKey;
+    const target = this._config?.room_id ? this._target : void 0;
+    this._loading = true;
+    try {
+      const [info, rooms, schedule] = await Promise.all([
+        fetchInfo(this.hass),
+        fetchRooms(this.hass),
+        target ? fetchSchedule(this.hass, target) : Promise.resolve(null)
+      ]);
+      if (key !== this._configKey) {
+        return;
+      }
+      this._info = info;
+      this._rooms = rooms;
+      this._schedule = schedule;
+      this._scheduleRoomId = target?.id;
+      if (!target && this._target) {
+        await this._loadSchedule();
+      }
+    } finally {
+      this._loading = false;
+    }
+    await this._subscribe();
+  }
+  /** (Re)lit le programme de la pièce courante (zone dont la pièce vient d'être résolue). */
+  async _loadSchedule() {
     const target = this._target;
-    const roomId = this._config?.room_id;
-    const [info, rooms, schedule] = await Promise.all([
-      fetchInfo(this.hass),
-      fetchRooms(this.hass),
-      target ? fetchSchedule(this.hass, target) : Promise.resolve(null)
-    ]);
-    if (roomId !== this._config?.room_id) {
+    const key = this._configKey;
+    this._scheduleRoomId = target?.id;
+    if (!this.hass || !target) {
+      this._schedule = null;
       return;
     }
-    this._info = info;
-    this._rooms = rooms;
-    this._schedule = schedule;
-    await this._subscribe();
+    const schedule = await fetchSchedule(this.hass, target);
+    if (key === this._configKey && target.id === this._roomId) {
+      this._schedule = schedule;
+    }
   }
   async _subscribe() {
     if (!this.hass || this._unsubscribe || this._subscribing) {
@@ -2901,7 +3225,8 @@ let DanfossAllyRoomCard = class extends i {
     }
   }
   _onJob(job) {
-    if (job.target?.id === this._config?.room_id) {
+    const id = this._roomId;
+    if (id && job.target?.id === id) {
       this._job = job;
     }
   }
@@ -2921,7 +3246,7 @@ let DanfossAllyRoomCard = class extends i {
         fetchSchedule(this.hass, target, true),
         this._reloadRooms()
       ]);
-      if (schedule && target.id === this._config?.room_id) {
+      if (schedule && target.id === this._roomId) {
         this._schedule = schedule;
       }
     } finally {
@@ -2948,6 +3273,33 @@ let DanfossAllyRoomCard = class extends i {
       this._error = errorText(this.hass, code);
     } finally {
       this._busy = false;
+    }
+  }
+  /**
+   * ± sur un climate HORS Ally (zone) : `climate.set_temperature`, administrateur,
+   * au pas du climate et dans ses bornes. Aucun état optimiste : Home Assistant
+   * pousse le nouvel état du climate.
+   */
+  async _adjustClimate(entityId, direction) {
+    if (!this.hass?.callService || !this._canWriteForeign || this._busyClimate) {
+      return;
+    }
+    const view = climateView(this.hass, entityId);
+    const next = view ? steppedClimateTarget(view, direction) : null;
+    if (!view || next === null) {
+      return;
+    }
+    this._busyClimate = entityId;
+    this._error = null;
+    try {
+      await this.hass.callService("climate", "set_temperature", {
+        entity_id: entityId,
+        temperature: next
+      });
+    } catch {
+      this._error = t(this.hass, "climate_write_failed", { name: view.name });
+    } finally {
+      this._busyClimate = null;
     }
   }
   async _restore() {
@@ -2977,7 +3329,7 @@ let DanfossAllyRoomCard = class extends i {
     }
     const el = document.createElement("danfoss-ally-schedule-card");
     el.embedded = true;
-    el.setConfig({ room_id: this._config?.room_id ?? "" });
+    el.setConfig({ room_id: this._roomId ?? "" });
     el.hass = this.hass;
     el.addEventListener("schedule-edit-close", (ev) => {
       if (ev.detail?.schedule) {
@@ -3002,33 +3354,49 @@ let DanfossAllyRoomCard = class extends i {
     const readOnly = this._info !== null && !this._info.is_admin;
     const comfort = this._schedule?.comfort ?? room?.comfort ?? null;
     const setback = this._schedule?.setback ?? room?.setback ?? null;
+    const areaMode = Boolean(this._config?.area_id);
     return b`
       <ha-card>
         <div class="content">
           ${showReload ? renderReloadBanner(this.hass, () => this._reload()) : A}
           <div class="titlebar">
-            <div class="room">${this._roomTitle(room)}</div>
+            <div class="room">${this._title(room)}</div>
             ${this._renderActions(room)}
           </div>
+          ${areaMode && room ? b`<div class="hint">${t(this.hass, "area_ally_room", { name: room.name })}</div>` : A}
           ${readOnly ? b`<div class="hint">${t(this.hass, "read_only")}</div>` : A}
           ${this._error ? b`<div class="banner error" role="alert">${this._error}</div>` : A}
-          ${room ? this._renderClimate(room) : A}
-          ${renderSetpoints(this.hass, comfort, setback)}
-          ${this._editing && this._schedCard ? this._schedCard : this._schedule ? renderReadGrid(this.hass, this._schedule) : b`<div class="hint">${t(this.hass, "schedule_unavailable")}</div>`}
-          ${this._renderHeads(room)}
-          ${renderJobBanner(this.hass, this._job)}
-          ${renderCardFooter(
+          ${room || !areaMode ? this._renderAllyBody(room, comfort, setback) : A}
+          ${areaMode ? this._renderAreaClimates(room) : A}
+          ${room || !areaMode ? renderCardFooter(
       this.hass,
       this._schedule,
       Boolean(this._target),
       this._refreshing,
       () => void this._refresh()
-    )}
+    ) : b`<div class="footer">
+                <span class="version">${t(this.hass, "version", { version: CARD_VERSION })}</span>
+              </div>`}
         </div>
       </ha-card>
     `;
   }
-  _roomTitle(room) {
+  /** Pièce Ally : son climat, ses consignes, son programme, ses têtes, son lot (§8.1). */
+  _renderAllyBody(room, comfort, setback) {
+    return b`
+      ${room ? this._renderClimate(room) : A}
+      ${renderSetpoints(this.hass, comfort, setback)}
+      ${this._editing && this._schedCard ? this._schedCard : this._schedule ? renderReadGrid(this.hass, this._schedule) : b`<div class="hint">${t(this.hass, "schedule_unavailable")}</div>`}
+      ${this._renderHeads(room)}
+      ${renderJobBanner(this.hass, this._job)}
+    `;
+  }
+  _title(room) {
+    const areaId = this._config?.area_id;
+    if (areaId) {
+      const area = this.hass?.areas?.[areaId];
+      return area ? area.name : t(this.hass, "unknown_area", { id: areaId });
+    }
     if (room) {
       return room.name;
     }
@@ -3100,6 +3468,90 @@ let DanfossAllyRoomCard = class extends i {
       <div class="heads">
         <div class="heads-title">${t(this.hass, "heads_heading")}</div>
         ${heads.length === 0 ? b`<div class="hint">${t(this.hass, "heads_none")}</div>` : b`<div class="heads-list">${heads.map((head) => this._renderHead(head))}</div>`}
+      </div>
+    `;
+  }
+  /** Climates de la zone hors pièce Ally de la carte (toutes intégrations). */
+  _renderAreaClimates(room) {
+    const hass = this.hass;
+    const areaId = this._config?.area_id;
+    const ids = hass && areaId ? climatesInArea(hass, areaId).filter((id) => id !== room?.climate_entity_id) : [];
+    const views = ids.map((id) => hass ? climateView(hass, id) : null).filter((v2) => v2 !== null);
+    if (views.length === 0 && room) {
+      return b``;
+    }
+    return b`
+      <div class="heads">
+        <div class="heads-title">
+          ${t(this.hass, room ? "area_other_climates" : "area_climates")}
+        </div>
+        ${views.length === 0 ? b`<div class="hint">${t(this.hass, "area_no_climate")}</div>` : b`<div class="heads-list">${views.map((v2) => this._renderClimateRow(v2))}</div>`}
+      </div>
+    `;
+  }
+  _renderClimateRow(view) {
+    const deg = (v2) => v2 === null ? "—" : t(this.hass, "degree", { value: v2 });
+    const canAdjust = this._canWriteForeign && Boolean(this.hass?.callService) && canAdjustClimate(view);
+    const busy = this._busyClimate !== null;
+    const down = canAdjust ? steppedClimateTarget(view, -1) : null;
+    const up = canAdjust ? steppedClimateTarget(view, 1) : null;
+    const x2 = view.extras;
+    const heating = view.available && view.action === "heating";
+    return b`
+      <div class="climate-row">
+        <div class="row-top">
+          <span class="head-name">${view.name}</span>
+          <span class="row-now">
+            <span class="row-temp ${heating ? "heating" : ""}">${deg(view.current)}</span>
+            ${view.available && view.action ? b`<span class="row-action">${actionLabel(this.hass, view.action)}</span>` : A}
+          </span>
+        </div>
+        <div class="row-bottom">
+          <span class="badges">
+            ${renderBadge(
+      view.available ? "ok" : "off",
+      view.available ? ICON_WIFI : ICON_WIFI_OFF,
+      t(this.hass, view.available ? "head_online" : "head_offline")
+    )}
+            ${x2.battery !== null || x2.low_battery ? renderBadge(
+      x2.low_battery ? "warn" : "muted",
+      ICON_BATTERY,
+      x2.battery === null ? t(this.hass, "head_low_battery") : t(this.hass, x2.low_battery ? "head_low_battery" : "head_battery", {
+        value: x2.battery
+      })
+    ) : A}
+            ${x2.valve_opening !== null ? renderBadge(
+      x2.valve_opening > 0 ? "ok" : "muted",
+      ICON_VALVE,
+      t(this.hass, "head_valve", { value: x2.valve_opening })
+    ) : A}
+            ${x2.window_open ? renderBadge("warn", ICON_WINDOW, t(this.hass, "head_window_open")) : A}
+            ${x2.heat_required ? renderBadge("ok", ICON_FLAME, t(this.hass, "head_heat_required")) : A}
+            ${x2.linkquality !== null ? renderBadge("muted", ICON_WIFI, t(this.hass, "head_linkquality", { value: x2.linkquality })) : A}
+            ${view.ally ? renderBadge("muted", ICON_LOCK, t(this.hass, "area_ally_climate")) : A}
+          </span>
+          <span class="setpoint">
+            ${canAdjust ? b`<button
+                  class="step small"
+                  @click=${() => this._adjustClimate(view.entity_id, -1)}
+                  ?disabled=${busy || down === null}
+                  aria-label=${t(this.hass, "cooler")}
+                  title=${t(this.hass, "cooler")}
+                >
+                  ${ICON_MINUS}
+                </button>` : A}
+            <span class="row-target">${deg(view.target)}</span>
+            ${canAdjust ? b`<button
+                  class="step small"
+                  @click=${() => this._adjustClimate(view.entity_id, 1)}
+                  ?disabled=${busy || up === null}
+                  aria-label=${t(this.hass, "warmer")}
+                  title=${t(this.hass, "warmer")}
+                >
+                  ${ICON_PLUS}
+                </button>` : A}
+          </span>
+        </div>
       </div>
     `;
   }
@@ -3200,6 +3652,55 @@ DanfossAllyRoomCard.styles = [
         opacity: 0.5;
         cursor: default;
       }
+      .step.small {
+        width: 28px;
+        height: 28px;
+      }
+      .step.small svg {
+        width: 16px;
+        height: 16px;
+      }
+      .climate-row {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 6px 0;
+        border-top: 1px solid var(--divider-color, #eee);
+      }
+      .climate-row:first-child {
+        border-top: none;
+      }
+      .row-top,
+      .row-bottom {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .row-now {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 6px;
+      }
+      .row-temp {
+        font-size: 1.1rem;
+        font-variant-numeric: tabular-nums;
+        color: var(--primary-text-color);
+      }
+      .row-temp.heating {
+        color: var(--danfoss-comfort-color, var(--primary-color, #ff8a33));
+      }
+      .row-action {
+        font-size: 0.8rem;
+        color: var(--secondary-text-color);
+      }
+      .row-target {
+        font-variant-numeric: tabular-nums;
+        min-width: 3rem;
+        text-align: center;
+        color: var(--primary-text-color);
+      }
     `
 ];
 __decorateClass$1([
@@ -3235,6 +3736,9 @@ __decorateClass$1([
 __decorateClass$1([
   r()
 ], DanfossAllyRoomCard.prototype, "_job", 2);
+__decorateClass$1([
+  r()
+], DanfossAllyRoomCard.prototype, "_busyClimate", 2);
 DanfossAllyRoomCard = __decorateClass$1([
   t$1("danfoss-ally-room-card")
 ], DanfossAllyRoomCard);
@@ -3285,6 +3789,7 @@ let DanfossAllyPanel = class extends i {
     this._overview = null;
     this._loaded = false;
     this._refreshing = false;
+    this._showOtherAreas = readShowOtherAreas();
   }
   updated(changed) {
     if (changed.has("hass") && this.hass && !this._loaded) {
@@ -3311,17 +3816,32 @@ let DanfossAllyPanel = class extends i {
       this._refreshing = false;
     }
   }
+  _toggleOtherAreas() {
+    this._showOtherAreas = !this._showOtherAreas;
+    writeShowOtherAreas(this._showOtherAreas);
+  }
   render() {
     const overview = this._overview;
     return b`
       <div class="page">
         <header class="bar">
           <h1>${t(this.hass, "panel_title")}</h1>
-          <button class="refresh" @click=${this._refresh} ?disabled=${this._refreshing}>
-            ${t(this.hass, "refresh")}
-          </button>
+          <span class="bar-actions">
+            <button
+              class="refresh toggle ${this._showOtherAreas ? "on" : ""}"
+              role="switch"
+              aria-checked=${this._showOtherAreas ? "true" : "false"}
+              @click=${this._toggleOtherAreas}
+            >
+              ${t(this.hass, "panel_show_other_areas")}
+            </button>
+            <button class="refresh" @click=${this._refresh} ?disabled=${this._refreshing}>
+              ${t(this.hass, "refresh")}
+            </button>
+          </span>
         </header>
         ${overview ? this._renderBody(overview) : this._renderUnavailable()}
+        ${this._showOtherAreas ? this._renderOtherAreas() : A}
         <footer class="foot">${t(this.hass, "version", { version: CARD_VERSION })}</footer>
       </div>
     `;
@@ -3401,6 +3921,40 @@ let DanfossAllyPanel = class extends i {
       </div>
     `;
   }
+  /** Zones qui contiennent des climates d'autres intégrations (lecture seule). */
+  _renderOtherAreas() {
+    const areas = this.hass ? areasWithClimates(this.hass, true) : [];
+    return b`
+      <section class="home other-areas">
+        <div class="home-head">
+          <h2>${t(this.hass, "panel_other_areas")}</h2>
+        </div>
+        <div class="room-sub wrap">${t(this.hass, "panel_other_areas_hint")}</div>
+        ${areas.length === 0 ? b`<div class="unavailable">${t(this.hass, "panel_no_other_areas")}</div>` : b`<div class="rooms">${areas.map((area) => this._renderArea(area))}</div>`}
+      </section>
+    `;
+  }
+  _renderArea(area) {
+    const sum = areaSummary(this.hass, area.entity_ids);
+    const line = areaClimateLine(sum);
+    const healthy = sum.offline === 0 && sum.low_battery === 0 && sum.window_open === 0;
+    return b`
+      <div class="room ${healthy ? "ok" : "attn"}">
+        <div class="room-top">
+          <span class="room-name" title=${area.name}>${area.name}</span>
+          <span class="heads-count">${sum.count}×</span>
+        </div>
+        ${line ? b`<div class="room-climate">${line}</div>` : A}
+        <div class="flags">
+          ${sum.heating ? b`<span class="flag hot">${t(this.hass, "area_heating_n", { n: sum.heating })}</span>` : A}
+          ${sum.window_open ? b`<span class="flag warn">${t(this.hass, "room_window")}</span>` : A}
+          ${sum.offline ? b`<span class="flag warn">${t(this.hass, "room_offline_n", { n: sum.offline })}</span>` : A}
+          ${sum.low_battery ? b`<span class="flag warn">${t(this.hass, "room_low_battery_n", { n: sum.low_battery })}</span>` : A}
+          ${healthy ? b`<span class="flag ok">${t(this.hass, "room_ok")}</span>` : A}
+        </div>
+      </div>
+    `;
+  }
   _renderRelay(relay) {
     const offline = relay.online === false;
     const on = !offline && relay.on === true;
@@ -3448,6 +4002,20 @@ DanfossAllyPanel.styles = i$3`
       color: var(--primary-text-color);
       font: inherit;
       font-size: 0.85rem;
+    }
+    .bar-actions {
+      display: inline-flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .toggle.on {
+      background: var(--primary-color, #03a9f4);
+      border-color: var(--primary-color, #03a9f4);
+      color: var(--text-primary-color, #fff);
+    }
+    .room-sub.wrap {
+      white-space: normal;
+      margin: -4px 0 10px;
     }
     .refresh:disabled {
       opacity: 0.6;
@@ -3671,9 +4239,26 @@ __decorateClass([
 __decorateClass([
   r()
 ], DanfossAllyPanel.prototype, "_refreshing", 2);
+__decorateClass([
+  r()
+], DanfossAllyPanel.prototype, "_showOtherAreas", 2);
 DanfossAllyPanel = __decorateClass([
   t$1("danfoss-ally-panel")
 ], DanfossAllyPanel);
+const OTHER_AREAS_KEY = "danfoss-ally-panel.show-other-areas";
+function readShowOtherAreas() {
+  try {
+    return globalThis.localStorage?.getItem(OTHER_AREAS_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+function writeShowOtherAreas(show) {
+  try {
+    globalThis.localStorage?.setItem(OTHER_AREAS_KEY, show ? "1" : "0");
+  } catch {
+  }
+}
 const DOC_URL = "https://github.com/aghulas/ha-danfoss-ally";
 const CARDS = [
   {
@@ -3687,7 +4272,7 @@ const CARDS = [
   {
     type: "danfoss-ally-room-card",
     name: "Danfoss Ally — Pièce / Room",
-    description: "Une pièce Danfoss Ally : climat, programme, têtes et actions. / A Danfoss Ally room: climate, schedule, thermostats and actions.",
+    description: "Une pièce Danfoss Ally ou une zone (tout thermostat) : climat, programme, têtes et actions. / A Danfoss Ally room or an area (any thermostat): climate, schedule, thermostats and actions.",
     preview: false,
     documentationURL: DOC_URL
   }

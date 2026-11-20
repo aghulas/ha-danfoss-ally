@@ -14,7 +14,8 @@ except for the refusals listed under "Changed", which are deliberate.
 - Tried once on a real head (2026-11-20): the reworked preheat write of the cloud-MQTT candidate
   (publish, then settings block), OFF to ON, confirmed through the local tunnel. The return to OFF
   and the hold over a night are not established; DP 1 stays a closed candidate.
-- **Not validated on real hardware**: the isolated-head thermostat write, the runtime creation and
+- **Not validated on real hardware**: the room card by area and the panel's other areas (not
+  checked in a real Home Assistant either: vitest with synthetic registries only), the isolated-head thermostat write, the runtime creation and
   retirement of entities, the embedded schedule editor and the editor fixes, the schedule-write
   guards, the device actions, the polling backoff, the reconfigure step and the Repairs issues
   (unit tests only).
@@ -25,6 +26,22 @@ cloud's value were back to the cloud's value by about 05:00, with no write from 
 (docs/preheat-tunnel-durability.md). The switch is unchanged here.
 
 ### Added
+
+- **Room card by Home Assistant area, for any climate.** `danfoss-ally-room-card` also accepts
+  `area_id` (`room_id` is unchanged). It lists every `climate` entity of the area whatever its
+  integration (for example Danfoss heads paired directly to Zigbee2MQTT): current and target
+  temperature, `hvac_action`, availability, and, from the other entities of the same device when
+  present, battery, valve opening (`pi_heating_demand`), window (`window_open_internal` /
+  `window_open_external`), heat demand (`heat_required`) and link quality. A Danfoss Ally room
+  whose room thermostat sits in the area keeps everything the card does for it (schedule strip,
+  comfort / setback, back to schedule, write jobs). The only new write is
+  `climate.set_temperature` on a climate of another integration, for administrators, within its
+  `min_temp` / `max_temp` and at its `target_temp_step`; no new WebSocket command, no new cloud
+  or tunnel write. The card editor picks a room or an area.
+- **Panel: other areas.** Below the integration's rooms, the side panel summarises the areas
+  holding climate entities of other integrations (temperature, setpoint, heating, offline, low
+  battery, window), read only, behind an "Other areas" toggle (on by default, remembered by the
+  browser).
 
 - **Thermostat of an isolated head: setpoint write over Tuya cloud MQTT.** With
   `enable_cloud_mqtt` on and the link connected, the climate of an isolated head writes the
