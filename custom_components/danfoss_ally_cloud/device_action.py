@@ -71,7 +71,11 @@ ACTION_SCHEMA = vol.Any(_SET_TEMPERATURE_SCHEMA, _RESTORE_SCHEDULE_SCHEMA)
 
 async def async_validate_action_config(hass: HomeAssistant, config: ConfigType) -> ConfigType:
     """Validate the config and resolve the climate's registry id to its entity id."""
-    return async_validate_entity_schema(hass, config, ACTION_SCHEMA)
+    # Schemas stay voluptuous (runtime-accepted by every supported HA, incl. 2026.x); HA 2026
+    # types them as probatio, so the schema crosses into HA as Any at this single point, as in
+    # ``services.py``.
+    schema: Any = ACTION_SCHEMA
+    return async_validate_entity_schema(hass, config, schema)
 
 
 def _room_group_id(hass: HomeAssistant, device_id: str) -> str | None:
