@@ -31,6 +31,7 @@ import {
   canAdjustClimate,
   climateView,
   climatesInArea,
+  roomSensors,
   steppedClimateTarget,
 } from "./area";
 import {
@@ -42,6 +43,7 @@ import {
   ICON_MINUS,
   ICON_PLUS,
   ICON_RESTORE,
+  ICON_THERMOMETER,
   ICON_VALVE,
   ICON_WIFI,
   ICON_WIFI_OFF,
@@ -441,6 +443,7 @@ export class DanfossAllyRoomCard extends LitElement {
             <div class="room">${this._title(room)}</div>
             ${this._renderActions(room)}
           </div>
+          ${areaMode ? this._renderRoomSensors() : nothing}
           ${areaMode && room
             ? html`<div class="hint">${t(this.hass, "area_ally_room", { name: room.name })}</div>`
             : nothing}
@@ -578,6 +581,46 @@ export class DanfossAllyRoomCard extends LitElement {
     `;
   }
 
+  /**
+   * Capteurs de pièce de la zone (hors appareils de climates) : un seul, sa valeur ;
+   * plusieurs, leur moyenne avec leur nombre et leur plage. Rien sans capteur.
+   */
+  private _renderRoomSensors(): TemplateResult | typeof nothing {
+    const areaId = this._config?.area_id;
+    if (!this.hass || !areaId) {
+      return nothing;
+    }
+    const s = roomSensors(this.hass, areaId);
+    if (s.temperature === null && s.humidity === null) {
+      return nothing;
+    }
+    const parts: string[] = [];
+    if (s.temperature !== null) {
+      parts.push(t(this.hass, "degree", { value: s.temperature }));
+    }
+    if (s.humidity !== null) {
+      parts.push(t(this.hass, "humidity", { value: s.humidity }));
+    }
+    const n = Math.max(s.temperature_count, s.humidity_count);
+    const caption =
+      n <= 1
+        ? t(this.hass, "area_room_sensor")
+        : s.temperature_count > 1 && s.temperature_min !== s.temperature_max
+          ? t(this.hass, "area_room_sensors_range", {
+              n,
+              min: s.temperature_min ?? "",
+              max: s.temperature_max ?? "",
+            })
+          : t(this.hass, "area_room_sensors", { n });
+    return html`
+      <div class="room-sensor">
+        ${ICON_THERMOMETER}
+        <span class="room-sensor-value">${parts.join(" · ")}</span>
+        <span class="room-sensor-label">${caption}</span>
+      </div>
+    `;
+  }
+
   /** Climates de la zone hors pièce Ally de la carte (toutes intégrations). */
   private _renderAreaClimates(room: Room | undefined): TemplateResult {
     const hass = this.hass;
@@ -614,17 +657,28 @@ export class DanfossAllyRoomCard extends LitElement {
     const up = canAdjust ? steppedClimateTarget(view, 1) : null;
     const x = view.extras;
     const heating = view.available && view.action === "heating";
+    // Tête qui régule sur un capteur externe : la température qui compte est la sienne ;
+    // la mesure propre de la tête reste affichée, nommée comme telle.
+    const external = x.external_temperature;
+    const shown = external ?? view.current;
     return html`
       <div class="climate-row">
         <div class="row-top">
           <span class="head-name">${view.name}</span>
           <span class="row-now">
-            <span class="row-temp ${heating ? "heating" : ""}">${deg(view.current)}</span>
+            <span class="row-temp ${heating ? "heating" : ""}">${deg(shown)}</span>
             ${view.available && view.action
               ? html`<span class="row-action">${actionLabel(this.hass, view.action)}</span>`
               : nothing}
           </span>
         </div>
+        ${external !== null
+          ? html`<div class="row-note">
+              ${t(this.hass, "head_external_note", {
+                head: deg(view.current),
+              })}
+            </div>`
+          : nothing}
         <div class="row-bottom">
           <span class="badges">
             ${renderBadge(
@@ -648,6 +702,13 @@ export class DanfossAllyRoomCard extends LitElement {
                   x.valve_opening > 0 ? "ok" : "muted",
                   ICON_VALVE,
                   t(this.hass, "head_valve", { value: x.valve_opening }),
+                )
+              : nothing}
+            ${external !== null
+              ? renderBadge(
+                  "ok",
+                  ICON_THERMOMETER,
+                  t(this.hass, "head_external_sensor", { value: deg(external) }),
                 )
               : nothing}
             ${x.window_open
@@ -843,6 +904,33 @@ export class DanfossAllyRoomCard extends LitElement {
       }
       .row-action {
         font-size: 0.8rem;
+        color: var(--secondary-text-color);
+      }
+      .row-note {
+        font-size: 0.8rem;
+        color: var(--secondary-text-color);
+      }
+      .room-sensor {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+        color: var(--primary-text-color);
+      }
+      .room-sensor svg {
+        width: 18px;
+        height: 18px;
+        fill: var(--secondary-text-color);
+        align-self: center;
+      }
+      .room-sensor-value {
+        font-size: 1.4rem;
+        font-weight: 300;
+        font-variant-numeric: tabular-nums;
+      }
+      .room-sensor-label {
+        font-size: 0.85rem;
         color: var(--secondary-text-color);
       }
       .row-target {

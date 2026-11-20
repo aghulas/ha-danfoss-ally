@@ -716,6 +716,12 @@ const STRINGS = {
     climate_write_failed: "{name}: the setpoint could not be sent",
     head_heat_required: "Heat required",
     head_linkquality: "Link quality {value}",
+    humidity: "{value} %",
+    area_room_sensor: "Room sensor",
+    area_room_sensors: "Average of {n} room sensors",
+    area_room_sensors_range: "Average of {n} room sensors ({min}–{max} °C)",
+    head_external_sensor: "Regulates on an external room sensor ({value})",
+    head_external_note: "External room sensor · head's own reading {head}",
     action_heating: "Heating",
     action_preheating: "Preheating",
     action_idle: "Idle",
@@ -874,6 +880,12 @@ const STRINGS = {
     climate_write_failed: "{name} : la consigne n'a pas pu être envoyée",
     head_heat_required: "Demande de chauffe",
     head_linkquality: "Qualité du lien {value}",
+    humidity: "{value} %",
+    area_room_sensor: "Capteur de pièce",
+    area_room_sensors: "Moyenne de {n} capteurs de pièce",
+    area_room_sensors_range: "Moyenne de {n} capteurs de pièce ({min}–{max} °C)",
+    head_external_sensor: "Régule sur un capteur de pièce externe ({value})",
+    head_external_note: "Capteur de pièce externe · mesure propre de la tête {head}",
     action_heating: "Chauffe",
     action_preheating: "Préchauffe",
     action_idle: "Au repos",
@@ -1449,6 +1461,7 @@ const ICON_BATTERY = w`<svg viewBox="0 0 24 24"><path d="M16.67 4H15V2H9v2H7.33C
 const ICON_VALVE = w`<svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7.76A4 4 0 1 0 15 16a4 4 0 0 0-2-3.24V5a1 1 0 0 1 2 0h2a3 3 0 0 0-3-3z" /></svg>`;
 const ICON_WINDOW = w`<svg viewBox="0 0 24 24"><path d="M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1m7 2H5v6h6zm2 0v6h6V5zm-2 8H5v6h6zm2 0v6h6v-6z" /></svg>`;
 const ICON_FLAME = w`<svg viewBox="0 0 24 24"><path d="M17.66 11.2c-.23-.3-.51-.56-.77-.82-.67-.6-1.43-1.03-2.07-1.66C13.33 7.26 13 4.85 13.95 3c-.95.23-1.78.75-2.49 1.32-2.59 2.08-3.61 5.75-2.39 8.9.04.1.08.2.08.33 0 .22-.15.42-.35.5-.23.1-.47.04-.66-.12a.6.6 0 0 1-.14-.17c-1.13-1.43-1.31-3.48-.55-5.12C5.78 10 4.87 12.3 5 14.47c.06.5.12 1 .29 1.5.14.6.41 1.2.71 1.73 1.08 1.73 2.95 2.97 4.96 3.22 2.14.27 4.43-.12 6.07-1.6 1.83-1.66 2.47-4.32 1.53-6.6l-.13-.26c-.21-.46-.77-1.26-.77-1.26" /></svg>`;
+const ICON_THERMOMETER = w`<svg viewBox="0 0 24 24"><path d="M15 13V5a3 3 0 0 0-6 0v8a5 5 0 1 0 6 0m-3-9a1 1 0 0 1 1 1v3h-2V5a1 1 0 0 1 1-1" /></svg>`;
 const ICON_LOCK = w`<svg viewBox="0 0 24 24"><path d="M12 17a2 2 0 0 0 2-2 2 2 0 0 0-2-2 2 2 0 0 0-2 2 2 2 0 0 0 2 2m6-9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h1V6a5 5 0 0 1 10 0v2zM12 3a3 3 0 0 0-3 3v2h6V6a3 3 0 0 0-3-3" /></svg>`;
 async function fetchInfo(hass) {
   try {
@@ -2861,6 +2874,9 @@ const KEYS_WINDOW_STATE = ["window_open_internal"];
 const KEYS_WINDOW_BINARY = ["window_open_external", "window_open", "window"];
 const KEYS_HEAT = ["heat_required"];
 const KEYS_LINK = ["linkquality"];
+const KEYS_EXTERNAL = ["external_measured_room_sensor"];
+const EXTERNAL_NONE = -8e3;
+const EXTERNAL_MAX = 3500;
 const WINDOW_OPEN_STATES = /* @__PURE__ */ new Set(["open", "external_open"]);
 const UNAVAILABLE = /* @__PURE__ */ new Set(["unavailable", "unknown", ""]);
 function domainOf(entityId) {
@@ -2981,6 +2997,7 @@ function headExtras(hass, entityId) {
   const heat = pick(list, "binary_sensor", [], KEYS_HEAT);
   const link = num(pick(list, "sensor", [], KEYS_LINK)?.state.state);
   return {
+    external_temperature: externalTemperature(hass, entityId, list),
     battery,
     low_battery: batteryLow?.state.state === "on" || battery !== null && battery <= LOW_BATTERY_PERCENT,
     valve_opening: valve,
@@ -2988,6 +3005,16 @@ function headExtras(hass, entityId) {
     heat_required: heat ? heat.state.state === "on" : null,
     linkquality: link
   };
+}
+function externalTemperature(hass, entityId, list) {
+  const entity = pick(list, "number", [], KEYS_EXTERNAL) ?? pick(list, "sensor", [], KEYS_EXTERNAL);
+  const raw = num(
+    entity ? entity.state.state : hass.states?.[entityId]?.attributes.external_measured_room_sensor
+  );
+  if (raw === null || raw <= EXTERNAL_NONE || raw > EXTERNAL_MAX) {
+    return null;
+  }
+  return Math.round(raw / 10) / 10;
 }
 function fallbackTemperature(hass, entityId) {
   const list = siblings(hass, entityId).filter((s2) => !s2.entry.entity_category);
@@ -3017,6 +3044,46 @@ function climateView(hass, entityId) {
     step: step > 0 ? step : DEFAULT_STEP,
     supports_target: (features & FEATURE_TARGET_TEMPERATURE) !== 0,
     extras: headExtras(hass, entityId)
+  };
+}
+function climateDevices(hass) {
+  const out = /* @__PURE__ */ new Set();
+  for (const e2 of Object.values(hass.entities ?? {})) {
+    if (domainOf(e2.entity_id) === "climate" && e2.device_id) {
+      out.add(e2.device_id);
+    }
+  }
+  return out;
+}
+const round1 = (x2) => Math.round(x2 * 10) / 10;
+function roomSensors(hass, areaId) {
+  const excluded = climateDevices(hass);
+  const temps = [];
+  const hums = [];
+  for (const entry of Object.values(hass.entities ?? {})) {
+    if (domainOf(entry.entity_id) !== "sensor" || entry.hidden || entry.entity_category || entry.platform === ALLY_PLATFORM || DUPLICATE_PLATFORMS.has(entry.platform ?? "") || entry.device_id && excluded.has(entry.device_id) || entityArea(hass, entry.entity_id) !== areaId) {
+      continue;
+    }
+    const st = hass.states?.[entry.entity_id];
+    const value = st && !UNAVAILABLE.has(st.state) ? num(st.state) : null;
+    if (value === null) {
+      continue;
+    }
+    const dc = st?.attributes.device_class;
+    if (dc === "temperature") {
+      temps.push(value);
+    } else if (dc === "humidity") {
+      hums.push(value);
+    }
+  }
+  const mean = (xs) => xs.reduce((s2, x2) => s2 + x2, 0) / xs.length;
+  return {
+    temperature: temps.length ? round1(mean(temps)) : null,
+    temperature_count: temps.length,
+    temperature_min: temps.length ? round1(Math.min(...temps)) : null,
+    temperature_max: temps.length ? round1(Math.max(...temps)) : null,
+    humidity: hums.length ? Math.round(mean(hums)) : null,
+    humidity_count: hums.length
   };
 }
 function canAdjustClimate(view) {
@@ -3374,6 +3441,7 @@ let DanfossAllyRoomCard = class extends i {
             <div class="room">${this._title(room)}</div>
             ${this._renderActions(room)}
           </div>
+          ${areaMode ? this._renderRoomSensors() : A}
           ${areaMode && room ? b`<div class="hint">${t(this.hass, "area_ally_room", { name: room.name })}</div>` : A}
           ${readOnly ? b`<div class="hint">${t(this.hass, "read_only")}</div>` : A}
           ${this._error ? b`<div class="banner error" role="alert">${this._error}</div>` : A}
@@ -3482,6 +3550,40 @@ let DanfossAllyRoomCard = class extends i {
       </div>
     `;
   }
+  /**
+   * Capteurs de pièce de la zone (hors appareils de climates) : un seul, sa valeur ;
+   * plusieurs, leur moyenne avec leur nombre et leur plage. Rien sans capteur.
+   */
+  _renderRoomSensors() {
+    const areaId = this._config?.area_id;
+    if (!this.hass || !areaId) {
+      return A;
+    }
+    const s2 = roomSensors(this.hass, areaId);
+    if (s2.temperature === null && s2.humidity === null) {
+      return A;
+    }
+    const parts = [];
+    if (s2.temperature !== null) {
+      parts.push(t(this.hass, "degree", { value: s2.temperature }));
+    }
+    if (s2.humidity !== null) {
+      parts.push(t(this.hass, "humidity", { value: s2.humidity }));
+    }
+    const n3 = Math.max(s2.temperature_count, s2.humidity_count);
+    const caption = n3 <= 1 ? t(this.hass, "area_room_sensor") : s2.temperature_count > 1 && s2.temperature_min !== s2.temperature_max ? t(this.hass, "area_room_sensors_range", {
+      n: n3,
+      min: s2.temperature_min ?? "",
+      max: s2.temperature_max ?? ""
+    }) : t(this.hass, "area_room_sensors", { n: n3 });
+    return b`
+      <div class="room-sensor">
+        ${ICON_THERMOMETER}
+        <span class="room-sensor-value">${parts.join(" · ")}</span>
+        <span class="room-sensor-label">${caption}</span>
+      </div>
+    `;
+  }
   /** Climates de la zone hors pièce Ally de la carte (toutes intégrations). */
   _renderAreaClimates(room) {
     const hass = this.hass;
@@ -3508,15 +3610,22 @@ let DanfossAllyRoomCard = class extends i {
     const up = canAdjust ? steppedClimateTarget(view, 1) : null;
     const x2 = view.extras;
     const heating = view.available && view.action === "heating";
+    const external = x2.external_temperature;
+    const shown = external ?? view.current;
     return b`
       <div class="climate-row">
         <div class="row-top">
           <span class="head-name">${view.name}</span>
           <span class="row-now">
-            <span class="row-temp ${heating ? "heating" : ""}">${deg(view.current)}</span>
+            <span class="row-temp ${heating ? "heating" : ""}">${deg(shown)}</span>
             ${view.available && view.action ? b`<span class="row-action">${actionLabel(this.hass, view.action)}</span>` : A}
           </span>
         </div>
+        ${external !== null ? b`<div class="row-note">
+              ${t(this.hass, "head_external_note", {
+      head: deg(view.current)
+    })}
+            </div>` : A}
         <div class="row-bottom">
           <span class="badges">
             ${renderBadge(
@@ -3535,6 +3644,11 @@ let DanfossAllyRoomCard = class extends i {
       x2.valve_opening > 0 ? "ok" : "muted",
       ICON_VALVE,
       t(this.hass, "head_valve", { value: x2.valve_opening })
+    ) : A}
+            ${external !== null ? renderBadge(
+      "ok",
+      ICON_THERMOMETER,
+      t(this.hass, "head_external_sensor", { value: deg(external) })
     ) : A}
             ${x2.window_open ? renderBadge("warn", ICON_WINDOW, t(this.hass, "head_window_open")) : A}
             ${x2.heat_required ? renderBadge("ok", ICON_FLAME, t(this.hass, "head_heat_required")) : A}
@@ -3704,6 +3818,33 @@ DanfossAllyRoomCard.styles = [
       }
       .row-action {
         font-size: 0.8rem;
+        color: var(--secondary-text-color);
+      }
+      .row-note {
+        font-size: 0.8rem;
+        color: var(--secondary-text-color);
+      }
+      .room-sensor {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+        color: var(--primary-text-color);
+      }
+      .room-sensor svg {
+        width: 18px;
+        height: 18px;
+        fill: var(--secondary-text-color);
+        align-self: center;
+      }
+      .room-sensor-value {
+        font-size: 1.4rem;
+        font-weight: 300;
+        font-variant-numeric: tabular-nums;
+      }
+      .room-sensor-label {
+        font-size: 0.85rem;
         color: var(--secondary-text-color);
       }
       .row-target {

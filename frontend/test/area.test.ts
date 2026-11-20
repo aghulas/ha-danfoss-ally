@@ -10,6 +10,7 @@ import {
   climatesInArea,
   entityArea,
   headExtras,
+  roomSensors,
   steppedClimateTarget,
 } from "../src/area";
 import type { Room } from "../src/types";
@@ -79,6 +80,7 @@ describe("entités d'une tête, appariées par appareil", () => {
       window_open: true,
       heat_required: true,
       linkquality: 120,
+      external_temperature: null,
     });
   });
 
@@ -94,6 +96,7 @@ describe("entités d'une tête, appariées par appareil", () => {
       window_open: null,
       heat_required: null,
       linkquality: null,
+      external_temperature: null,
     });
   });
 
@@ -188,5 +191,121 @@ describe("résumé d'une zone (panneau)", () => {
       areaClimateLine({ ...sum, temperature: null, setpoint_min: 19, setpoint_max: 21.5 }),
     ).toBe("– → 19–21.5 °C");
     expect(areaClimateLine({ ...sum, temperature: null, setpoint_min: null })).toBeNull();
+  });
+});
+
+/**
+ * Zone `nef` : deux têtes Zigbee2MQTT qui régulent sur un capteur de pièce externe
+ * (`dev-h1` à 1736, `dev-h2` sans capteur à −8000) et un capteur de pièce `dev-s1`
+ * (température, humidité, batterie). Données inventées.
+ */
+function nave() {
+  const reg = emptyRegistries();
+  reg.areas = { nef: { area_id: "nef", name: "Nef" } };
+  reg.devices = {
+    "dev-h1": { id: "dev-h1", area_id: "nef" },
+    "dev-h2": { id: "dev-h2", area_id: "nef" },
+    "dev-s1": { id: "dev-s1", area_id: "nef" },
+  };
+  z2mClimate(reg, "climate.nef_a", "dev-h1", { current_temperature: 22.4, temperature: 19 });
+  addEntity(reg, "number.nef_a_external_measured_room_sensor", "1736", {}, {
+    platform: "mqtt",
+    device_id: "dev-h1",
+  });
+  addEntity(reg, "sensor.nef_a_local_temperature", "22.4", { device_class: "temperature" }, {
+    platform: "mqtt",
+    device_id: "dev-h1",
+  });
+  z2mClimate(reg, "climate.nef_b", "dev-h2");
+  addEntity(reg, "number.nef_b_external_measured_room_sensor", "-8000", {}, {
+    platform: "mqtt",
+    device_id: "dev-h2",
+  });
+  addEntity(reg, "sensor.nef_temperature", "17.48", { device_class: "temperature" }, {
+    platform: "mqtt",
+    device_id: "dev-s1",
+  });
+  addEntity(reg, "sensor.nef_humidity", "61.6", { device_class: "humidity" }, {
+    platform: "mqtt",
+    device_id: "dev-s1",
+  });
+  addEntity(reg, "sensor.nef_battery", "90", { device_class: "battery" }, {
+    platform: "mqtt",
+    device_id: "dev-s1",
+  });
+  return reg;
+}
+
+describe("capteur de pièce externe", () => {
+  it("lit external_measured_room_sensor en centièmes de °C, au dixième", () => {
+    const hass = hassWith(nave());
+    expect(headExtras(hass, "climate.nef_a").external_temperature).toBe(17.4);
+    const view = climateView(hass, "climate.nef_a")!;
+    expect(view.current).toBe(22.4);
+  });
+
+  it("−8000, hors plage, indisponible ou absent = aucun capteur externe", () => {
+    const reg = nave();
+    const hass = hassWith(reg);
+    expect(headExtras(hass, "climate.nef_b").external_temperature).toBeNull();
+    reg.states["number.nef_a_external_measured_room_sensor"].state = "unavailable";
+    expect(headExtras(hassWith(reg), "climate.nef_a").external_temperature).toBeNull();
+    reg.states["number.nef_a_external_measured_room_sensor"].state = "9000";
+    expect(headExtras(hassWith(reg), "climate.nef_a").external_temperature).toBeNull();
+    expect(headExtras(hassWith(building()), "climate.salon_fenetre").external_temperature).toBeNull();
+  });
+
+  it("à défaut d'entité, lit l'attribut du climate", () => {
+    const reg = emptyRegistries();
+    z2mClimate(reg, "climate.t", "dev", { external_measured_room_sensor: 1850 });
+    expect(headExtras(hassWith(reg), "climate.t").external_temperature).toBe(18.5);
+  });
+});
+
+describe("capteurs de pièce d'une zone", () => {
+  it("un capteur : sa température et son humidité, sans les mesures des têtes", () => {
+    expect(roomSensors(hassWith(nave()), "nef")).toEqual({
+      temperature: 17.5,
+      temperature_count: 1,
+      temperature_min: 17.5,
+      temperature_max: 17.5,
+      humidity: 62,
+      humidity_count: 1,
+    });
+  });
+
+  it("plusieurs capteurs : moyenne, nombre et plage", () => {
+    const reg = nave();
+    addEntity(reg, "sensor.nef_fond_temperature", "18.5", { device_class: "temperature" }, {
+      area_id: "nef",
+    });
+    const s = roomSensors(hassWith(reg), "nef");
+    expect(s.temperature).toBe(18);
+    expect(s.temperature_count).toBe(2);
+    expect([s.temperature_min, s.temperature_max]).toEqual([17.5, 18.5]);
+  });
+
+  it("écarte diagnostic, masqué, non numérique, autre zone et cette intégration", () => {
+    const reg = nave();
+    reg.entities["sensor.nef_temperature"].hidden = true;
+    reg.states["sensor.nef_humidity"].state = "unavailable";
+    addEntity(reg, "sensor.nef_interne", "30", { device_class: "temperature" }, {
+      area_id: "nef",
+      entity_category: "diagnostic",
+    });
+    addEntity(reg, "sensor.nef_ally", "21", { device_class: "temperature" }, {
+      area_id: "nef",
+      platform: "danfoss_ally_cloud",
+    });
+    addEntity(reg, "sensor.ailleurs", "12", { device_class: "temperature" }, {
+      area_id: "salon",
+    });
+    const s = roomSensors(hassWith(reg), "nef");
+    expect(s.temperature).toBeNull();
+    expect(s.humidity).toBeNull();
+  });
+
+  it("une zone sans capteur de pièce ne montre rien", () => {
+    expect(roomSensors(hassWith(building()), "salon").temperature_count).toBe(0);
   });
 });
