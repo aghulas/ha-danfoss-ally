@@ -443,6 +443,29 @@ def read_attributes(
     return None if v is None else name_attributes(v, table)
 
 
+def read_standard(link: Any, dev_id: str, node_id: str, **kw: Any) -> dict[str, Any] | None:
+    """A head's standard attributes (``ATTRS_STD``, one frame), named. None if no response.
+
+    The same single request as ``read_preheat`` / ``read_programming_mode``: it also carries the
+    setpoint change source (0x0030) and the setpoint bounds, at no extra traffic.
+    """
+    return read_attributes(link, dev_id, node_id, ATTRS_STD, False, **kw)
+
+
+def read_settings(link: Any, dev_id: str, node_id: str, **kw: Any) -> dict[str, Any] | None:
+    """A head's Danfoss (manufacturer) attributes, named: ``ATTRS_DANFOSS_A`` then ``_B``.
+
+    Two frames for a head that answers. None if the first one gets no response: the second is
+    then not sent, so a head that does not answer costs one request, not two. A head that answers
+    the first only returns what it gave.
+    """
+    out = read_attributes(link, dev_id, node_id, ATTRS_DANFOSS_A, True, **kw)
+    if out is None:
+        return None
+    out.update(read_attributes(link, dev_id, node_id, ATTRS_DANFOSS_B, True, **kw) or {})
+    return out
+
+
 def read_preheat(link: Any, dev_id: str, node_id: str, **kw: Any) -> bool | None:
     """A head's real preheat (standard attribute 0x0025, bit 1). None if no response."""
     a = read_attributes(link, dev_id, node_id, ATTRS_STD, False, **kw)

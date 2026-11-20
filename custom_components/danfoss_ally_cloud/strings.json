@@ -85,6 +85,71 @@
       },
       "relay_rooms": {
         "name": "Rooms calling for heat"
+      },
+      "programming_mode": {
+        "name": "Programming mode",
+        "state": {
+          "setpoint": "Manual setpoint",
+          "schedule": "Schedule",
+          "schedule_with_preheat": "Schedule with preheat",
+          "eco": "Eco"
+        }
+      },
+      "setpoint_source": {
+        "name": "Setpoint change source",
+        "state": {
+          "manual": "Manual",
+          "schedule": "Schedule",
+          "externally": "External"
+        }
+      },
+      "window_state": {
+        "name": "Window state",
+        "state": {
+          "quarantine": "Quarantine",
+          "closed": "Closed",
+          "hold": "Hold",
+          "open": "Open",
+          "external_open": "Open (external contact)"
+        }
+      },
+      "adaptation_status": {
+        "name": "Adaptation run",
+        "state": {
+          "none": "None",
+          "in_progress": "In progress",
+          "found": "Found",
+          "lost": "Lost"
+        }
+      },
+      "orientation": {
+        "name": "Orientation",
+        "state": {
+          "horizontal": "Horizontal",
+          "vertical": "Vertical"
+        }
+      },
+      "regulation_speed": {
+        "name": "Regulation speed"
+      },
+      "setpoint_offset": {
+        "name": "Setpoint offset"
+      },
+      "descale_day": {
+        "name": "Valve exercise day",
+        "state": {
+          "sunday": "Sunday",
+          "monday": "Monday",
+          "tuesday": "Tuesday",
+          "wednesday": "Wednesday",
+          "thursday": "Thursday",
+          "friday": "Friday",
+          "saturday": "Saturday",
+          "undefined": "Not set"
+        }
+      },
+      "descale_time": {
+        "name": "Valve exercise time"
       }
     },
     "binary_sensor": {
@@ -99,6 +164,15 @@
       },
       "boiler_relay": {
         "name": "Boiler relay"
+      },
+      "heat_required": {
+        "name": "Heat required"
+      },
+      "mounting_mode": {
+        "name": "Mounting mode"
+      },
+      "radiator_covered": {
+        "name": "Radiator covered"
       }
     },
     "switch": {

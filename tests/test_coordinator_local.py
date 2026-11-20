@@ -22,16 +22,23 @@ class FakeManager:
         self._survey = survey or {}
         self._exc = releve_exc
         self.ecrits: list = []
+        self.mode_without_preheat = 1
+        self.settings: dict = {}  # dev_id -> Danfoss attributes (absent: the head does not answer)
+        self.settings_surveys = 0
+        self.settings_exc = None
+        self.setpoint_source = 1
 
     @property
     def gateway_ids(self):
         return {"gw-1"}
 
-    def survey_preheat(self, heads, on_result=None, stop=None):
+    def survey_preheat(self, heads, on_result=None, stop=None, on_attributes=None):
         if self._exc is not None:
             raise self._exc
         res = {h.dev_id: self._survey.get(h.dev_id, True) for h in heads}
         for dev_id, value in res.items():
+            if on_attributes is not None:
+                on_attributes(dev_id, self._attributes(value))
             if on_result is not None:
                 on_result(dev_id, value)
         return res
@@ -44,6 +51,29 @@ class FakeManager:
         if self._exc is not None:
             raise self._exc
         return self._survey.get(head.dev_id)
+
+    def read_standard(self, head):
+        return self._attributes(self.read_preheat(head))
+
+    def survey_settings(self, heads, on_result=None, stop=None):
+        self.settings_surveys += 1
+        if self.settings_exc is not None:
+            raise self.settings_exc
+        res = {h.dev_id: self.settings.get(h.dev_id) for h in heads}
+        for dev_id, attrs in res.items():
+            if on_result is not None:
+                on_result(dev_id, attrs)
+        return res
+
+    def _attributes(self, value):
+        """Standard attributes of a head whose preheat reads ``value`` (None: no answer)."""
+        if value is None:
+            return None
+        return {
+            "preheat": value,
+            "programming_mode": 3 if value else self.mode_without_preheat,
+            "setpoint_source": self.setpoint_source,
+        }
 
 
 def _cloud(hass, data):
@@ -138,7 +168,7 @@ class GatedManager(FakeManager):
     def was_read(self, dev_id):
         return self.read.setdefault(dev_id, threading.Event())
 
-    def survey_preheat(self, heads, on_result=None, stop=None):
+    def survey_preheat(self, heads, on_result=None, stop=None, on_attributes=None):
         self.calls += 1
         self.started.set()
         res = {}

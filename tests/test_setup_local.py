@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 import homeassistant.components.mqtt as mqtt_mod
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.danfoss_ally_cloud as integration
@@ -21,6 +22,7 @@ from custom_components.danfoss_ally_cloud.const import (
     DATA_LOCAL,
     DATA_MQTT,
     DOMAIN,
+    LOCAL_SETTINGS_INTERVAL,
 )
 
 from .common import ENTRY_DATA, FakeCloudClient, head
@@ -391,3 +393,157 @@ async def test_window_switch_state_not_rewritten_by_unrelated_local_reads(
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
+
+
+# --- Enum sensors read through the tunnel (docs/zigbee2mqtt-alignment.md, batch B) -------------
+
+
+async def test_local_enum_sensors_follow_the_survey(hass: HomeAssistant, mqtt_double):
+    manager = FakeManager(survey={"dev-1": True})
+    manager.setpoint_source = 0
+    entry = await _setup(hass, FakeCloudClient(devices=[head()]), manager)
+
+    mode = hass.states.get("sensor.salon_programming_mode")
+    assert mode is not None and mode.state == "schedule_with_preheat"
+    assert mode.attributes["raw"] == 3
+    assert mode.attributes["options"] == ["setpoint", "schedule", "schedule_with_preheat", "eco"]
+    source = hass.states.get("sensor.salon_setpoint_change_source")
+    assert source is not None and source.state == "manual"
+
+    # A preheat write reads the head back: the mode follows without waiting for the next survey.
+    manager._survey["dev-1"] = False
+    await hass.services.async_call(
+        "switch", "turn_off", {"entity_id": "switch.salon_pre_heating"}, blocking=True
+    )
+    assert hass.states.get("sensor.salon_programming_mode").state == "schedule"
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_local_enum_sensor_unknown_on_an_unlisted_raw_value(hass: HomeAssistant, mqtt_double):
+    manager = FakeManager(survey={"dev-1": False})
+    manager.mode_without_preheat = 9
+    await _setup(hass, FakeCloudClient(devices=[head()]), manager)
+    mode = hass.states.get("sensor.salon_programming_mode")
+    assert mode.state == "unknown" and mode.attributes["raw"] == 9
+
+
+async def test_local_enum_sensors_unavailable_without_an_answer(hass: HomeAssistant, mqtt_double):
+    await _setup(hass, FakeCloudClient(devices=[head()]), FakeManager(survey={"dev-1": None}))
+    assert hass.states.get("sensor.salon_programming_mode").state == "unavailable"
+    assert hass.states.get("sensor.salon_setpoint_change_source").state == "unavailable"
+
+
+async def test_local_enum_sensors_absent_without_the_local_tunnel(hass: HomeAssistant):
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, unique_id="compte@exemple.fr")
+    entry.add_to_hass(hass)
+    fake = FakeCloudClient(devices=[head()])
+    with patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=fake):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    assert hass.states.get("sensor.salon_programming_mode") is None
+
+
+# --- Daily settings pass (docs/zigbee2mqtt-alignment.md, batch B2) -----------------------------
+
+_SETTINGS = {
+    "window_state": 3,
+    "adaptation_state": 2,
+    "radiator_covered": True,
+    "orientation": False,
+    "control_speed": 5,
+    "setpoint_offset": -15,
+    "descale_day": "monday",
+    "descale_time": "10:30",
+}
+
+
+async def test_settings_entities_follow_the_daily_pass(hass: HomeAssistant, mqtt_double):
+    manager = FakeManager(survey={"dev-1": True})
+    manager.settings = {"dev-1": dict(_SETTINGS)}
+    await _setup(hass, FakeCloudClient(devices=[head()]), manager)
+
+    window = hass.states.get("sensor.salon_window_state")
+    assert window.state == "open" and window.attributes["raw"] == 3
+    assert window.attributes["read_at"] is not None
+    assert hass.states.get("sensor.salon_adaptation_run").state == "found"
+    assert hass.states.get("binary_sensor.salon_radiator_covered").state == "on"
+    # The static settings are disabled by default: registered, without a state.
+    registry = er.async_get(hass)
+    for name in ("orientation", "regulation_speed", "setpoint_offset"):
+        reg = registry.async_get(f"sensor.salon_{name}")
+        assert reg is not None and reg.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+        assert hass.states.get(f"sensor.salon_{name}") is None
+
+
+async def test_settings_pass_runs_once_a_day_and_keeps_the_last_value(
+    hass: HomeAssistant, mqtt_double
+):
+    manager = FakeManager(survey={"dev-1": True})
+    manager.settings = {"dev-1": dict(_SETTINGS)}
+    entry = await _setup(hass, FakeCloudClient(devices=[head()]), manager)
+    local = hass.data[DOMAIN][entry.entry_id][DATA_LOCAL]
+    assert manager.settings_surveys == 1
+
+    # The next preheat surveys do not read the settings again.
+    await local.async_refresh()
+    await hass.async_block_till_done()
+    assert manager.settings_surveys == 1
+
+    # A day later the pass runs again; a head that misses it keeps its last value, dated.
+    read_at = hass.states.get("sensor.salon_window_state").attributes["read_at"]
+    manager.settings = {}
+    local._settings_at -= LOCAL_SETTINGS_INTERVAL
+    await local.async_refresh()
+    await hass.async_block_till_done()
+    assert manager.settings_surveys == 2
+    window = hass.states.get("sensor.salon_window_state")
+    assert window.state == "open" and window.attributes["read_at"] == read_at
+
+
+async def test_settings_entities_unavailable_until_read_and_retry_after_a_failure(
+    hass: HomeAssistant, mqtt_double
+):
+    manager = FakeManager(survey={"dev-1": True})
+    manager.settings_exc = RuntimeError("tunnel busy")
+    entry = await _setup(hass, FakeCloudClient(devices=[head()]), manager)
+    local = hass.data[DOMAIN][entry.entry_id][DATA_LOCAL]
+    # The failed pass did not fail the preheat survey it followed.
+    assert hass.states.get("switch.salon_pre_heating").state == "on"
+    assert hass.states.get("sensor.salon_window_state").state == "unavailable"
+    assert hass.states.get("binary_sensor.salon_radiator_covered").state == "unavailable"
+
+    # It is tried again right after the next survey.
+    manager.settings_exc = None
+    manager.settings = {"dev-1": dict(_SETTINGS)}
+    await local.async_refresh()
+    await hass.async_block_till_done()
+    assert manager.settings_surveys == 2
+    assert hass.states.get("sensor.salon_window_state").state == "open"
+
+
+def test_local_sensor_values():
+    """Scaled, plain and enum values; an unlisted or ill-typed raw value reads unknown."""
+    from custom_components.danfoss_ally_cloud.sensor import LOCAL_SENSORS, DanfossLocalSensor
+
+    class _Local:
+        attributes: dict = {}
+        settings = {
+            "h": {**_SETTINGS, "window_state": 9, "control_speed": [5]},
+        }
+
+    def value(key):
+        desc = next(d for d in LOCAL_SENSORS if d.key == key)
+        sensor = DanfossLocalSensor.__new__(DanfossLocalSensor)
+        sensor.coordinator = _Local()
+        sensor._device_id = "h"
+        sensor.entity_description = desc
+        sensor._attribute = desc.attribute
+        sensor._daily = desc.daily
+        return sensor.native_value
+
+    assert value("setpoint_offset") == -1.5
+    assert value("descale_day") == "monday" and value("descale_time") == "10:30"
+    assert value("orientation") == "horizontal"
+    assert value("window_state") is None and value("regulation_speed") is None

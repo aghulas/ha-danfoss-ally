@@ -1,4 +1,4 @@
-"""Binary sensors: online (connectivity), window open.
+"""Binary sensors: online (connectivity), window open, heat required, mounting mode.
 
 `online` is authoritative for connectivity (not `update_time`, an event-driven registration
 timestamp that can stay frozen - see docs/architecture.md).
@@ -16,9 +16,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api.mqtt_client import CloudMqttLink
-from .const import DATA_COORDINATOR, DATA_MQTT_LINK, DOMAIN
-from .coordinator import DanfossCoordinator
-from .entity import DanfossEntity, DanfossHomeEntity
+from .const import DATA_COORDINATOR, DATA_LOCAL, DATA_MQTT_LINK, DOMAIN
+from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
+from .entity import DanfossEntity, DanfossHomeEntity, DanfossLocalEntity
 
 
 async def async_setup_entry(
@@ -32,6 +32,8 @@ async def async_setup_entry(
             continue
         entities.append(DanfossConnectivity(coordinator, dev.id))
         entities.append(DanfossWindow(coordinator, dev.id))
+        entities.append(DanfossHeatRequired(coordinator, dev.id))
+        entities.append(DanfossMountingMode(coordinator, dev.id))
     # Boiler relay on/off (read only, contract §4.6): one per relay device.
     for dev in coordinator.data.values():
         if dev.is_relay:
@@ -41,6 +43,15 @@ async def async_setup_entry(
         entities.append(DanfossHoliday(coordinator, gid, holiday.get("name")))
     # Cloud-MQTT link connectivity (only when the live link exists, i.e. enable_cloud_mqtt on): a
     # diagnostic so the link never fails silently.
+    # Read through the local tunnel by the daily settings pass: the heads it can address.
+    local: DanfossLocalCoordinator | None = data.get(DATA_LOCAL)
+    if local is not None:
+        gws = local.manager.gateway_ids
+        entities.extend(
+            DanfossRadiatorCovered(local, coordinator, dev.id)
+            for dev in coordinator.data.values()
+            if dev.is_head and dev.node_id and dev.mesh_id in gws
+        )
     link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
     if link is not None:
         entities.append(DanfossCloudMqttConnectivity(entry.entry_id, link))
@@ -101,6 +112,69 @@ class DanfossWindow(DanfossEntity, BinarySensorEntity):
     def is_on(self) -> bool | None:
         dev = self.device
         return dev.window_open if dev else None
+
+
+class DanfossHeatRequired(DanfossEntity, BinarySensorEntity):
+    """The head asks the heat source for heat (DP 162 ``heat_supply_request``, read only).
+
+    Same notion as Zigbee2MQTT's ``heat_required`` (docs/zigbee2mqtt-alignment.md). Unknown when
+    the cloud does not carry the DP.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "heat_required"
+
+    def __init__(self, coordinator: DanfossCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_heat_required"
+
+    @property
+    def is_on(self) -> bool | None:
+        dev = self.device
+        return dev.heat_request if dev else None
+
+
+class DanfossMountingMode(DanfossEntity, BinarySensorEntity):
+    """The head is in mounting mode, hence not regulating (DP 149, read only).
+
+    Same notion as Zigbee2MQTT's ``mounted_mode_active`` (docs/zigbee2mqtt-alignment.md). Unknown
+    when the cloud does not carry the DP.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "mounting_mode"
+
+    def __init__(self, coordinator: DanfossCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_mounting_mode"
+
+    @property
+    def is_on(self) -> bool | None:
+        dev = self.device
+        return dev.mounting if dev else None
+
+
+class DanfossRadiatorCovered(DanfossLocalEntity, BinarySensorEntity):
+    """The head is set as "radiator covered" (Danfoss attribute 0x4016, read only).
+
+    Same notion as Zigbee2MQTT's ``radiator_covered``. Read by the local tunnel's daily settings
+    pass; see ``DanfossLocalEntity`` for availability and freshness.
+    """
+
+    _daily = True
+    _attribute = "radiator_covered"
+    _attr_translation_key = "radiator_covered"
+
+    def __init__(
+        self, local: DanfossLocalCoordinator, cloud: DanfossCoordinator, device_id: str
+    ) -> None:
+        super().__init__(local, cloud, device_id)
+        self._attr_unique_id = f"{device_id}_radiator_covered"
+
+    @property
+    def is_on(self) -> bool | None:
+        raw = self._raw
+        return raw if isinstance(raw, bool) else None
 
 
 class DanfossRelay(DanfossEntity, BinarySensorEntity):

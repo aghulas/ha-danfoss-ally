@@ -85,6 +85,71 @@
    },
    "relay_rooms": {
     "name": "Pièces demandant de la chauffe"
+   },
+   "programming_mode": {
+    "name": "Mode de programmation",
+    "state": {
+     "setpoint": "Consigne manuelle",
+     "schedule": "Programme",
+     "schedule_with_preheat": "Programme avec pré-chauffage",
+     "eco": "Éco"
+    }
+   },
+   "setpoint_source": {
+    "name": "Origine de la consigne",
+    "state": {
+     "manual": "Manuelle",
+     "schedule": "Programme",
+     "externally": "Externe"
+    }
+   },
+   "window_state": {
+    "name": "État de la fenêtre",
+    "state": {
+     "quarantine": "Quarantaine",
+     "closed": "Fermée",
+     "hold": "Maintien",
+     "open": "Ouverte",
+     "external_open": "Ouverte (contact externe)"
+    }
+   },
+   "adaptation_status": {
+    "name": "Adaptation",
+    "state": {
+     "none": "Aucune",
+     "in_progress": "En cours",
+     "found": "Trouvée",
+     "lost": "Perdue"
+    }
+   },
+   "orientation": {
+    "name": "Orientation",
+    "state": {
+     "horizontal": "Horizontale",
+     "vertical": "Verticale"
+    }
+   },
+   "regulation_speed": {
+    "name": "Vitesse de régulation"
+   },
+   "setpoint_offset": {
+    "name": "Décalage de consigne"
+   },
+   "descale_day": {
+    "name": "Jour de dégommage",
+    "state": {
+     "sunday": "Dimanche",
+     "monday": "Lundi",
+     "tuesday": "Mardi",
+     "wednesday": "Mercredi",
+     "thursday": "Jeudi",
+     "friday": "Vendredi",
+     "saturday": "Samedi",
+     "undefined": "Non défini"
+    }
+   },
+   "descale_time": {
+    "name": "Heure de dégommage"
    }
   },
   "binary_sensor": {
@@ -99,6 +164,15 @@
    },
    "boiler_relay": {
     "name": "Relais chaudière"
+   },
+   "heat_required": {
+    "name": "Demande de chauffe"
+   },
+   "mounting_mode": {
+    "name": "Mode montage"
+   },
+   "radiator_covered": {
+    "name": "Radiateur couvert"
    }
   },
   "switch": {
