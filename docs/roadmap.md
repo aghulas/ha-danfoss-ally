@@ -113,11 +113,11 @@ publish over Tuya cloud MQTT, the only path found that applies them (contract §
      read back through the local tunnel and in the app.
    - Pause setpoint (DP 120): **proven 2026-11-19**, read back in the app and the cloud only (no
      tunnel read exists for it).
-   - Comfort and setback setpoints (DP 118 + 16, DP 119): candidates, code shipped, **supervised
-     writes pending**. Not run on 2026-11-19: the test head was in manual mode and could not be
-     put in a comfort slot. To run on an isolated head that already follows a schedule, in a
-     comfort slot. The trial must also settle whether a schedule rewrite is needed after the
-     publish, as for rooms (R3).
+   - Comfort and setback setpoints (DP 118 + 16, DP 119): **proven 2026-11-19/20** on an
+     isolated head following its schedule, read back through the local tunnel and in the app.
+     The head rewrites its own schedule transitions: no schedule rewrite is needed, unlike rooms
+     (R3). DP 16 sets the current setpoint at once, then the head returns to its schedule within
+     five minutes. Not observed on a head in manual mode: the comfort write is refused there.
    - Preheat (DP 1): candidate, code shipped closed, confirmed by the tunnel read of 0x0025 only.
      **Observation from the app pending**, before any supervised write; if it is negative the
      candidate is removed. Assessment: probably not worth a second route

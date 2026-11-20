@@ -349,7 +349,9 @@ async def test_link_diagnostics_and_sensor_state(hass: HomeAssistant, fake_paho)
 # --- supervised trial of a candidate DP (option cloud_mqtt_supervised_dps) -----------------------
 
 
-async def test_supervised_option_opens_only_real_candidates(hass: HomeAssistant, fake_paho):
+async def test_supervised_option_opens_only_real_candidates(
+    hass: HomeAssistant, fake_paho, setpoints_as_candidates
+):
     from custom_components.danfoss_ally_cloud.const import (
         CONF_CLOUD_MQTT_SUPERVISED_DPS,
         DATA_MQTT_SUPERVISED_DPS,

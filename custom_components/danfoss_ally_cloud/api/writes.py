@@ -25,14 +25,18 @@ def write_allowed(dev: DanfossDevice) -> bool:
 #   is explicitly listed for a supervised trial (the ``supervised`` argument below, fed by the
 #   integration's ``cloud_mqtt_supervised_dps`` option). After its supervised write succeeds, a DP
 #   moves from the second set to the first in a change of its own.
-# All validated on real hardware on 2026-11-19 (docs/first-write-procedure.md): 30 child lock;
+# All validated on real hardware (docs/first-write-procedure.md). On 2026-11-19: 30 child lock;
 # 116 window detection, 18 upper bound and 27 lower bound, each read back through the local
 # tunnel and in the app; 120 pause setpoint (also written with 27, in one frame, when the lower
 # bound rises above it), read back in the app and the cloud only — no tunnel read exists for it.
-MQTT_WRITE_DPS = frozenset({30, 116, 18, 27, 120})
-# 118 comfort setpoint, published with 16 (temp_set) as the app does; 119 setback setpoint;
-# 1 preheat (see below). Contract §4.2. Their supervised trial has not been run yet.
-MQTT_CANDIDATE_DPS = frozenset({118, 16, 119, 1})
+# On 2026-11-19/20, on an isolated head following its schedule: 118 comfort setpoint, published
+# with 16 (temp_set) as the app does, and 119 setback setpoint, each read back through the local
+# tunnel (the head rewrites its own schedule transitions, no schedule rewrite needed) and in the
+# app. DP 16 also sets the head's current setpoint at once; the head returns to its schedule's
+# value by itself within five minutes (contract §4.2).
+MQTT_WRITE_DPS = frozenset({30, 116, 18, 27, 120, 118, 16, 119})
+# 1 preheat (see below). Contract §4.2. Its supervised trial has not been run yet.
+MQTT_CANDIDATE_DPS = frozenset({1})
 # DPs whose write the gateway's echo and the cloud read CANNOT confirm: both may answer from the
 # gateway's cache while the head has not changed. DP 1 (preheat) is the known case: over HTTP it
 # only ever changed that cache; the head's real preheat is bit 1 of Zigbee attribute 0x0025. A

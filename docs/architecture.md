@@ -11,18 +11,17 @@ optimistic state.
 | Channel | Transport | Proven for | Known limits |
 |---|---|---|---|
 | **Cloud HTTP** (path 1a) | The app's signed HTTP API | Fleet read, **room-level** writes (setpoints, head settings of a grouped head, weekly schedule), holiday, room management, relay binding, unbind | `settings.change` on an **isolated** head is accepted and never applied. The bulk list route lags by minutes after a change. Mode labels and cloud DP 1 do not reach the head (below). |
-| **Tuya cloud MQTT** | The app's MQTT broker, protocol 2.3 frames keyed by the gateway localKey | DP publish to an **isolated** head, applied in under a second and confirmed by the gateway's echo (child lock, window detection, setpoint bounds, pause setpoint, 2026-11-19). Inbound DP reports are pushed and decode. | One connection per session. Proven DP by DP (five so far); every other DP needs its own supervised write. Inbound coverage (which heads, which DPs, how often) not measured yet. |
+| **Tuya cloud MQTT** | The app's MQTT broker, protocol 2.3 frames keyed by the gateway localKey | DP publish to an **isolated** head, applied in under a second and confirmed by the gateway's echo (child lock, window detection, setpoint bounds, pause setpoint, 2026-11-19; comfort and setback setpoints, 2026-11-19/20). Inbound DP reports are pushed and decode. | One connection per session. Proven DP by DP (eight so far); every other DP needs its own supervised write. Inbound coverage (which heads, which DPs, how often) not measured yet. |
 | **Local tunnel** | LAN, Zigbee tunnel DP 198→199 through the gateway | The head's own truth: real weekly schedule, preheat (attribute 0x0025), setpoint override (DP 171), window detection, valve exercise | Slow (seconds per head, surveyed on a long period), a head may not answer for a while, needs LAN access to the gateways |
 
 Status of the cloud-MQTT channel: validated on real hardware and on `main`, behind the option
 `enable_cloud_mqtt`, **off by default**. Its write path carries the child lock, window detection,
-the setpoint bounds and the pause setpoint of an isolated head (`api.writes.MQTT_WRITE_DPS`, each
-proven by its own supervised write on 2026-11-19); the comfort and setback setpoints of an
-isolated head and preheat (DP 1, confirmed by the tunnel only) are implemented as candidates,
-closed until their supervised write; a diagnostic
-entity reports the link state. Wire format: `docs/cloud-mqtt-publish.md`; procedure for a first
+the setpoint bounds and the pause, comfort and setback setpoints of an isolated head
+(`api.writes.MQTT_WRITE_DPS`, each proven by its own supervised write, on 2026-11-19 and
+2026-11-20); preheat (DP 1, confirmed by the tunnel only) is implemented as a candidate, closed
+until its supervised write; a diagnostic entity reports the link state. Wire format: `docs/cloud-mqtt-publish.md`; procedure for a first
 write of a new DP: `docs/first-write-procedure.md`. With the option off, an isolated head's child
-lock, bounds and pause setpoint have no path (the switch is unavailable, the numbers are absent).
+lock, bounds and setpoints have no path (the switch is unavailable, the numbers are absent).
 
 "MQTT" names two unrelated things in this project. **Tuya cloud MQTT** is a channel *to the heads*
 (above). **MQTT publishing** (`mqtt_publisher.py`) sends the integration's state *to the user's own
@@ -68,7 +67,7 @@ frames, so neither channel asks anything more of the user.
 
 | Operation | Grouped head (in a room) | Isolated head |
 |---|---|---|
-| Comfort / setback setpoint | Cloud HTTP: room publish, then rewrite the room schedule (R3) | Cloud MQTT, **candidate**: closed until its supervised write (not run yet). Followed by the settings block over HTTP, as the app does |
+| Comfort / setback setpoint | Cloud HTTP: room publish, then rewrite the room schedule (R3) | Cloud MQTT when enabled and connected (proven 2026-11-19/20 on a head following its schedule), followed by the settings block over HTTP, as the app does; otherwise no entity. The comfort write is refused when the head is not in a schedule mode. The head rewrites its own schedule transitions: no schedule rewrite |
 | Pause setpoint | No path | Cloud MQTT when enabled and connected (proven 2026-11-19, read back in the app and the cloud only); otherwise no entity |
 | Weekly schedule | Cloud HTTP | Cloud HTTP |
 | Child lock | Cloud HTTP: room publish (applies to **every** head of the room) | Cloud MQTT when enabled and connected; otherwise unavailable |
@@ -115,12 +114,12 @@ for a DP proven on it; (4) otherwise unavailable.
   that measure (`docs/cloud-mqtt-coverage.md`); its 24 h run on a real install is pending.
 - **Account exposure.** A long-lived broker connection from a client that is not the app is more
   visible than spaced HTTP polling. The channel stays opt-in, with backoff and a clean shutdown.
-- **Isolated-head comfort and setback setpoints.** The app publishes them over cloud MQTT;
-  implemented as candidates, not yet written on real hardware (the 2026-11-19 session could not
-  run them: the test head was in manual mode and could not be put in a comfort slot). Two things
-  to settle in the supervised trial: whether the head's schedule takes the new value without a
-  schedule rewrite (R3 is established for rooms only), and what the accompanying DP 16 does to
-  the current setpoint outside a comfort slot.
+- **Isolated-head comfort and setback setpoints on a head in manual mode.** Proven on a head
+  following its schedule (2026-11-19/20): the head rewrites its own schedule transitions, and the
+  accompanying DP 16 sets the current setpoint at once before the head returns to its schedule
+  within five minutes. Not observed: the same write on a head in manual mode or without a
+  schedule, where nothing is known to bring the current setpoint back. Until it is, the comfort
+  write is refused unless the cloud reports the head in a schedule mode.
 - **Back to schedule for an isolated head in manual mode.** Observed on 2026-11-19: a schedule
   write and `restore_schedule` over HTTP, both accepted, had not reached such a head after five
   minutes; an effect appeared more than ten minutes later and left the head in manual mode, at

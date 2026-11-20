@@ -50,12 +50,17 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
 - **Candidate DPs and the supervised-trial options.** A DP ships first as a candidate
   (`MQTT_CANDIDATE_DPS`) that only the option `cloud_mqtt_supervised_dps` (empty by default) opens,
   for its supervised first write; its entity then shows `write_trial: true`.
-- **Comfort and setback setpoints of an isolated head (DP 118 + 16, DP 119) as cloud-MQTT
-  candidates, closed by default.** Two `number` entities, present only while their DPs are open
-  for a trial. Written as the app does: MQTT publish, then the whole settings block over HTTP.
-  Values are checked against the head's own bounds before sending. **Not validated on real
-  hardware yet**: their supervised write was not run (it needs an isolated head in a comfort
-  slot), and it must also settle whether a schedule rewrite is needed after the publish.
+- **Comfort and setback setpoints of an isolated head over MQTT (DP 118 + 16, DP 119).** With the
+  option on, every isolated head gets "comfort setpoint" and "setback setpoint" numbers. Written
+  as the app does: MQTT publish, then the whole settings block over HTTP. Values are checked
+  against the head's own bounds before sending. Each validated by its own supervised write on
+  real hardware (2026-11-19 and 2026-11-20, one isolated head following its weekly schedule,
+  written once and restored), read back through the local tunnel and in the app. The head carries
+  the new value into its own schedule transitions about a minute after the write: no schedule
+  rewrite is needed, unlike a room. The comfort write also sets the head's current setpoint at
+  once (DP 16); the head returns to its schedule within five minutes, so outside a comfort period
+  it heats towards the comfort value for a few minutes. Not observed on a head in manual, pause
+  or holiday mode: the comfort write is refused there, with a clear error.
 - The cloud-MQTT write confirmation falls back to one read of the head through the per-device
   route when the gateway's echo does not come (it used the bulk list, which lags for minutes).
 - **Preheat (DP 1) as a closed cloud-MQTT candidate.** Nothing changes by default: preheat is

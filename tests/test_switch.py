@@ -572,7 +572,9 @@ async def test_cloud_mqtt_write_on_a_head_without_gateway_address_raises():
     assert link.published == []
 
 
-async def test_cloud_mqtt_write_refuses_a_closed_or_invalid_value_before_sending():
+async def test_cloud_mqtt_write_refuses_a_closed_or_invalid_value_before_sending(
+    setpoints_as_candidates,
+):
     from custom_components.danfoss_ally_cloud.mqtt_write import async_mqtt_write
 
     dev = head()

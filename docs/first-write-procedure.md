@@ -149,53 +149,65 @@ in pause mode — no thermal effect.
 - **Entity**: the head's "pause setpoint" number, present for every isolated head while
   `enable_cloud_mqtt` is on.
 
-### DP 118 + 16 — comfort setpoint of an isolated head (candidate)
+### DP 118 + 16 — comfort setpoint of an isolated head ✅ proven (2026-11-19/20)
 
-> **Trial not run on 2026-11-19**: the test head was in manual mode and could not be put in a
-> comfort slot — HTTP schedule writes reached it more than ten minutes late. Run on an isolated
-> head already following a schedule, in a comfort slot. No DP 118, 16 or 119 frame has been sent
-> on real hardware.
->
-> What was observed while preparing it, on an isolated head left in manual mode: a schedule write
-> (`set_schedule`) and `restore_schedule` over HTTP were both accepted and had **no effect on the
-> head within five minutes** (five tunnel reads). An effect appeared more than ten minutes after
-> the first write: the head ended in manual mode at the cloud's comfort value, with no schedule,
-> and had to be set back by hand in the app. Do not use that head state, nor the HTTP path, to
-> prepare this trial.
+Written on an isolated head **following its weekly schedule** (comfort slots 08:30–17:30 on four
+days), 21 → 20.5 °C in the evening, outside a comfort slot, then 20.5 → 21 °C the next morning,
+one minute into a comfort slot. Each step read back through the **local tunnel**, in the cloud
+(per-device route), in Home Assistant and in the app.
 
-- **Entity**: the head's "comfort setpoint" number (tick `118` **and** `16`).
+- **Entity**: the head's "comfort setpoint" number, present for every isolated head while
+  `enable_cloud_mqtt` is on.
 - **What is sent**, as the app does (contract §4.2): one MQTT frame `{"118": v, "16": v}`; once
   DP 118 is confirmed, the whole settings block `{"1", "118", "119", "121"}` through
   `settings.change` (`gwId` = the head's devId), with the head's current values and the new one.
-  Only DP 118's confirmation is required: DP 16 (`temp_set`) may be overruled by the schedule.
-- **Trial value**: `V0 − 0.5 °C`, **while the head is in a comfort slot**. DP 16 is the head's
-  effective setpoint: sent during a setback slot it may make the head heat to the comfort value
-  until the next transition. In a comfort slot the effect is at most half a degree down.
-- **Independent read-back**, through the **local tunnel**:
-  1. the head's weekly schedule — do the comfort slots carry the new value? **This is the open
-     question of this DP.** For a room, a setpoint publish must be followed by a schedule rewrite
-     (R3), otherwise the heads keep the old value in their transitions. Whether an isolated head
-     needs the same is not established. If the schedule still carries the old value, the trial is
-     **not** passed: a schedule rewrite (HTTP, proven for an isolated head, §4.1) has to be added
-     to the write before the DP is promoted;
-  2. the head's current setpoint (attribute `0x0012`) before and after — what did DP 16 do?
-  3. the real preheat (attribute `0x0025`) — unchanged after the block, which carries DP 1.
-- **Restore**: write `V0` back, then read the schedule again.
+  Only DP 118's confirmation is required. Each write returned in under a second.
+- **The head's schedule takes the value by itself — no schedule rewrite.** About a minute after
+  the write, every comfort transition of the head's weekly schedule carried the new value (tunnel
+  read; still the old value 15 s after the write). The next morning, at the start of the comfort
+  slot, the head applied the value written the evening before, on its own, with the setpoint
+  source "schedule". Unlike a room (R3), nothing has to be rewritten.
+- **DP 16 sets the current setpoint at once, then the head goes back to its schedule.** 15 s after
+  the write the head's current setpoint (attribute `0x0012`) was the new comfort value, with the
+  setpoint source "external". Within five minutes the source was "schedule" again:
+  - outside a comfort slot, the current setpoint fell back to the setback value. In between, the
+    head was in heat demand towards the comfort value: **a comfort write outside a comfort slot
+    costs a few minutes of heating**;
+  - inside a comfort slot, the current setpoint stayed at the new comfort value.
+- **Neighbouring settings unchanged**: the real preheat (attribute `0x0025`) and the head's
+  schedule mode, although the settings block carries DP 1; the setback transitions; the bounds.
+- **Not covered**: a head in **manual** mode, or with no schedule. DP 16 is the head's effective
+  setpoint, and nothing was observed that would bring such a head back to its previous setpoint.
+  The integration therefore refuses the comfort write unless the cloud reports the head in a
+  schedule mode (`at_home` or `leaving_home`). The cloud's mode can itself be wrong (seen on
+  2026-11-19 on another head): the guard is a best effort, not a proof.
 
-### DP 119 — setback setpoint of an isolated head (candidate)
+What must not be used to prepare such a trial, observed on 2026-11-19 on an isolated head left in
+manual mode: a schedule write (`set_schedule`) and `restore_schedule` over HTTP were both accepted
+and had **no effect on the head within five minutes** (five tunnel reads). An effect appeared more
+than ten minutes later: the head ended in manual mode at the cloud's comfort value, with no
+schedule, and had to be set back by hand in the app.
 
-> **Trial not run on 2026-11-19**, for the same reason as DP 118 + 16 above.
+### DP 119 — setback setpoint of an isolated head ✅ proven (2026-11-19)
 
-- **Entity**: the head's "setback setpoint" number (tick `119`).
+Written on the same head, 14 → 13.5 → 14 °C, at night, **during a setback period** (the setback
+value was the one in force). Each step read back through the **local tunnel**, in the cloud, in
+Home Assistant and in the app.
+
+- **Entity**: the head's "setback setpoint" number, present for every isolated head while
+  `enable_cloud_mqtt` is on.
 - **What is sent**: `{"119": v}` alone (no DP 109: the app does not send it for an isolated head),
-  then the settings block as above.
-- **Trial value**: `V0 − 0.5 °C`, **while the head is in a comfort slot**, so the setback value is
-  not the one in force. For a room, the setback publish also applies the value at once as the
-  current setpoint (contract §4.2, DP 109): check with the head's current setpoint (attribute
-  `0x0012`) that DP 119 alone does not.
-- **Independent read-back**: the head's weekly schedule through the local tunnel (setback periods),
-  same open question as for DP 118.
-- **Restore**: write `V0` back.
+  then the settings block as above. Each write returned in under a second.
+- **The head's schedule takes the value by itself — no schedule rewrite.** Between 15 s and
+  75 s after the write, every setback transition of the weekly schedule, on all seven days,
+  carried the new value (tunnel read). The comfort transitions did not move.
+- **DP 119 alone does not set the current setpoint at once** (unchanged 75 s after the write,
+  unlike DP 109 for a room, contract §4.2). During a setback period the head then aligns its
+  current setpoint by itself, with the setpoint source "schedule": seen between one and five
+  minutes after the first write, and within 90 s after the restore.
+- **Neighbouring settings unchanged**: the real preheat and the schedule mode.
+- **Not covered**: the same write during a comfort slot (the value is then not in force; the
+  schedule read above is what establishes it), and a head in manual mode.
 
 ### DP 1 — preheat (candidate; observation from the app first)
 
