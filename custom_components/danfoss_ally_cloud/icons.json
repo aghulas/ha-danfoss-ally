@@ -18,6 +18,33 @@
       },
       "relay_rooms": {
         "default": "mdi:radiator"
+      },
+      "programming_mode": {
+        "default": "mdi:calendar-clock"
+      },
+      "setpoint_source": {
+        "default": "mdi:account-switch-outline"
+      },
+      "window_state": {
+        "default": "mdi:window-closed-variant"
+      },
+      "adaptation_status": {
+        "default": "mdi:tune-vertical"
+      },
+      "orientation": {
+        "default": "mdi:phone-rotate-landscape"
+      },
+      "regulation_speed": {
+        "default": "mdi:speedometer"
+      },
+      "setpoint_offset": {
+        "default": "mdi:thermometer-plus"
+      },
+      "descale_day": {
+        "default": "mdi:calendar-week"
+      },
+      "descale_time": {
+        "default": "mdi:clock-outline"
       }
     },
     "binary_sensor": {
@@ -44,6 +71,21 @@
         "state": {
           "on": "mdi:fire"
         }
+      },
+      "heat_required": {
+        "default": "mdi:radiator-off",
+        "state": {
+          "on": "mdi:radiator"
+        }
+      },
+      "mounting_mode": {
+        "default": "mdi:wrench-outline",
+        "state": {
+          "on": "mdi:wrench"
+        }
+      },
+      "radiator_covered": {
+        "default": "mdi:radiator"
       }
     },
     "switch": {

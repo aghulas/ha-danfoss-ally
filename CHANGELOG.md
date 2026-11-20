@@ -58,8 +58,29 @@ cloud's value were back to the cloud's value by about 05:00, with no write from 
   entry is updated and reloaded.
 - **Repairs issues**: a warning for an offline gateway and for a head reporting a hardware fault,
   removed automatically when the device recovers or the entry is unloaded. No secret in them.
+- **Two read-only diagnostic binary sensors per head**, from data the cloud already returned:
+  "Heat required" (DP 162) and "Mounting mode" (DP 149). Unknown when the cloud does not carry
+  the DP. They match Zigbee2MQTT's `heat_required` and `mounted_mode_active`
+  (`docs/zigbee2mqtt-alignment.md`).
+- **Two read-only diagnostic sensors per head read through the local tunnel** (only with the
+  local tunnel on, for the heads it can address): "Programming mode" (manual setpoint, schedule,
+  schedule with preheat, eco) and "Setpoint change source" (manual, schedule, external). They
+  come from the frame the local survey already sends for the preheat switch: no extra traffic to
+  the heads. They show what the head itself says, where the cloud's mode is only a label. Not
+  yet seen on a real install; the `setpoint` and `eco` values and the three sources follow
+  Zigbee2MQTT's reading of the same attributes.
+- **Head settings read once a day through the local tunnel**, read only: window state (five
+  states), adaptation run, radiator covered; and, disabled by default, orientation, regulation
+  speed, setpoint offset, valve exercise day and time. These cost two more frames per head, so
+  they are read by a separate pass at most once every 24 hours (and once after each start),
+  after a preheat survey; on a large site that pass delays the next preheat survey once a day.
+  Each value carries the time it was read. Not yet seen on a real install.
 
 ### Changed
+
+- The head's battery sensor is now in the diagnostic category, as in Zigbee2MQTT. Its entity id
+  and unique id do not change; it moves to the "Diagnostic" block of the device page and no
+  longer appears in automatically generated dashboards.
 
 - **Schedule writes on an isolated head are guarded.** `set_schedule` and `copy_schedule` refuse
   an isolated head unless it is online and following a schedule (cloud mode `at_home` /

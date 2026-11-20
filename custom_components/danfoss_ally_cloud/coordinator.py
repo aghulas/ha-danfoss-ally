@@ -13,16 +13,19 @@ import threading
 import time
 from collections.abc import Iterable
 from datetime import timedelta
+from typing import Any
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import CloudAuthError, CloudClient, CloudError, DanfossDevice, apply_dps_overlay
 from .api.local.manager import Head, LocalTunnelManager
 from .api.rooms import Room, RoomState, aggregate_room
 from .const import (
+    LOCAL_SETTINGS_INTERVAL,
     POST_COMMAND_REFRESH_MAX_HEADS,
     POST_COMMAND_REFRESH_TTL,
     POST_COMMAND_SETTLE,
@@ -372,6 +375,15 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
         # Heads read back on their own (after a write) while a survey runs: that read is at least
         # as fresh as the survey's, which must not overwrite it with a pre-write value.
         self._read_back: dict[str, bool | None] = {}
+        # Standard attributes carried by the same frame as the preheat read (programming mode,
+        # setpoint change source...), per head. A head that did not answer has no entry.
+        self.attributes: dict[str, dict[str, Any]] = {}
+        # Danfoss settings attributes (orientation, radiator covered...), per head, read by a
+        # separate pass at most once per ``LOCAL_SETTINGS_INTERVAL``: two more frames per head.
+        # Each entry also carries ``read_at`` (UTC). A head that misses a pass keeps its last
+        # entry: these settings hardly ever change, and ``read_at`` says how old the value is.
+        self.settings: dict[str, dict[str, Any]] = {}
+        self._settings_at: float | None = None
 
     def heads(self) -> list[Head]:
         """Heads reachable through the tunnel (node_id + gateway known to the manager)."""
@@ -405,11 +417,14 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
         which makes the switch unavailable until the next survey (rather than lying). The survey
         schedule is left untouched (listeners are notified directly).
         """
+        attrs: dict[str, Any] | None
         try:
-            value = await self.hass.async_add_executor_job(self.manager.read_preheat, head)
+            attrs = await self.hass.async_add_executor_job(self.manager.read_standard, head)
         except Exception as err:  # noqa: BLE001 - best-effort, as the survey
             _LOGGER.debug("local preheat read-back failed (%s)", type(err).__name__)
-            value = None
+            attrs = None
+        value: bool | None = None if attrs is None else attrs.get("preheat")
+        self._store_attributes(head.dev_id, attrs)
         if self._surveying:
             self._read_back[head.dev_id] = value
         data = dict(self.data or {})
@@ -417,6 +432,62 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
         self.data = data
         self.async_update_listeners()
         return value
+
+    def _store_attributes(self, dev_id: str, attrs: dict[str, Any] | None) -> bool:
+        """Keep (or drop, for a head that did not answer) a head's attributes. True if changed."""
+        if attrs is None:
+            return self.attributes.pop(dev_id, None) is not None
+        if self.attributes.get(dev_id) == attrs:
+            return False
+        self.attributes[dev_id] = attrs
+        return True
+
+    @callback
+    def _async_head_attributes(self, dev_id: str, attrs: dict[str, Any] | None) -> None:
+        """Keep the attributes of ONE head just read by the running survey (event loop)."""
+        if not self._surveying or dev_id in self._read_back:
+            return
+        if self._store_attributes(dev_id, attrs):
+            self.async_update_listeners()
+
+    @callback
+    def _async_head_settings(self, dev_id: str, attrs: dict[str, Any] | None) -> None:
+        """Keep the settings of ONE head just read by the settings pass (event loop)."""
+        if not self._surveying or attrs is None:
+            return
+        self.settings[dev_id] = {**attrs, "read_at": dt_util.utcnow()}
+        self.async_update_listeners()
+
+    async def _async_survey_settings(self, heads: list[Head], stop: threading.Event) -> None:
+        """The settings pass, right after a preheat survey so the two never overlap.
+
+        Best-effort: a failure is logged and tried again after the next preheat survey; it never
+        fails the preheat survey it follows.
+        """
+        loop = self.hass.loop
+        # Also kept here, from the worker: a callback posted to the loop may run only after the
+        # pass has returned (seen on Python 3.14), when ``_async_head_settings`` drops it.
+        collected: dict[str, dict[str, Any]] = {}
+
+        def on_result(dev_id: str, attrs: dict[str, Any] | None) -> None:  # worker thread
+            if attrs is not None:
+                collected[dev_id] = attrs
+            loop.call_soon_threadsafe(self._async_head_settings, dev_id, attrs)
+
+        failed = False
+        try:
+            await self.hass.async_add_executor_job(
+                self.manager.survey_settings, heads, on_result, stop
+            )
+        except Exception as err:  # noqa: BLE001 - best-effort
+            _LOGGER.debug("local settings survey failed (%s)", type(err).__name__)
+            failed = True
+        # What the heads gave is kept even when the pass failed part-way (best-effort).
+        now = dt_util.utcnow()
+        for dev_id, attrs in collected.items():
+            self.settings[dev_id] = {**attrs, "read_at": now}
+        if not failed:
+            self._settings_at = time.monotonic()
 
     @callback
     def _async_head_read(self, dev_id: str, value: bool | None) -> None:
@@ -443,17 +514,37 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
         def on_result(dev_id: str, value: bool | None) -> None:  # worker thread
             loop.call_soon_threadsafe(self._async_head_read, dev_id, value)
 
+        # Also kept here, from the worker: a callback posted to the loop may run only after the
+        # survey has returned and ``_surveying`` is False (seen on Python 3.14), when
+        # ``_async_head_attributes`` drops it. The survey's result is merged below, as for preheat.
+        collected: dict[str, dict[str, Any] | None] = {}
+
+        def on_attributes(dev_id: str, attrs: dict[str, Any] | None) -> None:  # worker thread
+            collected[dev_id] = attrs
+            loop.call_soon_threadsafe(self._async_head_attributes, dev_id, attrs)
+
         stop = threading.Event()
+        stop_settings = threading.Event()
         self._read_back = {}
         self._surveying = True
         try:
-            res = await self.hass.async_add_executor_job(
-                self.manager.survey_preheat, heads, on_result, stop
-            )
-        except Exception as err:  # noqa: BLE001 - best-effort local fallback
-            raise UpdateFailed(f"local survey: {err}") from err
+            try:
+                res = await self.hass.async_add_executor_job(
+                    self.manager.survey_preheat, heads, on_result, stop, on_attributes
+                )
+            except Exception as err:  # noqa: BLE001 - best-effort local fallback
+                raise UpdateFailed(f"local survey: {err}") from err
+            for dev_id, attrs in collected.items():
+                # A head read back on its own meanwhile (after a write) keeps that fresher read.
+                if dev_id not in self._read_back:
+                    self._store_attributes(dev_id, attrs)
+            if self._settings_at is None or (
+                time.monotonic() - self._settings_at >= LOCAL_SETTINGS_INTERVAL
+            ):
+                await self._async_survey_settings(heads, stop_settings)
         finally:
             # Also reached on cancellation (unload / stop): release the gateways.
             stop.set()
+            stop_settings.set()
             self._surveying = False
         return {**res, **self._read_back}

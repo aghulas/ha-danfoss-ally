@@ -154,7 +154,7 @@ def test_survey_head_error_isolated(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("flaky head")
 
-    monkeypatch.setattr(tunnel, "read_preheat", boom)
+    monkeypatch.setattr(tunnel, "read_standard", boom)
     mgr = LocalTunnelManager(_gw(), open_link=lambda g: _ReadFakeLink("node1", 0x03))
     res = mgr.survey_preheat([Head("dev1", "node1", "gw1")])
     assert res == {"dev1": None}
@@ -210,9 +210,9 @@ def test_read_preheat_one_head(monkeypatch):
 
     def fake_read(link, dev_id, node_id, **kw):
         calls.append((dev_id, node_id))
-        return True
+        return {"preheat": True, "programming_mode": 3}
 
-    monkeypatch.setattr(tunnel, "read_preheat", fake_read)
+    monkeypatch.setattr(tunnel, "read_standard", fake_read)
     link = _RWFakeLink("node1", 0x03)
     mgr = LocalTunnelManager(_gw(), open_link=lambda g: link)
     assert mgr.read_preheat(Head("dev1", "node1", "gw1")) is True
@@ -334,3 +334,79 @@ def test_read_programming_mode_unknown_gateway():
     mgr = LocalTunnelManager(_gw(), open_link=lambda g: None)
     with pytest.raises(tunnel.LocalUnavailable):
         mgr.read_programming_mode(Head("devX", "nodeX", "gw-inconnue"))
+
+
+def test_survey_preheat_reports_the_standard_attributes_of_each_head():
+    """The frame read for the preheat also carries the programming mode: it is handed over."""
+    seen = []
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: _ReadFakeLink("node1", 0x03))
+    res = mgr.survey_preheat(
+        [Head("dev1", "node1", "gw1")], on_attributes=lambda d, a: seen.append((d, a))
+    )
+    assert res == {"dev1": True}
+    assert [d for d, _ in seen] == ["dev1"]
+    assert seen[0][1]["programming_mode"] == 0x03 and seen[0][1]["preheat"] is True
+
+
+def test_survey_preheat_attributes_none_for_an_unreachable_gateway():
+    def refuse(g):
+        raise OSError("down")
+
+    seen = []
+    mgr = LocalTunnelManager(_gw(), open_link=refuse)
+    mgr.survey_preheat(
+        [Head("dev1", "node1", "gw1")], on_attributes=lambda d, a: seen.append((d, a))
+    )
+    assert seen == [("dev1", None)]
+
+
+def test_read_standard_unknown_gateway():
+    mgr = LocalTunnelManager(_gw())
+    with pytest.raises(tunnel.LocalUnavailable):
+        mgr.read_standard(Head("devX", "nodeX", "gw-inconnue"))
+
+
+def test_survey_settings_reads_each_head(monkeypatch):
+    def fake_read(link, dev_id, node_id, **kw):
+        return {"radiator_covered": dev_id == "dev1"} if dev_id != "dev3" else None
+
+    monkeypatch.setattr(tunnel, "read_settings", fake_read)
+    seen = []
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: _ReadFakeLink("node1", 0x03))
+    heads = [Head(f"dev{i}", f"node{i}", "gw1") for i in (1, 2, 3)]
+    res = mgr.survey_settings(heads, lambda d, a: seen.append(d))
+    assert res == {
+        "dev1": {"radiator_covered": True},
+        "dev2": {"radiator_covered": False},
+        "dev3": None,
+    }
+    assert seen == ["dev1", "dev2", "dev3"]
+    assert mgr.survey_settings(heads[:1]) == {"dev1": {"radiator_covered": True}}
+
+
+def test_read_settings_skips_the_second_frame_when_the_head_does_not_answer(monkeypatch):
+    asked = []
+
+    def fake_read(link, dev_id, node_id, table, manufacturer, **kw):
+        asked.append(table)
+        return None
+
+    monkeypatch.setattr(tunnel, "read_attributes", fake_read)
+    assert tunnel.read_settings(object(), "dev1", "node1") is None
+    assert asked == [tunnel.ATTRS_DANFOSS_A]
+
+
+def test_read_settings_merges_both_frames_and_tolerates_a_missing_second(monkeypatch):
+    answers = {id(tunnel.ATTRS_DANFOSS_A): {"orientation": True}}
+
+    def fake_read(link, dev_id, node_id, table, manufacturer, **kw):
+        assert manufacturer is True
+        return answers.get(id(table))
+
+    monkeypatch.setattr(tunnel, "read_attributes", fake_read)
+    assert tunnel.read_settings(object(), "dev1", "node1") == {"orientation": True}
+    answers[id(tunnel.ATTRS_DANFOSS_B)] = {"window_state": 1}
+    assert tunnel.read_settings(object(), "dev1", "node1") == {
+        "orientation": True,
+        "window_state": 1,
+    }

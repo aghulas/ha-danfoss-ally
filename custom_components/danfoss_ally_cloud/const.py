@@ -58,6 +58,9 @@ DATA_MQTT_COVERAGE = "cloud_mqtt_coverage"  # CoverageStats | None: only with cl
 
 # LOCAL survey (Zigbee tunnel) interval: slow, ~8 s per head. Distinct from the cloud polling.
 DEFAULT_LOCAL_SCAN_INTERVAL = 900  # seconds
+# LOCAL settings pass (Danfoss attributes: orientation, radiator covered...): two more frames per
+# head, for values that hardly ever change. At most once per interval, after a preheat survey.
+LOCAL_SETTINGS_INTERVAL = 86400  # seconds
 
 # --- Installation credentials and secrets (config_flow / options_flow) ---
 # username/password/country_code: the app account's credentials (path-1a login).

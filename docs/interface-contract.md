@@ -706,6 +706,30 @@ by the MCP connector (`smartlife.m.*` family; the APK also exposes the `thing.m.
   `schedule_active`), `number` comfort setpoint and setback setpoint (write = publishing the DP +
   rewriting the schedule, R3), a `sensor` "inconsistent heads" (count).
 - Per head: a `binary_sensor` "schedule active" (DP 172, diagnostic category).
+- Per head, read only, diagnostic category: a `binary_sensor` "heat required" (DP 162
+  `heat_supply_request`) and a `binary_sensor` "mounting mode" (DP 149, on = the head is in
+  mounting mode and does not regulate). Both are unknown when the cloud does not carry the DP,
+  and unavailable while the head is offline. The head's `battery` sensor is in the diagnostic
+  category too. These follow Zigbee2MQTT's `heat_required`, `mounted_mode_active` and `battery`
+  (`docs/zigbee2mqtt-alignment.md`).
+- Per head the local tunnel can address (same heads as the preheat switch), read only, diagnostic
+  category: two enum `sensor` entities read from the frame of the local preheat survey, at no
+  extra traffic. "Programming mode" (attribute `0x0025`: `setpoint`, `schedule`,
+  `schedule_with_preheat`, `eco`) and "setpoint change source" (attribute `0x0030`: `manual`,
+  `schedule`, `externally`). Attribute `raw`: the value the head gave. Unavailable until the
+  tunnel has an answer from the head and while the head is offline; unknown on an unlisted raw
+  value. They refresh at the survey's pace and after a preheat write. No write: setting the
+  programming mode to `setpoint` is the manual switch of R4.
+- For the same heads, read only, diagnostic category: the Danfoss settings attributes, read by a
+  separate tunnel pass at most once every 24 hours (and once after each start), right after a
+  preheat survey. `sensor` "window state" (`quarantine`, `closed`, `hold`, `open`,
+  `external_open`), `sensor` "adaptation run" (`none`, `in_progress`, `found`, `lost`) and
+  `binary_sensor` "radiator covered" are enabled by default; `sensor` "orientation"
+  (`horizontal` / `vertical`), "regulation speed", "setpoint offset" (°C), "valve exercise day"
+  and "valve exercise time" are disabled by default. Attributes `raw` and `read_at` (UTC time of
+  the read that gave the value). Unavailable until read once and while the head is offline; a
+  head that misses a pass keeps its last value. Value tables and their real-hardware status:
+  `docs/zigbee2mqtt-alignment.md` §6.
 - **Thermostat (`climate`)**: no `comfort` / `setback` / `holiday` preset tied to DP 2 (R5).
   **Durable setpoint write at the room level**: in modes `comfort` (`at_home`) and `setback`
   (`leaving_home`), changing the temperature publishes the setpoint on the group then rewrites one

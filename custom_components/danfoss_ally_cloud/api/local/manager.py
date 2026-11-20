@@ -26,6 +26,8 @@ _LOGGER = logging.getLogger(__name__)
 # not read yet are simply absent from the result (their switch stays unavailable).
 SURVEY_BASE_TIMEOUT = 40.0
 SURVEY_HEAD_TIMEOUT = 30.0
+# Settings survey: two requests for a head that answers (``tunnel.read_settings``).
+SETTINGS_HEAD_TIMEOUT = 60.0
 
 
 @dataclass(frozen=True)
@@ -52,38 +54,39 @@ class LocalTunnelManager:
     def gateway_ids(self) -> set[str]:
         return set(self._gateways)
 
-    def survey_preheat(
+    def _survey(
         self,
         heads: list[Head],
-        on_result: Callable[[str, bool | None], None] | None = None,
-        stop: threading.Event | None = None,
-    ) -> dict[str, bool | None]:
-        """Read preheat (0x0025 bit 1) per head, one gateway per thread. Best-effort.
+        read: Callable[[Any, Head], Any],
+        on_read: Callable[[str, Any], None],
+        stop: threading.Event | None,
+        head_timeout: float,
+    ) -> dict[str, Any]:
+        """Read each head with ``read(link, head)``, one gateway per thread. Best-effort.
 
-        Slow by nature: the heads of a gateway are read one after the other (a few seconds each when
-        they answer, up to 24 s when they do not). ``on_result(dev_id, value)`` is called from the
-        worker thread as soon as a head is read, so the caller can publish it without waiting for
-        the whole site. ``stop`` aborts the survey: it returns at once with what was read so far,
-        and each worker gives up after the head it is on (a tunnel request is not interruptible).
-        No worker outlives the call for longer than that one request: nothing is written into the
-        returned mapping afterwards.
+        ``on_read(dev_id, value)`` is called from the worker thread as soon as a head is read
+        (None: no answer, or its gateway is unreachable). ``stop`` aborts the survey: it returns
+        at once with what was read so far, and each worker gives up after the head it is on (a
+        tunnel request is not interruptible). The survey also stops by itself past a deadline of
+        ``SURVEY_BASE_TIMEOUT`` plus ``head_timeout`` per head of the busiest gateway. No worker
+        outlives the call for longer than one request: nothing is written into the returned
+        mapping afterwards.
         """
         stop = stop if stop is not None else threading.Event()
-        res: dict[str, bool | None] = {}
+        res: dict[str, Any] = {}
         lock = threading.Lock()
         by_gw: dict[str, list[Head]] = defaultdict(list)
         for h in heads:
             if h.gateway_id in self._gateways:
                 by_gw[h.gateway_id].append(h)
 
-        def publish(dev_id: str, value: bool | None) -> None:
+        def publish(dev_id: str, value: Any) -> None:
             with lock:
                 if stop.is_set():
                     return
                 res[dev_id] = value
-            if on_result is not None:
-                with contextlib.suppress(Exception):  # a listener never breaks the survey
-                    on_result(dev_id, value)
+            with contextlib.suppress(Exception):  # a listener never breaks the survey
+                on_read(dev_id, value)
 
         def worker(gw_id: str, mine: list[Head]) -> None:
             try:
@@ -98,10 +101,10 @@ class LocalTunnelManager:
                     if stop.is_set():
                         return
                     try:
-                        v = tunnel.read_preheat(link, h.dev_id, h.node_id)
+                        value = read(link, h)
                     except Exception:  # noqa: BLE001 - isolate each head
-                        v = None
-                    publish(h.dev_id, v)
+                        value = None
+                    publish(h.dev_id, value)
             finally:
                 link.close()
 
@@ -109,7 +112,7 @@ class LocalTunnelManager:
             threading.Thread(target=worker, args=(g, m), daemon=True) for g, m in by_gw.items()
         ]
         busiest = max((len(m) for m in by_gw.values()), default=0)
-        deadline = time.monotonic() + SURVEY_BASE_TIMEOUT + SURVEY_HEAD_TIMEOUT * busiest
+        deadline = time.monotonic() + SURVEY_BASE_TIMEOUT + head_timeout * busiest
         for t in threads:
             t.start()
         for t in threads:
@@ -118,6 +121,62 @@ class LocalTunnelManager:
         with lock:
             stop.set()  # timed out or aborted: late workers stop and publish nothing more
             return dict(res)
+
+    def survey_preheat(
+        self,
+        heads: list[Head],
+        on_result: Callable[[str, bool | None], None] | None = None,
+        stop: threading.Event | None = None,
+        on_attributes: Callable[[str, dict[str, Any] | None], None] | None = None,
+    ) -> dict[str, bool | None]:
+        """Read preheat (0x0025 bit 1) per head, one gateway per thread. Best-effort.
+
+        Slow by nature: the heads of a gateway are read one after the other (a few seconds each when
+        they answer, up to 24 s when they do not). ``on_result(dev_id, value)`` is called from the
+        worker thread as soon as a head is read, so the caller can publish it without waiting for
+        the whole site; ``on_attributes(dev_id, attributes)`` is called just before it with the
+        standard attributes the same frame carried (``tunnel.read_standard``), None for a head
+        that did not answer. ``stop`` and the deadline: see ``_survey``.
+        """
+
+        def preheat(attrs: dict[str, Any] | None) -> bool | None:
+            return None if attrs is None else attrs.get("preheat")
+
+        def on_read(dev_id: str, attrs: dict[str, Any] | None) -> None:
+            if on_attributes is not None:
+                with contextlib.suppress(Exception):
+                    on_attributes(dev_id, attrs)
+            if on_result is not None:
+                on_result(dev_id, preheat(attrs))
+
+        raw = self._survey(
+            heads,
+            lambda link, h: tunnel.read_standard(link, h.dev_id, h.node_id),
+            on_read,
+            stop,
+            SURVEY_HEAD_TIMEOUT,
+        )
+        return {dev_id: preheat(attrs) for dev_id, attrs in raw.items()}
+
+    def survey_settings(
+        self,
+        heads: list[Head],
+        on_result: Callable[[str, dict[str, Any] | None], None] | None = None,
+        stop: threading.Event | None = None,
+    ) -> dict[str, dict[str, Any] | None]:
+        """Read the Danfoss settings attributes per head (``tunnel.read_settings``). Best-effort.
+
+        Two frames per head that answers, one for a head that does not: heavier than the preheat
+        survey, meant to run rarely. Same threading, ``on_result``, ``stop`` and deadline rules
+        as ``survey_preheat``; None for a head that did not answer.
+        """
+        return self._survey(
+            heads,
+            lambda link, h: tunnel.read_settings(link, h.dev_id, h.node_id),
+            on_result if on_result is not None else (lambda dev_id, attrs: None),
+            stop,
+            SETTINGS_HEAD_TIMEOUT,
+        )
 
     def survey_heads(self, heads: list[Head]) -> dict[str, dict[str, Any]]:
         """Full read-only survey of each head through the tunnel, summarized per head.
@@ -136,11 +195,19 @@ class LocalTunnelManager:
         next full survey (~8 s per head, minutes for a whole site). Raises LocalUnavailable on an
         unknown gateway.
         """
+        attrs = self.read_standard(head)
+        return None if attrs is None else attrs.get("preheat")
+
+    def read_standard(self, head: Head) -> dict[str, Any] | None:
+        """Read ONE head's standard attributes (one frame, ``tunnel.read_standard``).
+
+        None without a response. Raises LocalUnavailable on an unknown gateway.
+        """
         if head.gateway_id not in self._gateways:
             raise tunnel.LocalUnavailable(f"unknown gateway: {head.gateway_id}")
         link = self._open_link(self._gateways[head.gateway_id])
         try:
-            return tunnel.read_preheat(link, head.dev_id, head.node_id)
+            return tunnel.read_standard(link, head.dev_id, head.node_id)
         finally:
             link.close()
 

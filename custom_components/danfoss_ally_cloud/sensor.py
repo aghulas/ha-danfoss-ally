@@ -1,4 +1,5 @@
-"""Sensors: battery, valve opening (%), fault code (decoded E1..E15).
+"""Sensors: battery, valve opening (%), fault code (decoded E1..E15), and the sensors read
+through the local tunnel (programming mode, setpoint change source, and the daily settings).
 
 The `fault` code is a bit field (SW error code) decoded by api.decode.decode_fault.
 """
@@ -7,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -20,9 +22,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import DanfossDevice, holiday_temperature
-from .const import DATA_COORDINATOR, DOMAIN
-from .coordinator import DanfossCoordinator
-from .entity import DanfossEntity, DanfossHomeEntity
+from .api.local.tunnel import DESCALE_DAYS
+from .const import DATA_COORDINATOR, DATA_LOCAL, DOMAIN
+from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
+from .entity import DanfossEntity, DanfossHomeEntity, DanfossLocalEntity
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -52,6 +55,7 @@ SENSORS: tuple[DanfossSensorDescription, ...] = (
         key="battery",
         device_class=SensorDeviceClass.BATTERY,
         state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         native_unit_of_measurement=PERCENTAGE,
         value=lambda d: d.battery,
     ),
@@ -71,10 +75,99 @@ SENSORS: tuple[DanfossSensorDescription, ...] = (
 )
 
 
+@dataclass(frozen=True, kw_only=True)
+class DanfossLocalSensorDescription(SensorEntityDescription):
+    """A sensor decoded from a Zigbee attribute read through the local tunnel."""
+
+    attribute: str  # name given by tunnel.name_attributes
+    daily: bool = False  # read by the settings pass (once a day), not by each survey
+    states: dict[Any, str] | None = None  # enum sensor: raw value -> state
+    scale: float | None = None  # numeric sensor: raw value * scale
+
+
+_DAYS = {d: d for d in DESCALE_DAYS}
+
+# Value names follow Zigbee2MQTT (docs/zigbee2mqtt-alignment.md). Established on real hardware
+# here: 0x0025 values 1 and 3 (bit 0 schedule, bit 1 preheat), the valve exercise day and time
+# encodings (written by the descale service), and bit 1 of the adaptation state. The other value
+# tables are Zigbee2MQTT's reading of the same attributes (0x0030 being the ZCL
+# SetpointChangeSource enumeration). An unlisted raw value reads unknown, the raw value being kept
+# as the ``raw`` attribute.
+LOCAL_SENSORS: tuple[DanfossLocalSensorDescription, ...] = (
+    DanfossLocalSensorDescription(
+        key="programming_mode",
+        translation_key="programming_mode",
+        attribute="programming_mode",
+        states={0: "setpoint", 1: "schedule", 3: "schedule_with_preheat", 4: "eco"},
+    ),
+    DanfossLocalSensorDescription(
+        key="setpoint_source",
+        translation_key="setpoint_source",
+        attribute="setpoint_source",
+        states={0: "manual", 1: "schedule", 2: "externally"},
+    ),
+    DanfossLocalSensorDescription(
+        key="window_state",
+        translation_key="window_state",
+        attribute="window_state",
+        daily=True,
+        states={0: "quarantine", 1: "closed", 2: "hold", 3: "open", 4: "external_open"},
+    ),
+    DanfossLocalSensorDescription(
+        key="adaptation_status",
+        translation_key="adaptation_status",
+        attribute="adaptation_state",
+        daily=True,
+        states={0: "none", 1: "in_progress", 2: "found", 4: "lost"},
+    ),
+    DanfossLocalSensorDescription(
+        key="orientation",
+        translation_key="orientation",
+        attribute="orientation",
+        daily=True,
+        states={False: "horizontal", True: "vertical"},
+        entity_registry_enabled_default=False,
+    ),
+    DanfossLocalSensorDescription(
+        key="regulation_speed",
+        translation_key="regulation_speed",
+        attribute="control_speed",
+        daily=True,
+        entity_registry_enabled_default=False,
+    ),
+    DanfossLocalSensorDescription(
+        key="setpoint_offset",
+        translation_key="setpoint_offset",
+        attribute="setpoint_offset",
+        daily=True,
+        scale=0.1,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        entity_registry_enabled_default=False,
+    ),
+    DanfossLocalSensorDescription(
+        key="descale_day",
+        translation_key="descale_day",
+        attribute="descale_day",
+        daily=True,
+        states=_DAYS,
+        entity_registry_enabled_default=False,
+    ),
+    DanfossLocalSensorDescription(
+        key="descale_time",
+        translation_key="descale_time",
+        attribute="descale_time",
+        daily=True,
+        entity_registry_enabled_default=False,
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    coordinator: DanfossCoordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+    data = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DanfossCoordinator = data[DATA_COORDINATOR]
+    local: DanfossLocalCoordinator | None = data.get(DATA_LOCAL)
     entities: list[SensorEntity] = [
         DanfossSensor(coordinator, dev.id, desc)
         for dev in coordinator.data.values()
@@ -90,7 +183,52 @@ async def async_setup_entry(
     entities.extend(
         DanfossRelayRooms(coordinator, dev.id) for dev in coordinator.data.values() if dev.is_relay
     )
+    # Read through the local tunnel: the same heads as the preheat switch (addressable ones).
+    if local is not None:
+        gws = local.manager.gateway_ids
+        entities.extend(
+            DanfossLocalSensor(local, coordinator, dev.id, desc)
+            for dev in coordinator.data.values()
+            if dev.is_head and dev.node_id and dev.mesh_id in gws
+            for desc in LOCAL_SENSORS
+        )
     async_add_entities(entities)
+
+
+class DanfossLocalSensor(DanfossLocalEntity, SensorEntity):
+    """What the head itself reports, read through the local tunnel (read only).
+
+    Availability and freshness: see ``DanfossLocalEntity``. The per-survey sensors cost no extra
+    traffic (their value is in the frame the survey sends for the preheat switch).
+    """
+
+    entity_description: DanfossLocalSensorDescription
+
+    def __init__(
+        self,
+        local: DanfossLocalCoordinator,
+        cloud: DanfossCoordinator,
+        device_id: str,
+        description: DanfossLocalSensorDescription,
+    ) -> None:
+        super().__init__(local, cloud, device_id)
+        self.entity_description = description
+        self._attribute = description.attribute
+        self._daily = description.daily
+        self._attr_unique_id = f"{device_id}_{description.key}"
+        if description.states is not None:
+            self._attr_device_class = SensorDeviceClass.ENUM
+            self._attr_options = list(description.states.values())
+
+    @property
+    def native_value(self) -> str | float | int | None:
+        raw = self._raw
+        desc = self.entity_description
+        if desc.states is not None:
+            return desc.states.get(raw) if isinstance(raw, (bool, int, str)) else None
+        if desc.scale is not None:
+            return round(raw * desc.scale, 2) if isinstance(raw, (int, float)) else None
+        return raw if isinstance(raw, (int, float, str)) else None
 
 
 class DanfossSensor(DanfossEntity, SensorEntity):
