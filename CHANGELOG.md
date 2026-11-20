@@ -14,11 +14,31 @@ except for the refusals listed under "Changed", which are deliberate.
 - Tried once on a real head (2026-11-20): the reworked preheat write of the cloud-MQTT candidate
   (publish, then settings block), OFF to ON, confirmed through the local tunnel. The return to OFF
   and the hold over a night are not established; DP 1 stays a closed candidate.
-- **Not validated on real hardware**: the room card by area and the panel's other areas (not
-  checked in a real Home Assistant either: vitest with synthetic registries only), the isolated-head thermostat write, the runtime creation and
-  retirement of entities, the embedded schedule editor and the editor fixes, the schedule-write
-  guards, the device actions, the polling backoff, the reconfigure step and the Repairs issues
-  (unit tests only).
+- Validated on a real install with `1.3.0-rc2` (2026-11-20): the isolated-head thermostat write
+  over cloud MQTT (setpoint changed and restored, read back through the local tunnel, the cloud,
+  Home Assistant and the app); the runtime creation and retirement of a room's entities (test room
+  created then deleted, no reload, heads unchanged); the schedule-write guards (`set_schedule` and
+  `restore_schedule` refused where they should be).
+- Validated on a real install with `1.3.0-rc3` (2026-11-20, one isolated test head, every write
+  restored):
+  - the Zigbee2MQTT-aligned diagnostic entities, consistent with the app and with the official
+    API;
+  - the four head settings written through the local tunnel (radiator covered, setpoint offset,
+    regulation speed, valve exercise day and time), each confirmed by a tunnel read-back;
+  - the mounting orientation (DP 133) written over cloud MQTT both ways, confirmed by the tunnel
+    and followed by the cloud: Zigbee2MQTT's reading of flag `0x4014` (false = horizontal) holds;
+  - the room card by area and the panel's other areas, read only (thermostats of another
+    integration stay read-only).
+- **Not established on real hardware**:
+  - the viewing direction (DP 101), refused on `1.3.0-rc3` for want of a confirmation read, which
+    is the per-device route fixed below;
+  - the post-command refresh overlay, fixed below and not yet observed;
+  - the scale and effect of the setpoint offset: the head stores the raw value written, but no
+    independent source shows it in °C;
+  - whether the cloud keeps a setting written through the tunnel alone (it did not for preheat);
+  - the bundle URL with its hash;
+  - the embedded schedule editor and the editor fixes, the device actions, the polling backoff,
+    the reconfigure step and the Repairs issues (unit tests only).
 
 **Known issue, not fixed in this release.** A preheat change written by the preheat switch (local
 tunnel only) does not survive the night: on 2026-11-19/20, heads whose preheat differed from the
