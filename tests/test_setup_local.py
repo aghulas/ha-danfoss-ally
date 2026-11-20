@@ -204,6 +204,43 @@ async def test_cloud_mqtt_live_link_setup_routes_isolated_switch(hass: HomeAssis
     assert c.loop_stop_thread is not None and c.loop_stop_thread is not loop_thread
 
 
+async def test_local_and_cloud_mqtt_share_a_single_gateway_key_fetch(
+    hass: HomeAssistant, monkeypatch
+):
+    """When both enable_local and enable_cloud_mqtt are on, gateway keys are fetched once and the
+    existing session from the first refresh is reused without a second login."""
+    import paho.mqtt.client as paho
+
+    from custom_components.danfoss_ally_cloud.const import CONF_ENABLE_CLOUD_MQTT
+
+    from .test_mqtt_client import _FakePaho
+
+    _FakePaho.instances.clear()
+    monkeypatch.setattr(paho, "Client", _FakePaho)
+    fake = FakeCloudClient(devices=[head()])
+    manager = FakeManager(survey={"dev-1": True})
+    fetch_keys = AsyncMock(return_value=_GW)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=ENTRY_DATA,
+        unique_id="compte@exemple.fr",
+        options={CONF_ENABLE_LOCAL: True, CONF_ENABLE_CLOUD_MQTT: True},
+    )
+    entry.add_to_hass(hass)
+    with (
+        patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=fake),
+        patch("custom_components.danfoss_ally_cloud.async_fetch_gateway_keys", fetch_keys),
+        patch("custom_components.danfoss_ally_cloud.LocalTunnelManager", return_value=manager),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert fetch_keys.await_count == 1
+    assert getattr(fake, "logged_in", False) is False
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
 _PREHEAT_1 = "switch.salon_pre_heating"
 _PREHEAT_2 = "switch.bureau_pre_heating"
 

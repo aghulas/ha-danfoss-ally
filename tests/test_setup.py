@@ -160,3 +160,80 @@ async def test_setup_links_grouped_heads_to_their_room_device(hass: HomeAssistan
     assert isolated is not None and isolated.via_device_id is None
 
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def _setup_with_room(hass: HomeAssistant):
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, unique_id="compte@exemple.fr")
+    entry.add_to_hass(hass)
+    fake = FakeCloudClient(
+        devices=[head("a", "A"), head("b", "B")], groups=_PIECE, members={"77": ["a", "b"]}
+    )
+    with patch("custom_components.danfoss_ally_cloud.CloudClient", return_value=fake):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    coordinator: DanfossCoordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+    registry = er.async_get(hass)
+    room_climate = registry.async_get_entity_id("climate", DOMAIN, "77")
+    room_number = registry.async_get_entity_id("number", DOMAIN, "77_comfort_setpoint")
+    assert room_climate is not None and room_number is not None
+    return entry, fake, coordinator, registry, room_climate, room_number
+
+
+async def test_partial_device_list_never_removes_room_entities(hass: HomeAssistant):
+    """One home not answering leaves the device list a SUBSET without an error: the room drops
+    out of ``coordinator.rooms``, and its entities must stay in the registry (ids, names and areas
+    are the user's). They come back by themselves at the next complete read."""
+    entry, fake, coordinator, registry, room_climate, room_number = await _setup_with_room(hass)
+
+    fake._devices = []  # the home's list did not come: no head of the room this poll
+    fake.device_list_complete = False
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert "77" not in coordinator.rooms
+    assert coordinator.room_retired("77") is False
+    assert registry.async_get(room_climate) is not None
+    assert registry.async_get(room_number) is not None
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_degraded_topology_never_removes_room_entities(hass: HomeAssistant):
+    """A topology read where a home lists rooms but gives no membership is degraded, not a home
+    whose rooms were deleted: nothing is retired on it, even with a complete device list."""
+    entry, fake, coordinator, registry, room_climate, room_number = await _setup_with_room(hass)
+
+    fake._members = {}  # rooms still listed, memberships missing
+    coordinator.invalidate_topology()
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert "77" not in coordinator.rooms
+    assert coordinator.room_retired("77") is False
+    assert registry.async_get(room_climate) is not None
+    assert registry.async_get(room_number) is not None
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_room_deleted_in_the_cloud_is_retired_on_complete_reads(hass: HomeAssistant):
+    """Positive evidence only: complete device list, complete topology, room no longer listed."""
+    entry, fake, coordinator, registry, room_climate, room_number = await _setup_with_room(hass)
+
+    fake._groups = []  # the room was deleted: the heads are isolated again
+    fake._members = {}
+    coordinator.invalidate_topology()
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coordinator.room_retired("77") is True
+    assert registry.async_get(room_climate) is None
+    assert registry.async_get(room_number) is None
+    # The two heads are isolated now and get their own climate.
+    assert registry.async_get_entity_id("climate", DOMAIN, "a") is not None
+    assert registry.async_get_entity_id("climate", DOMAIN, "b") is not None
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()

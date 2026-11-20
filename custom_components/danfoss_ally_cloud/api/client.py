@@ -1,8 +1,9 @@
 """Client for the Danfoss Ally cloud API (the non-public one, used by the app) - path 1a.
 
 Async wrapper around the vendored Tuya stack (``_tuya``). Auth via the app account (email/password
-login) + installation material captured once (sign_key, deviceId, chKey). Exposes: login, list of
-homes, list of decoded heads. Read-only for v0.1.
+login) + installation material captured once (sign_key, deviceId, chKey). Exposes: login, homes,
+devices, per-device DPs, room groups, weekly schedules, room management, relay binding, holidays,
+and sub-device unbind.
 
 Re-authentication is robust: Tuya can invalidate the session when the app reconnects; on a session
 error we log in once more then replay the request.

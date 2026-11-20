@@ -233,3 +233,117 @@ def test_setpoint_attributes_without_temp_set_has_no_alias():
     attrs = DanfossHeadClimate(coord, dev.id).extra_state_attributes
     assert "active_setpoint" not in attrs
     assert attrs["setpoints"] == {"comfort": 21.0}
+
+
+# --- ISOLATED head climate over Tuya cloud MQTT (enable_cloud_mqtt on) ------------------------
+
+
+def _mqtt_head(**kw):
+    base = dict(
+        max_setpoint=28.0,
+        min_setpoint=5.0,
+        setpoints={"comfort": 21.0, "setback": 14.0, "pause": 5.0},
+        dps={"1": False, "118": 210, "119": 140, "121": 145},
+        mode="at_home",
+    )
+    base.update(kw)
+    return head(**base)
+
+
+async def test_head_climate_writes_comfort_and_setback_via_cloud_mqtt():
+    from .test_switch import _FakeClient as _MqttFakeClient
+    from .test_switch import _FakeMqttLink
+
+    dev = _mqtt_head(mode="at_home")
+    client = _MqttFakeClient()
+    coord = _FakeCoord(data={dev.id: dev}, client=client)
+    link = _FakeMqttLink()
+    cl = DanfossHeadClimate(coord, dev.id, link=link, cloud_mqtt_enabled=True)
+
+    await cl.async_set_temperature(**{ATTR_TEMPERATURE: 20.5})
+    assert link.published == [("gw-1", "node-1", {"118": 205, "16": 205})]
+    assert link.confirmations == [("node-1", 118, 205)]
+    assert client.calls == [
+        (dev.id, "03wvrwpv", {"1": False, "118": 205, "119": 140, "121": 145}, None)
+    ]
+
+    # Setback mode: publishes DP 119 alone + posts the settings block.
+    dev_sb = _mqtt_head(mode="leaving_home")
+    coord.data[dev.id] = dev_sb
+    link.published.clear()
+    client.calls.clear()
+    await cl.async_set_temperature(**{ATTR_TEMPERATURE: 14.5})
+    assert link.published == [("gw-1", "node-1", {"119": 145})]
+    assert client.calls[0][2]["119"] == 145
+
+    # Missing ATTR_TEMPERATURE is a no-op.
+    link.published.clear()
+    await cl.async_set_temperature()
+    assert link.published == []
+
+
+@pytest.mark.parametrize("mode", ["manual", "pause", "holiday", None])
+async def test_head_climate_mqtt_refuses_outside_schedule_modes(mode):
+    from .test_switch import _FakeClient as _MqttFakeClient
+    from .test_switch import _FakeMqttLink
+
+    dev = _mqtt_head(mode=mode)
+    coord = _FakeCoord(data={dev.id: dev}, client=_MqttFakeClient())
+    link = _FakeMqttLink()
+    cl = DanfossHeadClimate(coord, dev.id, link=link, cloud_mqtt_enabled=True)
+    with pytest.raises(HomeAssistantError, match="comfort"):
+        await cl.async_set_temperature(**{ATTR_TEMPERATURE: 20.0})
+    assert link.published == []
+
+
+async def test_head_climate_mqtt_refuses_out_of_bounds_and_block_error():
+    from custom_components.danfoss_ally_cloud.api import CloudError
+
+    from .test_switch import _FakeClient as _MqttFakeClient
+    from .test_switch import _FakeMqttLink
+
+    dev = _mqtt_head(mode="leaving_home")
+    client = _MqttFakeClient()
+    coord = _FakeCoord(data={dev.id: dev}, client=client)
+    link = _FakeMqttLink()
+    cl = DanfossHeadClimate(coord, dev.id, link=link, cloud_mqtt_enabled=True)
+
+    with pytest.raises(HomeAssistantError, match="setpoint refused"):
+        await cl.async_set_temperature(**{ATTR_TEMPERATURE: 30.0})  # above max_setpoint 28.0
+    assert link.published == []
+
+    # Grouped head or disconnected link falls back to the Read-only error.
+    coord._group_of[dev.id] = "77"
+    with pytest.raises(HomeAssistantError, match="Read-only"):
+        await cl.async_set_temperature(**{ATTR_TEMPERATURE: 15.0})
+    coord._group_of.clear()
+
+    # Refused HTTP settings block after confirmed MQTT publish surfaces a clear error.
+    class _RefusingClient(_MqttFakeClient):
+        async def async_write_setting(self, dev_id, pid, dps, *, gw_id=None):
+            raise CloudError("block refused")
+
+    coord.client = _RefusingClient()
+    with pytest.raises(HomeAssistantError, match="written on the head and confirmed"):
+        await cl.async_set_temperature(**{ATTR_TEMPERATURE: 15.0})
+
+
+async def test_head_climate_mqtt_refuses_a_setpoint_outside_the_heads_own_bounds():
+    """The climate's fixed 5-35 °C range is not the limit: the head's own bounds are, as for the
+    setpoint numbers. Nothing is published for a value the head's upper bound excludes."""
+    from .test_switch import _FakeClient as _MqttFakeClient
+    from .test_switch import _FakeMqttLink
+
+    dev = _mqtt_head(mode="at_home", min_setpoint=5.0, max_setpoint=21.0)
+    client = _MqttFakeClient()
+    coord = _FakeCoord(data={dev.id: dev}, client=client)
+    link = _FakeMqttLink()
+    cl = DanfossHeadClimate(coord, dev.id, link=link, cloud_mqtt_enabled=True)
+
+    with pytest.raises(HomeAssistantError, match="setpoint refused"):
+        await cl.async_set_temperature(**{ATTR_TEMPERATURE: 25.0})  # inside 5-35, above 21
+    assert link.published == []
+    assert client.calls == []
+
+    await cl.async_set_temperature(**{ATTR_TEMPERATURE: 21.0})  # the bound itself is allowed
+    assert link.published == [("gw-1", "node-1", {"118": 210, "16": 210})]

@@ -234,6 +234,20 @@ async def test_await_confirmation_times_out_without_frame():
     assert link._waiters == []  # cleaned up
 
 
+async def test_stop_resolves_pending_confirmation_waiters():
+    import asyncio
+
+    link = mc.CloudMqttLink(
+        credentials=mc.MqttCredentials(host="h", client_id="c", username="u", password="p"),
+        gateways={GW: mc.GatewayRef(dev_id=GW, local_key=KEY)},
+    )
+    task = asyncio.ensure_future(link.await_confirmation("node-9", 30, True, timeout_s=10.0))
+    await asyncio.sleep(0.01)
+    link.stop()
+    assert await task is False
+    assert link._waiters == []
+
+
 async def test_await_confirmation_ignores_other_cid_or_value():
     import asyncio
 

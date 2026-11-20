@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+**Not validated on real hardware**: the isolated-head thermostat write, the runtime creation and
+retirement of entities, and the embedded schedule editor are covered by unit tests only.
+
+### Added
+
+- **Thermostat of an isolated head: setpoint write over Tuya cloud MQTT.** With
+  `enable_cloud_mqtt` on and the link connected, the climate of an isolated head writes the
+  setpoint of its current mode (comfort: DP 118 + 16, setback: DP 119, then the settings block),
+  the path proven for the setpoint numbers. The value is checked against the head's own bounds
+  before anything is sent; other modes are refused. Off by default: the climate stays read-only.
+  The mode is the one the cloud reports; outside a comfort slot a comfort write causes a few
+  minutes of heat demand, as for the comfort number.
+- **Rooms and isolated heads follow the topology at runtime.** Climates and setpoint numbers are
+  created when a room appears or a head becomes isolated, without reloading the integration. A
+  room's entities are removed only on positive evidence that the room is gone: a complete device
+  list, a complete topology read, and a topology that no longer lists it. A partial device list
+  (one home not answering) or a degraded topology read never removes anything; the entities stay
+  unavailable until the next complete read.
+- **Room card: the schedule editor opens inside the card** (embedded mode of the schedule card),
+  without a second card frame.
+
+### Changed
+
+- Start-up: the session opened by the first refresh is reused for the cloud-MQTT link, and the
+  gateway keys are fetched once for the local tunnel and the cloud-MQTT link.
+- Cloud-MQTT link: pending write confirmations are guarded across threads and resolved (as not
+  confirmed) when the link stops.
+- WebSocket commands sent without an `entry_id` on an install with several accounts are routed to
+  the account that owns the targeted room, device or home.
+- `operations.py` is split into `ops_common`, `ops_views`, `ops_rooms` and `ops_local`
+  (re-exported from `operations`; no behaviour change).
+
+### Fixed
+
+- Schedule editor: ranges with the same start were mis-indexed; a cancelled drag is handled.
+
 ## 1.2.1 — Building overview: gateway homes; preheat cloud-MQTT candidate reworked (still closed)
 
 Patch release. Nothing changes for an install that has not armed a supervised trial: no new

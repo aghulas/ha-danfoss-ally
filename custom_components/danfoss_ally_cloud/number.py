@@ -35,7 +35,7 @@ from homeassistant.components.number import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfTemperature
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -109,38 +109,76 @@ async def async_setup_entry(
 ) -> None:
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator: DanfossCoordinator = data[DATA_COORDINATOR]
-    entities: list[NumberEntity] = []
-    for group_id, room in coordinator.rooms.items():
-        if room.pid in WRITE_VERIFIED_PRODUCTS:
-            entities += [DanfossRoomSetpoint(coordinator, group_id, desc) for desc in SETPOINTS]
-    # Isolated-head settings over cloud MQTT: only with the write option on, a link, and the DP
-    # open on that channel FOR THAT HEAD (proven, or under supervised trial on the designated
-    # trial head). An entity whose DP is closed by configuration is not provided, and its registry
-    # entry is removed so it does not linger "restored, unavailable" after a trial is disarmed.
     link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
     cloud_mqtt_on = bool(data.get(DATA_CLOUD_MQTT))
-    closed: list[str] = []
-    for dev in coordinator.data.values():
-        if not (dev.is_head and write_allowed(dev)):
-            continue
-        isolated = coordinator.group_of(dev.id) is None
-        supervised = supervised_for(data, dev.id)
-        for desc in HEAD_BOUNDS:
-            if not (cloud_mqtt_on and isolated and mqtt_dp_open(desc.dp, supervised)):
-                closed.append(f"{dev.id}_{desc.key}")
-            elif link is not None:
-                entities.append(DanfossHeadBound(coordinator, dev.id, desc, link, supervised))
-            # Open but no link (it failed to start): transient, the registry entry is kept.
-        for sp in HEAD_SETPOINTS:
-            # A setpoint needs ALL its DPs open (comfort: 118 and 16).
-            if not (
-                cloud_mqtt_on and isolated and all(mqtt_dp_open(dp, supervised) for dp in sp.dps)
-            ):
-                closed.append(f"{dev.id}_{sp.key}")
-            elif link is not None:
-                entities.append(DanfossHeadSetpoint(coordinator, dev.id, sp, link, supervised))
-    remove_closed_head_numbers(hass, entry, closed)
-    async_add_entities(entities)
+
+    known_rooms: set[str] = set()
+    known_head_uids: set[str] = set()
+
+    def _collect_new_entities() -> list[NumberEntity]:
+        entities: list[NumberEntity] = []
+        for group_id, room in coordinator.rooms.items():
+            if group_id not in known_rooms and room.pid in WRITE_VERIFIED_PRODUCTS:
+                known_rooms.add(group_id)
+                entities += [DanfossRoomSetpoint(coordinator, group_id, desc) for desc in SETPOINTS]
+        # Isolated-head settings over cloud MQTT: only with the write option on, a link, and the DP
+        # open on that channel FOR THAT HEAD (proven, or under supervised trial on the designated
+        # trial head). An entity whose DP is closed by configuration is not provided, and its
+        # registry entry is removed so it does not linger "restored, unavailable".
+        closed: list[str] = []
+        for dev in coordinator.data.values():
+            if not (dev.is_head and write_allowed(dev)):
+                continue
+            isolated = coordinator.group_of(dev.id) is None
+            supervised = supervised_for(data, dev.id)
+            for desc in HEAD_BOUNDS:
+                uid = f"{dev.id}_{desc.key}"
+                if not (cloud_mqtt_on and isolated and mqtt_dp_open(desc.dp, supervised)):
+                    closed.append(uid)
+                    known_head_uids.discard(uid)
+                elif link is not None and uid not in known_head_uids:
+                    known_head_uids.add(uid)
+                    entities.append(DanfossHeadBound(coordinator, dev.id, desc, link, supervised))
+                # Open but no link (it failed to start): transient, the registry entry is kept.
+            for sp in HEAD_SETPOINTS:
+                uid = f"{dev.id}_{sp.key}"
+                # A setpoint needs ALL its DPs open (comfort: 118 and 16).
+                if not (
+                    cloud_mqtt_on
+                    and isolated
+                    and all(mqtt_dp_open(dp, supervised) for dp in sp.dps)
+                ):
+                    closed.append(uid)
+                    known_head_uids.discard(uid)
+                elif link is not None and uid not in known_head_uids:
+                    known_head_uids.add(uid)
+                    entities.append(DanfossHeadSetpoint(coordinator, dev.id, sp, link, supervised))
+        remove_closed_head_numbers(hass, entry, closed)
+        return entities
+
+    async_add_entities(_collect_new_entities())
+
+    if hasattr(coordinator, "async_add_listener") and hasattr(entry, "async_on_unload"):
+
+        @callback
+        def _async_sync_topology() -> None:
+            registry = er.async_get(hass)
+            for group_id in list(known_rooms):
+                # Never on a mere absence from ``rooms`` (a partial device list empties it).
+                if coordinator.room_retired(group_id):
+                    known_rooms.discard(group_id)
+                    for desc in SETPOINTS:
+                        uid = f"{group_id}_{desc.key}"
+                        ent_id = registry.async_get_entity_id("number", DOMAIN, uid)
+                        if ent_id is not None:
+                            ent = registry.async_get(ent_id)
+                            if ent is not None and ent.config_entry_id == entry.entry_id:
+                                registry.async_remove(ent_id)
+            added = _collect_new_entities()
+            if added:
+                async_add_entities(added)
+
+        entry.async_on_unload(coordinator.async_add_listener(_async_sync_topology))
 
 
 def remove_closed_head_numbers(

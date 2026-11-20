@@ -891,6 +891,495 @@ function errorText(hass, code, vars = {}) {
   const key = `err_${code}`;
   return t(hass, ERROR_KEYS.has(key) ? key : "err_unknown", vars);
 }
+const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const MINUTES_PER_DAY = 24 * 60;
+function parseHHMM(value) {
+  const m2 = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!m2) {
+    return null;
+  }
+  const hours = Number(m2[1]);
+  const minutes = Number(m2[2]);
+  if (hours > 23 || minutes > 59) {
+    return null;
+  }
+  return hours * 60 + minutes;
+}
+function dayBars(ranges) {
+  const bars = [];
+  for (const range of ranges) {
+    const start = parseHHMM(range.start);
+    const end = parseHHMM(range.end);
+    if (start === null || end === null || end <= start) {
+      continue;
+    }
+    bars.push({
+      start: range.start,
+      end: range.end,
+      leftPct: start / MINUTES_PER_DAY * 100,
+      widthPct: (end - start) / MINUTES_PER_DAY * 100
+    });
+  }
+  bars.sort((a2, b2) => a2.leftPct - b2.leftPct);
+  return bars;
+}
+function isSetbackOnly(ranges) {
+  return dayBars(ranges).length === 0;
+}
+function formatReadAt(iso, lang2) {
+  if (!iso) {
+    return null;
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return new Intl.DateTimeFormat(lang2, {
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(date);
+}
+const CARD_VERSION = "1.2.1";
+function needsReload(cardVersion, serverVersion) {
+  if (!serverVersion) {
+    return false;
+  }
+  return cardVersion !== serverVersion;
+}
+function renderSetpoints(hass, comfort, setback) {
+  const fmt = (v2) => v2 === null ? "—" : t(hass, "degree", { value: v2 });
+  return b`
+    <div class="setpoints">
+      <span class="chip comfort">
+        <span class="swatch comfort"></span>${t(hass, "comfort")} ${fmt(comfort)}
+      </span>
+      <span class="chip setback">
+        <span class="swatch setback"></span>${t(hass, "setback")} ${fmt(setback)}
+      </span>
+    </div>
+  `;
+}
+function renderScale() {
+  return b`
+    <div class="scale" aria-hidden="true">
+      <span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span>
+    </div>
+  `;
+}
+function dayAriaLabel(hass, day, bars, setbackOnly) {
+  const name = dayLabel(hass, day);
+  if (setbackOnly) {
+    return `${name} — ${t(hass, "setback_all_day")}`;
+  }
+  const parts = bars.map((bar) => t(hass, "range_label", { start: bar.start, end: bar.end }));
+  return `${name} — ${parts.join(", ")}`;
+}
+function renderReadDay(hass, day, ranges) {
+  const bars = dayBars(ranges);
+  const label = dayAriaLabel(hass, day, bars, isSetbackOnly(ranges));
+  return b`
+    <div class="day">
+      <span class="day-label">${dayLabel(hass, day)}</span>
+      <div class="track" role="img" aria-label=${label}>
+        ${bars.map(
+    (bar) => b`
+            <div
+              class="bar"
+              style="left:${bar.leftPct}%;width:${bar.widthPct}%"
+              title=${t(hass, "range_label", { start: bar.start, end: bar.end })}
+            ></div>
+          `
+  )}
+      </div>
+    </div>
+  `;
+}
+function renderReadGrid(hass, schedule) {
+  return b`
+    <div class="grid">
+      ${renderScale()}
+      ${DAY_KEYS.map((day) => renderReadDay(hass, day, schedule.days[day] ?? []))}
+    </div>
+  `;
+}
+function renderBadge(kind, icon, label) {
+  return b`
+    <span class="badge ${kind}" title=${label} role="img" aria-label=${label}>${icon}</span>
+  `;
+}
+function jobStatusKind(status) {
+  switch (status) {
+    case "applied":
+      return "ok";
+    case "partial":
+      return "warn";
+    case "failed":
+      return "off";
+    default:
+      return "muted";
+  }
+}
+function renderJobBanner(hass, job) {
+  if (!job) {
+    return A;
+  }
+  const key = `job_status_${job.status}`;
+  return b`
+    <div class="job">
+      <span class="job-title">${t(hass, "job_heading")}</span>
+      <span class="pill ${jobStatusKind(job.status)}">${t(hass, key)}</span>
+    </div>
+  `;
+}
+function renderCardFooter(hass, schedule, canRefresh, refreshing, onRefresh) {
+  const when = formatReadAt(schedule?.read_at, language(hass));
+  const lastRead = when ? t(hass, "last_read", { when }) : t(hass, "never_read");
+  return b`
+    <div class="footer">
+      <button
+        class="refresh"
+        @click=${onRefresh}
+        ?disabled=${!canRefresh || refreshing}
+        aria-label=${t(hass, "refresh")}
+      >
+        ${ICON_REFRESH}<span>${t(hass, "refresh")}</span>
+      </button>
+      <span class="read-at">${lastRead}</span>
+      <span class="version">${t(hass, "version", { version: CARD_VERSION })}</span>
+    </div>
+  `;
+}
+function renderReloadBanner(hass, onReload) {
+  return b`
+    <div class="reload">
+      <span>${t(hass, "reload_available")}</span>
+      <button @click=${onReload}>${t(hass, "reload")}</button>
+    </div>
+  `;
+}
+const cardSharedStyles = i$3`
+  :host {
+    display: block;
+  }
+  .content {
+    padding: 0 16px 16px;
+  }
+  .titlebar {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding-top: 16px;
+  }
+  .room {
+    font-size: 1.4rem;
+    font-weight: 500;
+    color: var(--primary-text-color);
+  }
+  .actions {
+    display: inline-flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .hint {
+    margin-top: 8px;
+    color: var(--secondary-text-color);
+    font-size: 0.9rem;
+  }
+  .banner {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+  }
+  .banner.error {
+    background: var(--error-color, #c62828);
+    color: var(--text-primary-color, #fff);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    border: 1px solid var(--divider-color, #e0e0e0);
+    border-radius: 16px;
+    padding: 6px 12px;
+    background: var(--card-background-color, #fff);
+    color: var(--primary-text-color);
+    font: inherit;
+    font-size: 0.85rem;
+  }
+  .btn svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--secondary-background-color, #f0f0f0);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .btn.primary {
+    background: var(--primary-color, #03a9f4);
+    color: var(--text-primary-color, #fff);
+    border-color: transparent;
+  }
+  .btn.primary:hover:not(:disabled) {
+    filter: brightness(0.95);
+  }
+  .btn.ghost {
+    background: transparent;
+  }
+  .btn.tiny {
+    padding: 4px 10px;
+    font-size: 0.8rem;
+  }
+  .btn.icon {
+    padding: 4px;
+    border-radius: 8px;
+  }
+  .setpoints {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 14px;
+    font-size: 0.9rem;
+    background: var(--secondary-background-color, #f0f0f0);
+    color: var(--primary-text-color);
+  }
+  .swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+  }
+  .swatch.comfort,
+  .bar {
+    background: var(--danfoss-comfort-color, var(--primary-color, #03a9f4));
+  }
+  .swatch.setback {
+    background: var(--danfoss-setback-color, var(--disabled-text-color, #9e9e9e));
+  }
+  .grid {
+    margin: 8px 0 4px;
+  }
+  .scale {
+    display: flex;
+    justify-content: space-between;
+    margin: 0 0 4px calc(2.6rem + 8px);
+    color: var(--secondary-text-color);
+    font-size: 0.7rem;
+  }
+  .day {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 3px 0;
+  }
+  .day-label {
+    flex: 0 0 2.6rem;
+    font-size: 0.8rem;
+    color: var(--secondary-text-color);
+  }
+  .track {
+    position: relative;
+    flex: 1 1 auto;
+    height: 16px;
+    border-radius: 4px;
+    background: var(--danfoss-track-color, var(--divider-color, #e0e0e0));
+    background-image: linear-gradient(
+      to right,
+      transparent 0,
+      transparent calc(25% - 1px),
+      rgba(127, 127, 127, 0.35) calc(25% - 1px),
+      rgba(127, 127, 127, 0.35) 25%
+    );
+    background-size: 25% 100%;
+    overflow: hidden;
+  }
+  .bar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: 3px;
+    min-width: 2px;
+  }
+  .heads {
+    margin-top: 14px;
+  }
+  .heads-title {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--secondary-text-color);
+    margin-bottom: 6px;
+  }
+  .heads-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .head-name {
+    font-size: 0.9rem;
+    color: var(--primary-text-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .badges {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .badge {
+    display: inline-flex;
+    width: 20px;
+    height: 20px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+  }
+  .badge svg {
+    width: 15px;
+    height: 15px;
+    fill: currentColor;
+  }
+  .badge.ok {
+    color: var(--success-color, #2e7d32);
+  }
+  .badge.warn {
+    color: var(--warning-color, #ffa600);
+  }
+  .badge.off,
+  .badge.muted {
+    color: var(--disabled-text-color, #9e9e9e);
+  }
+  .pill {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--secondary-background-color, #eee);
+    color: var(--primary-text-color);
+    white-space: nowrap;
+  }
+  .pill.ok {
+    background: var(--success-color, #2e7d32);
+    color: var(--text-primary-color, #fff);
+  }
+  .pill.warn {
+    background: var(--warning-color, #ffa600);
+    color: var(--text-primary-color, #fff);
+  }
+  .pill.off {
+    background: var(--disabled-text-color, #9e9e9e);
+    color: var(--text-primary-color, #fff);
+  }
+  .job {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .job-title {
+    font-size: 0.8rem;
+    color: var(--secondary-text-color);
+  }
+  .footer {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin-top: 16px;
+  }
+  .refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    border: 1px solid var(--divider-color, #e0e0e0);
+    border-radius: 16px;
+    padding: 5px 12px;
+    background: var(--card-background-color, #fff);
+    color: var(--primary-text-color);
+    font: inherit;
+    font-size: 0.85rem;
+  }
+  .refresh:hover:not(:disabled) {
+    background: var(--secondary-background-color, #f0f0f0);
+  }
+  .refresh:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .refresh svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+  }
+  .read-at {
+    color: var(--secondary-text-color);
+    font-size: 0.8rem;
+  }
+  .version {
+    margin-left: auto;
+    color: var(--secondary-text-color);
+    font-size: 0.75rem;
+  }
+  .reload {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: var(--warning-color, #ffa600);
+    color: var(--text-primary-color, #fff);
+  }
+  .reload button {
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 12px;
+    background: var(--primary-color, #03a9f4);
+    color: var(--text-primary-color, #fff);
+    font: inherit;
+  }
+`;
+const ICON_CHECK = w`<svg viewBox="0 0 24 24"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.42z" /></svg>`;
+const ICON_MINUS = w`<svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14z" /></svg>`;
+const ICON_PLUS = w`<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z" /></svg>`;
+const ICON_ALERT = w`<svg viewBox="0 0 24 24"><path d="M13 14h-2V9h2m0 9h-2v-2h2M1 21h22L12 2z" /></svg>`;
+const ICON_WRENCH = w`<svg viewBox="0 0 24 24"><path d="M22.7 19 13.6 9.9c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z" /></svg>`;
+const ICON_WIFI = w`<svg viewBox="0 0 24 24"><path d="M12 21 2 9c5.5-5 14.5-5 20 0zm0-3.5 3.5-4.2a5.3 5.3 0 0 0-7 0z" /></svg>`;
+const ICON_WIFI_OFF = w`<svg viewBox="0 0 24 24"><path d="M2.3 4.3 1 5.6l2.3 2.3C2.8 8.3 2.4 8.6 2 9l10 12 3.3-4L18 19.7l1.3-1.4zM12 21ZM20.6 8.3A14 14 0 0 0 9.9 5.8l9.1 9.1 2.9-3.6c-.4-.3-.8-.7-1.3-1z" /></svg>`;
+const ICON_REFRESH = w`<svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z" /></svg>`;
+const ICON_EDIT = w`<svg viewBox="0 0 24 24"><path d="M20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.93l-3.75-3.75z" /></svg>`;
+const ICON_SAVE = w`<svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6m3-10H5V5h10z" /></svg>`;
+const ICON_TRASH = w`<svg viewBox="0 0 24 24"><path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14zM6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6z" /></svg>`;
+const ICON_COPY = w`<svg viewBox="0 0 24 24"><path d="M19 21H8V7h11m0-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2m-3-4H4a2 2 0 0 0-2 2v14h2V3h12z" /></svg>`;
+const ICON_RESTORE = w`<svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l4 4 4-4H6a7 7 0 1 1 7 7c-1.9 0-3.6-.8-4.9-2l-1.4 1.4A9 9 0 1 0 13 3m-1 5v5l4 2 .7-1.2-3.2-1.9V8z" /></svg>`;
+const ICON_BATTERY = w`<svg viewBox="0 0 24 24"><path d="M16.67 4H15V2H9v2H7.33C6.6 4 6 4.6 6 5.33v15.33C6 21.4 6.6 22 7.33 22h9.33c.74 0 1.34-.6 1.34-1.33V5.33C18 4.6 17.4 4 16.67 4" /></svg>`;
+const ICON_VALVE = w`<svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7.76A4 4 0 1 0 15 16a4 4 0 0 0-2-3.24V5a1 1 0 0 1 2 0h2a3 3 0 0 0-3-3z" /></svg>`;
+const ICON_WINDOW = w`<svg viewBox="0 0 24 24"><path d="M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1m7 2H5v6h6zm2 0v6h6V5zm-2 8H5v6h6zm2 0v6h6v-6z" /></svg>`;
+const ICON_LOCK = w`<svg viewBox="0 0 24 24"><path d="M12 17a2 2 0 0 0 2-2 2 2 0 0 0-2-2 2 2 0 0 0-2 2 2 2 0 0 0 2 2m6-9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h1V6a5 5 0 0 1 10 0v2zM12 3a3 3 0 0 0-3 3v2h6V6a3 3 0 0 0-3-3" /></svg>`;
 async function fetchInfo(hass) {
   try {
     return await hass.callWS({ type: "danfoss_ally_cloud/info" });
@@ -1098,54 +1587,6 @@ __decorateClass$3([
 DanfossAllyScheduleCardEditor = __decorateClass$3([
   t$1("danfoss-ally-schedule-card-editor")
 ], DanfossAllyScheduleCardEditor);
-const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-const MINUTES_PER_DAY = 24 * 60;
-function parseHHMM(value) {
-  const m2 = /^(\d{2}):(\d{2})$/.exec(value);
-  if (!m2) {
-    return null;
-  }
-  const hours = Number(m2[1]);
-  const minutes = Number(m2[2]);
-  if (hours > 23 || minutes > 59) {
-    return null;
-  }
-  return hours * 60 + minutes;
-}
-function dayBars(ranges) {
-  const bars = [];
-  for (const range of ranges) {
-    const start = parseHHMM(range.start);
-    const end = parseHHMM(range.end);
-    if (start === null || end === null || end <= start) {
-      continue;
-    }
-    bars.push({
-      start: range.start,
-      end: range.end,
-      leftPct: start / MINUTES_PER_DAY * 100,
-      widthPct: (end - start) / MINUTES_PER_DAY * 100
-    });
-  }
-  bars.sort((a2, b2) => a2.leftPct - b2.leftPct);
-  return bars;
-}
-function isSetbackOnly(ranges) {
-  return dayBars(ranges).length === 0;
-}
-function formatReadAt(iso, lang2) {
-  if (!iso) {
-    return null;
-  }
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-  return new Intl.DateTimeFormat(lang2, {
-    dateStyle: "short",
-    timeStyle: "short"
-  }).format(date);
-}
 const SNAP_MINUTES = 5;
 const MIN_RANGE_MINUTES = SNAP_MINUTES;
 const LAST_MINUTE = 23 * 60 + 59;
@@ -1164,6 +1605,11 @@ function replace(ranges, index, next) {
 function sortRanges(ranges) {
   return [...ranges].sort(
     (a2, b2) => (parseHHMM(a2.start) ?? Infinity) - (parseHHMM(b2.start) ?? Infinity)
+  );
+}
+function sortIndexedRanges(ranges) {
+  return ranges.map((range, index) => ({ range, index })).sort(
+    (a2, b2) => (parseHHMM(a2.range.start) ?? Infinity) - (parseHHMM(b2.range.start) ?? Infinity)
   );
 }
 function firstFreeSlot(ranges, durationMin = 60) {
@@ -1316,13 +1762,6 @@ function validateDay(ranges, day = null) {
     errors
   };
 }
-const CARD_VERSION = "1.2.1";
-function needsReload(cardVersion, serverVersion) {
-  if (!serverVersion) {
-    return false;
-  }
-  return cardVersion !== serverVersion;
-}
 var __defProp$2 = Object.defineProperty;
 var __getOwnPropDesc$2 = Object.getOwnPropertyDescriptor;
 var __decorateClass$2 = (decorators, target, key, kind) => {
@@ -1336,6 +1775,7 @@ var __decorateClass$2 = (decorators, target, key, kind) => {
 let DanfossAllyScheduleCard = class extends i {
   constructor() {
     super(...arguments);
+    this.embedded = false;
     this._rooms = [];
     this._info = null;
     this._schedule = null;
@@ -1386,12 +1826,20 @@ let DanfossAllyScheduleCard = class extends i {
       throw new Error("Configuration invalide");
     }
     if (this._editing && config.room_id !== this._config?.room_id) {
-      this._leaveEdit();
+      this._leaveEdit(false);
     }
     this._config = config;
   }
   getCardSize() {
     return this._editing ? 12 : 6;
+  }
+  /** Démarre l'édition (appelable par un parent tel que `danfoss-ally-room-card`). */
+  beginEdit() {
+    this._beginEdit();
+  }
+  /** Demande la sortie d'édition avec confirmation si des jours ont été modifiés. */
+  cancelEdit() {
+    this._cancelEdit();
   }
   disconnectedCallback() {
     super.disconnectedCallback();
@@ -1417,13 +1865,18 @@ let DanfossAllyScheduleCard = class extends i {
     const target = this._target;
     const [info, rooms, schedule] = await Promise.all([
       fetchInfo(this.hass),
-      fetchRooms(this.hass),
+      this.embedded ? Promise.resolve([]) : fetchRooms(this.hass),
       target ? fetchSchedule(this.hass, target) : Promise.resolve(null)
     ]);
     this._info = info;
-    this._rooms = rooms;
+    if (!this.embedded) {
+      this._rooms = rooms;
+    }
     this._schedule = schedule;
-    if (!this._unsubscribe) {
+    if (this.embedded && !this._editing && this._isAdmin && this._schedule) {
+      this._beginEdit();
+    }
+    if (!this._unsubscribe && !this.embedded) {
       this._unsubscribe = await subscribeJobs(this.hass, (job) => this._onJob(job));
     }
   }
@@ -1476,7 +1929,7 @@ let DanfossAllyScheduleCard = class extends i {
     this._copyFrom = null;
     globalThis.addEventListener?.("beforeunload", this._onBeforeUnload);
   }
-  _leaveEdit() {
+  _leaveEdit(notifyParent = true) {
     this._editing = false;
     this._draft = null;
     this._copyFrom = null;
@@ -1487,6 +1940,15 @@ let DanfossAllyScheduleCard = class extends i {
       this._validateTimer = null;
     }
     globalThis.removeEventListener?.("beforeunload", this._onBeforeUnload);
+    if (this.embedded && notifyParent) {
+      this.dispatchEvent(
+        new CustomEvent("schedule-edit-close", {
+          detail: { schedule: this._schedule, job: this._job },
+          bubbles: true,
+          composed: true
+        })
+      );
+    }
   }
   _cancelEdit() {
     if (this._modified.length > 0) {
@@ -1495,7 +1957,7 @@ let DanfossAllyScheduleCard = class extends i {
         return;
       }
     }
-    this._leaveEdit();
+    this._leaveEdit(true);
   }
   _setDay(day, ranges) {
     if (!this._draft) {
@@ -1601,7 +2063,7 @@ let DanfossAllyScheduleCard = class extends i {
       if (this._schedule) {
         this._schedule = { ...this._schedule, days: cloneDays(this._draft) };
       }
-      this._leaveEdit();
+      this._leaveEdit(true);
     } catch (err) {
       const code = err instanceof ScheduleCommandError ? err.code : "unknown";
       this._error = errorText(this.hass, code, { max: MAX_TRANSITIONS_PER_DAY });
@@ -1648,21 +2110,26 @@ let DanfossAllyScheduleCard = class extends i {
     handle.setPointerCapture?.(ev.pointerId);
     globalThis.addEventListener?.("pointermove", this._onDragMove);
     globalThis.addEventListener?.("pointerup", this._onDragEnd);
+    globalThis.addEventListener?.("pointercancel", this._onDragEnd);
   }
   _teardownDrag() {
     this._drag = void 0;
     globalThis.removeEventListener?.("pointermove", this._onDragMove);
     globalThis.removeEventListener?.("pointerup", this._onDragEnd);
+    globalThis.removeEventListener?.("pointercancel", this._onDragEnd);
   }
   // --- Rendu ---
   render() {
+    if (this.embedded) {
+      return this._renderEmbedded();
+    }
     const room = pickRoom(this._rooms, this._config?.room_id);
     const showReload = needsReload(CARD_VERSION, this._info?.version);
     const readOnly = this._info !== null && !this._info.is_admin;
     return b`
       <ha-card>
         <div class="content">
-          ${showReload ? this._renderReloadBanner() : A}
+          ${showReload ? renderReloadBanner(this.hass, () => this._reload()) : A}
           <div class="titlebar">
             <div class="room">${this._roomTitle(room)}</div>
             ${this._renderActions(room)}
@@ -1674,22 +2141,42 @@ let DanfossAllyScheduleCard = class extends i {
       </ha-card>
     `;
   }
+  /** Rendu allégé quand l'éditeur est déplié dans `danfoss-ally-room-card`. */
+  _renderEmbedded() {
+    return b`
+      <div class="embedded-editor">
+        ${this._error ? b`<div class="banner error" role="alert">${this._error}</div>` : A}
+        ${this._editing && this._draft ? b`
+              <div class="embedded-bar">
+                <span class="read-at">
+                  ${this._modified.length > 0 ? t(this.hass, "unsaved_hint") : t(this.hass, "no_changes")}
+                </span>
+                ${this._renderEditButtons()}
+              </div>
+              ${this._renderEditor()}
+            ` : b`<div class="hint">${t(this.hass, "schedule_unavailable")}</div>`}
+      </div>
+    `;
+  }
+  _renderEditButtons() {
+    const canSave = this._modified.length > 0 && this._allValid && !this._saving;
+    return b`
+      <div class="actions">
+        <button class="btn ghost" @click=${this._cancelEdit} ?disabled=${this._saving}>
+          ${t(this.hass, "cancel")}
+        </button>
+        <button class="btn primary" @click=${this._save} ?disabled=${!canSave}>
+          ${ICON_SAVE}<span>${this._saving ? t(this.hass, "saving") : t(this.hass, "save")}</span>
+        </button>
+      </div>
+    `;
+  }
   _renderActions(room) {
     if (!this._isAdmin || !this._schedule) {
       return A;
     }
     if (this._editing) {
-      const canSave = this._modified.length > 0 && this._allValid && !this._saving;
-      return b`
-        <div class="actions">
-          <button class="btn ghost" @click=${this._cancelEdit} ?disabled=${this._saving}>
-            ${t(this.hass, "cancel")}
-          </button>
-          <button class="btn primary" @click=${this._save} ?disabled=${!canSave}>
-            ${ICON_SAVE}<span>${this._saving ? t(this.hass, "saving") : t(this.hass, "save")}</span>
-          </button>
-        </div>
-      `;
+      return this._renderEditButtons();
     }
     const needsRestore = (room?.heads ?? []).some((h2) => h2.schedule_active === false);
     return b`
@@ -1700,10 +2187,10 @@ let DanfossAllyScheduleCard = class extends i {
               ?disabled=${this._restoring}
               title=${t(this.hass, "restore_hint")}
             >
-              ${ICON_RESTORE$1}<span>${t(this.hass, "restore_schedule")}</span>
+              ${ICON_RESTORE}<span>${t(this.hass, "restore_schedule")}</span>
             </button>` : A}
         <button class="btn primary" @click=${this._beginEdit}>
-          ${ICON_EDIT$1}<span>${t(this.hass, "edit")}</span>
+          ${ICON_EDIT}<span>${t(this.hass, "edit")}</span>
         </button>
       </div>
     `;
@@ -1716,11 +2203,17 @@ let DanfossAllyScheduleCard = class extends i {
     const comfort = schedule?.comfort ?? room?.comfort ?? null;
     const setback = schedule?.setback ?? room?.setback ?? null;
     return b`
-      ${this._renderSetpoints(comfort, setback)}
-      ${this._editing && this._draft ? this._renderEditor() : schedule ? this._renderGrid(schedule) : b`<div class="hint">${t(this.hass, "schedule_unavailable")}</div>`}
+      ${renderSetpoints(this.hass, comfort, setback)}
+      ${this._editing && this._draft ? this._renderEditor() : schedule ? renderReadGrid(this.hass, schedule) : b`<div class="hint">${t(this.hass, "schedule_unavailable")}</div>`}
       ${this._renderHeads(room)}
-      ${this._renderJob()}
-      ${this._editing ? this._renderUnsavedHint() : this._renderFooter(schedule)}
+      ${renderJobBanner(this.hass, this._job)}
+      ${this._editing ? this._renderUnsavedHint() : renderCardFooter(
+      this.hass,
+      schedule,
+      Boolean(this.hass && this._target),
+      this._refreshing,
+      () => void this._refresh()
+    )}
     `;
   }
   _roomTitle(room) {
@@ -1735,68 +2228,11 @@ let DanfossAllyScheduleCard = class extends i {
     }
     return t(this.hass, "no_room");
   }
-  _renderSetpoints(comfort, setback) {
-    const fmt = (v2) => v2 === null ? "—" : t(this.hass, "degree", { value: v2 });
-    return b`
-      <div class="setpoints">
-        <span class="chip comfort">
-          <span class="swatch comfort"></span>${t(this.hass, "comfort")} ${fmt(comfort)}
-        </span>
-        <span class="chip setback">
-          <span class="swatch setback"></span>${t(this.hass, "setback")} ${fmt(setback)}
-        </span>
-      </div>
-    `;
-  }
-  // --- Grille de lecture (lot 4) ---
-  _renderGrid(schedule) {
-    return b`
-      <div class="grid">
-        ${this._renderScale()}
-        ${DAY_KEYS.map((day) => this._renderDay(day, schedule.days[day] ?? []))}
-      </div>
-    `;
-  }
-  _renderScale() {
-    return b`
-      <div class="scale" aria-hidden="true">
-        <span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span>
-      </div>
-    `;
-  }
-  _renderDay(day, ranges) {
-    const bars = dayBars(ranges);
-    const label = this._dayAria(day, bars, isSetbackOnly(ranges));
-    return b`
-      <div class="day">
-        <span class="day-label">${dayLabel(this.hass, day)}</span>
-        <div class="track" role="img" aria-label=${label}>
-          ${bars.map(
-      (bar) => b`
-              <div
-                class="bar"
-                style="left:${bar.leftPct}%;width:${bar.widthPct}%"
-                title=${t(this.hass, "range_label", { start: bar.start, end: bar.end })}
-              ></div>
-            `
-    )}
-        </div>
-      </div>
-    `;
-  }
-  _dayAria(day, bars, setbackOnly) {
-    const name = dayLabel(this.hass, day);
-    if (setbackOnly) {
-      return `${name} — ${t(this.hass, "setback_all_day")}`;
-    }
-    const parts = bars.map((bar) => t(this.hass, "range_label", { start: bar.start, end: bar.end }));
-    return `${name} — ${parts.join(", ")}`;
-  }
   // --- Grille d'édition (lot 5) ---
   _renderEditor() {
     return b`
       <div class="grid editing">
-        ${this._renderScale()}
+        ${renderScale()}
         ${DAY_KEYS.map((day) => this._renderEditDay(day))}
       </div>
     `;
@@ -1807,6 +2243,7 @@ let DanfossAllyScheduleCard = class extends i {
     const bars = dayBars(ranges);
     const counterClass = result.valid ? "counter" : "counter invalid";
     const codes = this._dayErrorCodes(day, result.errors.map((e2) => e2.code));
+    const indexedRanges = sortIndexedRanges(ranges);
     return b`
       <div class="eday ${result.valid ? "" : "invalid"}">
         <div class="eday-row">
@@ -1829,10 +2266,10 @@ let DanfossAllyScheduleCard = class extends i {
           </span>
         </div>
         <div class="ranges">
-          ${sortRanges(ranges).map((r2) => this._rangeRow(day, ranges.indexOf(r2), r2))}
+          ${indexedRanges.map(({ range, index }) => this._rangeRow(day, index, range))}
           <div class="range-tools">
             <button class="btn tiny" @click=${() => this._addRange(day)}>
-              ${ICON_PLUS$1}<span>${t(this.hass, "add_range")}</span>
+              ${ICON_PLUS}<span>${t(this.hass, "add_range")}</span>
             </button>
             <button
               class="btn tiny"
@@ -1965,7 +2402,7 @@ let DanfossAllyScheduleCard = class extends i {
       </div>
     `;
   }
-  // --- Têtes, lot, pied ---
+  // --- Têtes ---
   _renderHeads(room) {
     const heads = room?.heads ?? [];
     return b`
@@ -1982,18 +2419,18 @@ let DanfossAllyScheduleCard = class extends i {
         <span class="head-name">${head.name}</span>
         <span class="badges">
           ${jobHead ? this._renderJobBadge(jobHead.status) : A}
-          ${this._badge(
+          ${renderBadge(
       head.online ? "ok" : "off",
-      head.online ? ICON_WIFI$1 : ICON_WIFI_OFF$1,
+      head.online ? ICON_WIFI : ICON_WIFI_OFF,
       t(this.hass, head.online ? "head_online" : "head_offline")
     )}
-          ${head.schedule_active !== null ? this._badge(
+          ${head.schedule_active !== null ? renderBadge(
       head.schedule_active ? "ok" : "muted",
-      head.schedule_active ? ICON_CHECK : ICON_MINUS$1,
+      head.schedule_active ? ICON_CHECK : ICON_MINUS,
       t(this.hass, head.schedule_active ? "head_schedule_on" : "head_schedule_off")
     ) : A}
-          ${head.inconsistent ? this._badge("warn", ICON_ALERT$1, t(this.hass, "head_inconsistent")) : A}
-          ${head.mounting ? this._badge("muted", ICON_WRENCH$1, t(this.hass, "head_mounting")) : A}
+          ${head.inconsistent ? renderBadge("warn", ICON_ALERT, t(this.hass, "head_inconsistent")) : A}
+          ${head.mounting ? renderBadge("muted", ICON_WRENCH, t(this.hass, "head_mounting")) : A}
         </span>
       </div>
     `;
@@ -2010,522 +2447,185 @@ let DanfossAllyScheduleCard = class extends i {
     const label = t(this.hass, m2.key);
     return b`<span class="pill ${m2.kind}" title=${label}>${label}</span>`;
   }
-  _badge(kind, icon, label) {
-    return b`
-      <span class="badge ${kind}" title=${label} role="img" aria-label=${label}>${icon}</span>
-    `;
-  }
-  _renderJob() {
-    const job = this._job;
-    if (!job) {
-      return A;
-    }
-    const key = `job_status_${job.status}`;
-    return b`
-      <div class="job">
-        <span class="job-title">${t(this.hass, "job_heading")}</span>
-        <span class="pill ${this._jobKind(job.status)}">${t(this.hass, key)}</span>
-      </div>
-    `;
-  }
-  _jobKind(status) {
-    switch (status) {
-      case "applied":
-        return "ok";
-      case "partial":
-        return "warn";
-      case "failed":
-        return "off";
-      default:
-        return "muted";
-    }
-  }
-  _renderFooter(schedule) {
-    const when = formatReadAt(schedule?.read_at, language(this.hass));
-    const lastRead = when ? t(this.hass, "last_read", { when }) : t(this.hass, "never_read");
-    const canRefresh = Boolean(this.hass && this._target);
-    return b`
-      <div class="footer">
-        <button
-          class="refresh"
-          @click=${this._refresh}
-          ?disabled=${!canRefresh || this._refreshing}
-          aria-label=${t(this.hass, "refresh")}
-        >
-          ${ICON_REFRESH$1}<span>${t(this.hass, "refresh")}</span>
-        </button>
-        <span class="read-at">${lastRead}</span>
-        <span class="version">${t(this.hass, "version", { version: CARD_VERSION })}</span>
-      </div>
-    `;
-  }
-  _renderReloadBanner() {
-    return b`
-      <div class="reload">
-        <span>${t(this.hass, "reload_available")}</span>
-        <button @click=${this._reload}>${t(this.hass, "reload")}</button>
-      </div>
-    `;
-  }
 };
-DanfossAllyScheduleCard.styles = i$3`
-    :host {
-      display: block;
-    }
-    .content {
-      padding: 0 16px 16px;
-    }
-    .titlebar {
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-      padding-top: 16px;
-    }
-    .room {
-      font-size: 1.4rem;
-      font-weight: 500;
-      color: var(--primary-text-color);
-    }
-    .actions {
-      display: inline-flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .hint {
-      margin-top: 8px;
-      color: var(--secondary-text-color);
-      font-size: 0.9rem;
-    }
-    .banner {
-      margin-top: 10px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      font-size: 0.85rem;
-    }
-    .banner.error {
-      background: var(--error-color, #c62828);
-      color: var(--text-primary-color, #fff);
-    }
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-      border: 1px solid var(--divider-color, #e0e0e0);
-      border-radius: 16px;
-      padding: 6px 12px;
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-      font: inherit;
-      font-size: 0.85rem;
-    }
-    .btn svg {
-      width: 16px;
-      height: 16px;
-      fill: currentColor;
-    }
-    .btn:hover:not(:disabled) {
-      background: var(--secondary-background-color, #f0f0f0);
-    }
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: default;
-    }
-    .btn.primary {
-      background: var(--primary-color, #03a9f4);
-      color: var(--text-primary-color, #fff);
-      border-color: transparent;
-    }
-    .btn.primary:hover:not(:disabled) {
-      filter: brightness(0.95);
-    }
-    .btn.ghost {
-      background: transparent;
-    }
-    .btn.tiny {
-      padding: 4px 10px;
-      font-size: 0.8rem;
-    }
-    .btn.icon {
-      padding: 4px;
-      border-radius: 8px;
-    }
-    .setpoints {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin: 12px 0;
-    }
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      border-radius: 14px;
-      font-size: 0.9rem;
-      background: var(--secondary-background-color, #f0f0f0);
-      color: var(--primary-text-color);
-    }
-    .swatch {
-      width: 12px;
-      height: 12px;
-      border-radius: 3px;
-    }
-    .swatch.comfort,
-    .bar {
-      background: var(--danfoss-comfort-color, var(--primary-color, #03a9f4));
-    }
-    .swatch.setback {
-      background: var(--danfoss-setback-color, var(--disabled-text-color, #9e9e9e));
-    }
-    .grid {
-      margin: 8px 0 4px;
-    }
-    .scale {
-      display: flex;
-      justify-content: space-between;
-      margin: 0 0 4px calc(2.6rem + 8px);
-      color: var(--secondary-text-color);
-      font-size: 0.7rem;
-    }
-    .day {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin: 3px 0;
-    }
-    .day-label {
-      flex: 0 0 2.6rem;
-      font-size: 0.8rem;
-      color: var(--secondary-text-color);
-    }
-    .track {
-      position: relative;
-      flex: 1 1 auto;
-      height: 16px;
-      border-radius: 4px;
-      background: var(--danfoss-track-color, var(--divider-color, #e0e0e0));
-      background-image: linear-gradient(
-        to right,
-        transparent 0,
-        transparent calc(25% - 1px),
-        rgba(127, 127, 127, 0.35) calc(25% - 1px),
-        rgba(127, 127, 127, 0.35) 25%
-      );
-      background-size: 25% 100%;
-      overflow: hidden;
-    }
-    .track.editable {
-      height: 22px;
-      overflow: visible;
-    }
-    .bar {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      border-radius: 3px;
-      min-width: 2px;
-    }
-    .bar.edit {
-      display: flex;
-      touch-action: none;
-    }
-    .grip {
-      display: block;
-    }
-    .grip.body {
-      flex: 1 1 auto;
-      cursor: grab;
-    }
-    .grip.start,
-    .grip.end {
-      flex: 0 0 8px;
-      cursor: ew-resize;
-      background: rgba(0, 0, 0, 0.25);
-    }
-    .grip.start {
-      border-radius: 3px 0 0 3px;
-    }
-    .grip.end {
-      border-radius: 0 3px 3px 0;
-    }
-    .eday {
-      padding: 6px 0;
-      border-bottom: 1px solid var(--divider-color, #eee);
-    }
-    .eday.invalid {
-      background: var(--danfoss-invalid-bg, rgba(198, 40, 40, 0.06));
-      border-radius: 6px;
-    }
-    .eday-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .counter {
-      flex: 0 0 auto;
-      font-size: 0.75rem;
-      font-variant-numeric: tabular-nums;
-      color: var(--secondary-text-color);
-      min-width: 2.4rem;
-      text-align: right;
-    }
-    .counter.invalid {
-      color: var(--error-color, #c62828);
-      font-weight: 600;
-    }
-    .ranges {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin: 6px 0 0 calc(2.6rem + 8px);
-    }
-    .range {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .field {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .field-label {
-      font-size: 0.7rem;
-      color: var(--secondary-text-color);
-    }
-    input[type="time"] {
-      font: inherit;
-      font-size: 0.85rem;
-      padding: 4px 6px;
-      border-radius: 6px;
-      border: 1px solid var(--divider-color, #ccc);
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color, #000);
-      color-scheme: light dark;
-    }
-    .dash {
-      color: var(--secondary-text-color);
-    }
-    .range-tools {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-top: 2px;
-    }
-    .errors {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin: 6px 0 0 calc(2.6rem + 8px);
-    }
-    .err {
-      font-size: 0.75rem;
-      color: var(--error-color, #c62828);
-    }
-    .note {
-      font-size: 0.72rem;
-      color: var(--secondary-text-color);
-      margin: 6px 0 0 calc(2.6rem + 8px);
-    }
-    .copy-panel {
-      margin: 8px 0 2px calc(2.6rem + 8px);
-      padding: 8px 10px;
-      border-radius: 8px;
-      background: var(--secondary-background-color, #f3f3f3);
-    }
-    .copy-head {
-      font-size: 0.8rem;
-      font-weight: 500;
-      margin-bottom: 6px;
-    }
-    .copy-days {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px 12px;
-    }
-    .copy-opt {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 0.8rem;
-      color: var(--primary-text-color);
-    }
-    .copy-opt.all {
-      font-weight: 500;
-      flex: 0 0 100%;
-    }
-    .copy-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-      margin-top: 8px;
-    }
-    .heads {
-      margin-top: 14px;
-    }
-    .heads-title {
-      font-size: 0.85rem;
-      font-weight: 500;
-      color: var(--secondary-text-color);
-      margin-bottom: 6px;
-    }
-    .heads-list {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
-    .head-name {
-      font-size: 0.9rem;
-      color: var(--primary-text-color);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .badges {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      flex: 0 0 auto;
-    }
-    .badge {
-      display: inline-flex;
-      width: 20px;
-      height: 20px;
-      align-items: center;
-      justify-content: center;
-      border-radius: 50%;
-    }
-    .badge svg {
-      width: 15px;
-      height: 15px;
-      fill: currentColor;
-    }
-    .badge.ok {
-      color: var(--success-color, #2e7d32);
-    }
-    .badge.warn {
-      color: var(--warning-color, #ffa600);
-    }
-    .badge.off,
-    .badge.muted {
-      color: var(--disabled-text-color, #9e9e9e);
-    }
-    .pill {
-      font-size: 0.7rem;
-      padding: 2px 8px;
-      border-radius: 10px;
-      background: var(--secondary-background-color, #eee);
-      color: var(--primary-text-color);
-      white-space: nowrap;
-    }
-    .pill.ok {
-      background: var(--success-color, #2e7d32);
-      color: var(--text-primary-color, #fff);
-    }
-    .pill.warn {
-      background: var(--warning-color, #ffa600);
-      color: var(--text-primary-color, #fff);
-    }
-    .pill.off {
-      background: var(--disabled-text-color, #9e9e9e);
-      color: var(--text-primary-color, #fff);
-    }
-    .job {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 12px;
-    }
-    .job-title {
-      font-size: 0.8rem;
-      color: var(--secondary-text-color);
-    }
-    .footer {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 8px 12px;
-      margin-top: 16px;
-    }
-    .refresh {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-      border: 1px solid var(--divider-color, #e0e0e0);
-      border-radius: 16px;
-      padding: 5px 12px;
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-      font: inherit;
-      font-size: 0.85rem;
-    }
-    .refresh:hover {
-      background: var(--secondary-background-color, #f0f0f0);
-    }
-    .refresh:disabled {
-      opacity: 0.6;
-      cursor: default;
-    }
-    .refresh svg {
-      width: 16px;
-      height: 16px;
-      fill: currentColor;
-    }
-    .read-at {
-      color: var(--secondary-text-color);
-      font-size: 0.8rem;
-    }
-    .version {
-      margin-left: auto;
-      color: var(--secondary-text-color);
-      font-size: 0.75rem;
-    }
-    .reload {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-top: 12px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      background: var(--warning-color, #ffa600);
-      color: var(--text-primary-color, #fff);
-    }
-    .reload button {
-      cursor: pointer;
-      border: none;
-      border-radius: 6px;
-      padding: 4px 12px;
-      background: var(--primary-color, #03a9f4);
-      color: var(--text-primary-color, #fff);
-      font: inherit;
-    }
-    @media (max-width: 480px) {
-      .range {
+DanfossAllyScheduleCard.styles = [
+  cardSharedStyles,
+  i$3`
+      .setpoints {
+        margin: 12px 0;
+      }
+      .embedded-editor {
+        margin: 8px 0;
+        padding-top: 8px;
+        border-top: 1px solid var(--divider-color, #eee);
+      }
+      .embedded-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+      }
+      .track.editable {
+        height: 22px;
+        overflow: visible;
+      }
+      .bar.edit {
+        display: flex;
+        touch-action: none;
+      }
+      .grip {
+        display: block;
+      }
+      .grip.body {
+        flex: 1 1 auto;
+        cursor: grab;
+      }
+      .grip.start,
+      .grip.end {
+        flex: 0 0 8px;
+        cursor: ew-resize;
+        background: rgba(0, 0, 0, 0.25);
+      }
+      .grip.start {
+        border-radius: 3px 0 0 3px;
+      }
+      .grip.end {
+        border-radius: 0 3px 3px 0;
+      }
+      .eday {
+        padding: 6px 0;
+        border-bottom: 1px solid var(--divider-color, #eee);
+      }
+      .eday.invalid {
+        background: var(--danfoss-invalid-bg, rgba(198, 40, 40, 0.06));
+        border-radius: 6px;
+      }
+      .eday-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .counter {
+        flex: 0 0 auto;
+        font-size: 0.75rem;
+        font-variant-numeric: tabular-nums;
+        color: var(--secondary-text-color);
+        min-width: 2.4rem;
+        text-align: right;
+      }
+      .counter.invalid {
+        color: var(--error-color, #c62828);
+        font-weight: 600;
+      }
+      .ranges {
+        display: flex;
+        flex-direction: column;
         gap: 6px;
+        margin: 6px 0 0 calc(2.6rem + 8px);
       }
-      .ranges,
-      .errors,
-      .note,
+      .range {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .field {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .field-label {
+        font-size: 0.7rem;
+        color: var(--secondary-text-color);
+      }
+      input[type="time"] {
+        font: inherit;
+        font-size: 0.85rem;
+        padding: 4px 6px;
+        border-radius: 6px;
+        border: 1px solid var(--divider-color, #ccc);
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color, #000);
+        color-scheme: light dark;
+      }
+      .dash {
+        color: var(--secondary-text-color);
+      }
+      .range-tools {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 2px;
+      }
+      .errors {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 6px 0 0 calc(2.6rem + 8px);
+      }
+      .err {
+        font-size: 0.75rem;
+        color: var(--error-color, #c62828);
+      }
+      .note {
+        font-size: 0.72rem;
+        color: var(--secondary-text-color);
+        margin: 6px 0 0 calc(2.6rem + 8px);
+      }
       .copy-panel {
-        margin-left: 0;
+        margin: 8px 0 2px calc(2.6rem + 8px);
+        padding: 8px 10px;
+        border-radius: 8px;
+        background: var(--secondary-background-color, #f3f3f3);
       }
-    }
-  `;
+      .copy-head {
+        font-size: 0.8rem;
+        font-weight: 500;
+        margin-bottom: 6px;
+      }
+      .copy-days {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 12px;
+      }
+      .copy-opt {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.8rem;
+        color: var(--primary-text-color);
+      }
+      .copy-opt.all {
+        font-weight: 500;
+        flex: 0 0 100%;
+      }
+      .copy-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      @media (max-width: 480px) {
+        .range {
+          gap: 6px;
+        }
+        .ranges,
+        .errors,
+        .note,
+        .copy-panel {
+          margin-left: 0;
+        }
+      }
+    `
+];
 __decorateClass$2([
   n2({ attribute: false })
 ], DanfossAllyScheduleCard.prototype, "hass", 2);
+__decorateClass$2([
+  n2({ type: Boolean })
+], DanfossAllyScheduleCard.prototype, "embedded", 2);
 __decorateClass$2([
   r()
 ], DanfossAllyScheduleCard.prototype, "_config", 2);
@@ -2574,19 +2674,6 @@ __decorateClass$2([
 DanfossAllyScheduleCard = __decorateClass$2([
   t$1("danfoss-ally-schedule-card")
 ], DanfossAllyScheduleCard);
-const ICON_CHECK = w`<svg viewBox="0 0 24 24"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.42z" /></svg>`;
-const ICON_MINUS$1 = w`<svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14z" /></svg>`;
-const ICON_ALERT$1 = w`<svg viewBox="0 0 24 24"><path d="M13 14h-2V9h2m0 9h-2v-2h2M1 21h22L12 2z" /></svg>`;
-const ICON_WRENCH$1 = w`<svg viewBox="0 0 24 24"><path d="M22.7 19 13.6 9.9c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z" /></svg>`;
-const ICON_WIFI$1 = w`<svg viewBox="0 0 24 24"><path d="M12 21 2 9c5.5-5 14.5-5 20 0zm0-3.5 3.5-4.2a5.3 5.3 0 0 0-7 0z" /></svg>`;
-const ICON_WIFI_OFF$1 = w`<svg viewBox="0 0 24 24"><path d="M2.3 4.3 1 5.6l2.3 2.3C2.8 8.3 2.4 8.6 2 9l10 12 3.3-4L18 19.7l1.3-1.4zM12 21ZM20.6 8.3A14 14 0 0 0 9.9 5.8l9.1 9.1 2.9-3.6c-.4-.3-.8-.7-1.3-1z" /></svg>`;
-const ICON_REFRESH$1 = w`<svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z" /></svg>`;
-const ICON_EDIT$1 = w`<svg viewBox="0 0 24 24"><path d="M20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.93l-3.75-3.75z" /></svg>`;
-const ICON_SAVE = w`<svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6m3-10H5V5h10z" /></svg>`;
-const ICON_PLUS$1 = w`<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z" /></svg>`;
-const ICON_TRASH = w`<svg viewBox="0 0 24 24"><path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14zM6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6z" /></svg>`;
-const ICON_COPY = w`<svg viewBox="0 0 24 24"><path d="M19 21H8V7h11m0-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2m-3-4H4a2 2 0 0 0-2 2v14h2V3h12z" /></svg>`;
-const ICON_RESTORE$1 = w`<svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l4 4 4-4H6a7 7 0 1 1 7 7c-1.9 0-3.6-.8-4.9-2l-1.4 1.4A9 9 0 1 0 13 3m-1 5v5l4 2 .7-1.2-3.2-1.9V8z" /></svg>`;
 const ADJUSTABLE_MODES = /* @__PURE__ */ new Set(["at_home", "leaving_home"]);
 const SETPOINT_STEP = 0.5;
 function isLowBattery(head) {
@@ -2710,7 +2797,10 @@ let DanfossAllyRoomCard = class extends i {
     }
     this._refreshing = true;
     try {
-      const [schedule] = await Promise.all([fetchSchedule(this.hass, target, true), this._reloadRooms()]);
+      const [schedule] = await Promise.all([
+        fetchSchedule(this.hass, target, true),
+        this._reloadRooms()
+      ]);
       if (schedule) {
         this._schedule = schedule;
       }
@@ -2758,12 +2848,27 @@ let DanfossAllyRoomCard = class extends i {
   }
   _toggleEdit() {
     if (this._editing) {
-      this._editing = false;
+      if (this._schedCard?.cancelEdit) {
+        this._schedCard.cancelEdit();
+      } else {
+        this._editing = false;
+      }
       return;
     }
     const el = document.createElement("danfoss-ally-schedule-card");
+    el.embedded = true;
     el.setConfig({ room_id: this._config?.room_id ?? "" });
     el.hass = this.hass;
+    el.addEventListener("schedule-edit-close", (ev) => {
+      if (ev.detail?.schedule) {
+        this._schedule = ev.detail.schedule;
+      }
+      if (ev.detail?.job) {
+        this._job = ev.detail.job;
+      }
+      this._editing = false;
+      this._schedCard = void 0;
+    });
     this._schedCard = el;
     this._editing = true;
   }
@@ -2775,10 +2880,12 @@ let DanfossAllyRoomCard = class extends i {
     const room = this._room;
     const showReload = needsReload(CARD_VERSION, this._info?.version);
     const readOnly = this._info !== null && !this._info.is_admin;
+    const comfort = this._schedule?.comfort ?? room?.comfort ?? null;
+    const setback = this._schedule?.setback ?? room?.setback ?? null;
     return b`
       <ha-card>
         <div class="content">
-          ${showReload ? this._renderReloadBanner() : A}
+          ${showReload ? renderReloadBanner(this.hass, () => this._reload()) : A}
           <div class="titlebar">
             <div class="room">${this._roomTitle(room)}</div>
             ${this._renderActions(room)}
@@ -2786,11 +2893,17 @@ let DanfossAllyRoomCard = class extends i {
           ${readOnly ? b`<div class="hint">${t(this.hass, "read_only")}</div>` : A}
           ${this._error ? b`<div class="banner error" role="alert">${this._error}</div>` : A}
           ${room ? this._renderClimate(room) : A}
-          ${this._renderSetpoints(room)}
-          ${this._editing && this._schedCard ? this._schedCard : this._schedule ? this._renderGrid(this._schedule) : b`<div class="hint">${t(this.hass, "schedule_unavailable")}</div>`}
+          ${renderSetpoints(this.hass, comfort, setback)}
+          ${this._editing && this._schedCard ? this._schedCard : this._schedule ? renderReadGrid(this.hass, this._schedule) : b`<div class="hint">${t(this.hass, "schedule_unavailable")}</div>`}
           ${this._renderHeads(room)}
-          ${this._renderJob()}
-          ${this._renderFooter(this._schedule)}
+          ${renderJobBanner(this.hass, this._job)}
+          ${renderCardFooter(
+      this.hass,
+      this._schedule,
+      Boolean(this._target),
+      this._refreshing,
+      () => void this._refresh()
+    )}
         </div>
       </ha-card>
     `;
@@ -2818,13 +2931,13 @@ let DanfossAllyRoomCard = class extends i {
             >
               ${ICON_RESTORE}<span>${t(this.hass, "restore_schedule")}</span>
             </button>` : A}
-        <button
-          class="btn primary"
-          @click=${this._toggleEdit}
-          aria-expanded=${this._editing ? "true" : "false"}
-        >
-          ${ICON_EDIT}<span>${this._editing ? t(this.hass, "cancel") : t(this.hass, "edit_schedule")}</span>
-        </button>
+        ${!this._editing ? b`<button
+              class="btn primary"
+              @click=${this._toggleEdit}
+              aria-expanded="false"
+            >
+              ${ICON_EDIT}<span>${t(this.hass, "edit_schedule")}</span>
+            </button>` : A}
       </div>
     `;
   }
@@ -2861,51 +2974,6 @@ let DanfossAllyRoomCard = class extends i {
       </div>
     `;
   }
-  _renderSetpoints(room) {
-    const comfort = this._schedule?.comfort ?? room?.comfort ?? null;
-    const setback = this._schedule?.setback ?? room?.setback ?? null;
-    const fmt = (v2) => v2 === null ? "—" : t(this.hass, "degree", { value: v2 });
-    return b`
-      <div class="setpoints">
-        <span class="chip">
-          <span class="swatch comfort"></span>${t(this.hass, "comfort")} ${fmt(comfort)}
-        </span>
-        <span class="chip">
-          <span class="swatch setback"></span>${t(this.hass, "setback")} ${fmt(setback)}
-        </span>
-      </div>
-    `;
-  }
-  _renderGrid(schedule) {
-    return b`
-      <div class="grid">
-        <div class="scale" aria-hidden="true">
-          <span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span>
-        </div>
-        ${DAY_KEYS.map((day) => this._renderDay(day, schedule.days[day] ?? []))}
-      </div>
-    `;
-  }
-  _renderDay(day, ranges) {
-    const bars = dayBars(ranges);
-    const label = isSetbackOnly(ranges) ? `${dayLabel(this.hass, day)} — ${t(this.hass, "setback_all_day")}` : `${dayLabel(this.hass, day)} — ${bars.map((b2) => t(this.hass, "range_label", { start: b2.start, end: b2.end })).join(", ")}`;
-    return b`
-      <div class="day">
-        <span class="day-label">${dayLabel(this.hass, day)}</span>
-        <div class="track" role="img" aria-label=${label}>
-          ${bars.map(
-      (bar) => b`
-              <div
-                class="bar"
-                style="left:${bar.leftPct}%;width:${bar.widthPct}%"
-                title=${t(this.hass, "range_label", { start: bar.start, end: bar.end })}
-              ></div>
-            `
-    )}
-        </div>
-      </div>
-    `;
-  }
   _renderHeads(room) {
     const heads = room?.heads ?? [];
     return b`
@@ -2921,429 +2989,99 @@ let DanfossAllyRoomCard = class extends i {
       <div class="head">
         <span class="head-name">${head.name}</span>
         <span class="badges">
-          ${this._badge(
+          ${renderBadge(
       head.online ? "ok" : "off",
       head.online ? ICON_WIFI : ICON_WIFI_OFF,
       t(this.hass, head.online ? "head_online" : "head_offline")
     )}
-          ${head.battery != null ? this._badge(
+          ${head.battery != null ? renderBadge(
       low ? "warn" : "muted",
       ICON_BATTERY,
       t(this.hass, low ? "head_low_battery" : "head_battery", { value: head.battery })
     ) : A}
-          ${head.valve_opening != null ? this._badge(
+          ${head.valve_opening != null ? renderBadge(
       head.valve_opening > 0 ? "ok" : "muted",
       ICON_VALVE,
       t(this.hass, "head_valve", { value: head.valve_opening })
     ) : A}
-          ${head.window_open ? this._badge("warn", ICON_WINDOW, t(this.hass, "head_window_open")) : A}
-          ${head.child_lock ? this._badge("muted", ICON_LOCK, t(this.hass, "head_child_lock")) : A}
-          ${head.inconsistent ? this._badge("warn", ICON_ALERT, t(this.hass, "head_inconsistent")) : A}
-          ${head.mounting ? this._badge("muted", ICON_WRENCH, t(this.hass, "head_mounting")) : A}
+          ${head.window_open ? renderBadge("warn", ICON_WINDOW, t(this.hass, "head_window_open")) : A}
+          ${head.child_lock ? renderBadge("muted", ICON_LOCK, t(this.hass, "head_child_lock")) : A}
+          ${head.inconsistent ? renderBadge("warn", ICON_ALERT, t(this.hass, "head_inconsistent")) : A}
+          ${head.mounting ? renderBadge("muted", ICON_WRENCH, t(this.hass, "head_mounting")) : A}
           ${(head.faults ?? []).map(
-      (f2) => this._badge("warn", ICON_ALERT, t(this.hass, "head_fault", { code: f2.code }))
+      (f2) => renderBadge("warn", ICON_ALERT, t(this.hass, "head_fault", { code: f2.code }))
     )}
         </span>
       </div>
     `;
   }
-  _badge(kind, icon, label) {
-    return b`<span class="badge ${kind}" title=${label} role="img" aria-label=${label}>${icon}</span>`;
-  }
-  _renderJob() {
-    const job = this._job;
-    if (!job) {
-      return A;
-    }
-    const key = `job_status_${job.status}`;
-    const kind = job.status === "applied" ? "ok" : job.status === "partial" ? "warn" : job.status === "failed" ? "off" : "muted";
-    return b`
-      <div class="job">
-        <span class="job-title">${t(this.hass, "job_heading")}</span>
-        <span class="pill ${kind}">${t(this.hass, key)}</span>
-      </div>
-    `;
-  }
-  _renderFooter(schedule) {
-    const when = formatReadAt(schedule?.read_at, language(this.hass));
-    const lastRead = when ? t(this.hass, "last_read", { when }) : t(this.hass, "never_read");
-    return b`
-      <div class="footer">
-        <button
-          class="refresh"
-          @click=${this._refresh}
-          ?disabled=${!this._target || this._refreshing}
-          aria-label=${t(this.hass, "refresh")}
-        >
-          ${ICON_REFRESH}<span>${t(this.hass, "refresh")}</span>
-        </button>
-        <span class="read-at">${lastRead}</span>
-        <span class="version">${t(this.hass, "version", { version: CARD_VERSION })}</span>
-      </div>
-    `;
-  }
-  _renderReloadBanner() {
-    return b`
-      <div class="reload">
-        <span>${t(this.hass, "reload_available")}</span>
-        <button @click=${this._reload}>${t(this.hass, "reload")}</button>
-      </div>
-    `;
-  }
 };
-DanfossAllyRoomCard.styles = i$3`
-    :host {
-      display: block;
-    }
-    .content {
-      padding: 0 16px 16px;
-    }
-    .titlebar {
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-      padding-top: 16px;
-    }
-    .room {
-      font-size: 1.4rem;
-      font-weight: 500;
-      color: var(--primary-text-color);
-    }
-    .actions {
-      display: inline-flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .hint {
-      margin-top: 8px;
-      color: var(--secondary-text-color);
-      font-size: 0.9rem;
-    }
-    .banner {
-      margin-top: 10px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      font-size: 0.85rem;
-    }
-    .banner.error {
-      background: var(--error-color, #c62828);
-      color: var(--text-primary-color, #fff);
-    }
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-      border: 1px solid var(--divider-color, #e0e0e0);
-      border-radius: 16px;
-      padding: 6px 12px;
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-      font: inherit;
-      font-size: 0.85rem;
-    }
-    .btn svg {
-      width: 16px;
-      height: 16px;
-      fill: currentColor;
-    }
-    .btn:hover:not(:disabled) {
-      background: var(--secondary-background-color, #f0f0f0);
-    }
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: default;
-    }
-    .btn.primary {
-      background: var(--primary-color, #03a9f4);
-      color: var(--text-primary-color, #fff);
-      border-color: transparent;
-    }
-    .btn.ghost {
-      background: transparent;
-    }
-    .climate {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin: 12px 0 4px;
-    }
-    .metric {
-      display: flex;
-      flex-direction: column;
-    }
-    .big {
-      font-size: 2rem;
-      font-weight: 300;
-      line-height: 1.1;
-      color: var(--primary-text-color);
-    }
-    .big.heating {
-      color: var(--danfoss-comfort-color, var(--primary-color, #ff8a33));
-    }
-    .metric-label {
-      font-size: 0.85rem;
-      color: var(--secondary-text-color);
-    }
-    .setpoint {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .target {
-      font-size: 1.4rem;
-      font-variant-numeric: tabular-nums;
-      min-width: 3.5rem;
-      text-align: center;
-      color: var(--primary-text-color);
-    }
-    .step {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      border: 1px solid var(--divider-color, #e0e0e0);
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-      cursor: pointer;
-    }
-    .step svg {
-      width: 20px;
-      height: 20px;
-      fill: currentColor;
-    }
-    .step:hover:not(:disabled) {
-      background: var(--secondary-background-color, #f0f0f0);
-    }
-    .step:disabled {
-      opacity: 0.5;
-      cursor: default;
-    }
-    .setpoints {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin: 8px 0;
-    }
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      border-radius: 14px;
-      font-size: 0.9rem;
-      background: var(--secondary-background-color, #f0f0f0);
-      color: var(--primary-text-color);
-    }
-    .swatch {
-      width: 12px;
-      height: 12px;
-      border-radius: 3px;
-    }
-    .swatch.comfort,
-    .bar {
-      background: var(--danfoss-comfort-color, var(--primary-color, #03a9f4));
-    }
-    .swatch.setback {
-      background: var(--danfoss-setback-color, var(--disabled-text-color, #9e9e9e));
-    }
-    .grid {
-      margin: 8px 0 4px;
-    }
-    .scale {
-      display: flex;
-      justify-content: space-between;
-      margin: 0 0 4px calc(2.6rem + 8px);
-      color: var(--secondary-text-color);
-      font-size: 0.7rem;
-    }
-    .day {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin: 3px 0;
-    }
-    .day-label {
-      flex: 0 0 2.6rem;
-      font-size: 0.8rem;
-      color: var(--secondary-text-color);
-    }
-    .track {
-      position: relative;
-      flex: 1 1 auto;
-      height: 16px;
-      border-radius: 4px;
-      background: var(--danfoss-track-color, var(--divider-color, #e0e0e0));
-      background-image: linear-gradient(
-        to right,
-        transparent 0,
-        transparent calc(25% - 1px),
-        rgba(127, 127, 127, 0.35) calc(25% - 1px),
-        rgba(127, 127, 127, 0.35) 25%
-      );
-      background-size: 25% 100%;
-      overflow: hidden;
-    }
-    .bar {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      border-radius: 3px;
-      min-width: 2px;
-    }
-    .heads {
-      margin-top: 14px;
-    }
-    .heads-title {
-      font-size: 0.85rem;
-      font-weight: 500;
-      color: var(--secondary-text-color);
-      margin-bottom: 6px;
-    }
-    .heads-list {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
-    .head-name {
-      font-size: 0.9rem;
-      color: var(--primary-text-color);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .badges {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      flex: 0 0 auto;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-    .badge {
-      display: inline-flex;
-      width: 20px;
-      height: 20px;
-      align-items: center;
-      justify-content: center;
-      border-radius: 50%;
-    }
-    .badge svg {
-      width: 15px;
-      height: 15px;
-      fill: currentColor;
-    }
-    .badge.ok {
-      color: var(--success-color, #2e7d32);
-    }
-    .badge.warn {
-      color: var(--warning-color, #ffa600);
-    }
-    .badge.off,
-    .badge.muted {
-      color: var(--disabled-text-color, #9e9e9e);
-    }
-    .pill {
-      font-size: 0.7rem;
-      padding: 2px 8px;
-      border-radius: 10px;
-      background: var(--secondary-background-color, #eee);
-      color: var(--primary-text-color);
-      white-space: nowrap;
-    }
-    .pill.ok {
-      background: var(--success-color, #2e7d32);
-      color: var(--text-primary-color, #fff);
-    }
-    .pill.warn {
-      background: var(--warning-color, #ffa600);
-      color: var(--text-primary-color, #fff);
-    }
-    .pill.off {
-      background: var(--disabled-text-color, #9e9e9e);
-      color: var(--text-primary-color, #fff);
-    }
-    .job {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 12px;
-    }
-    .job-title {
-      font-size: 0.8rem;
-      color: var(--secondary-text-color);
-    }
-    .footer {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 8px 12px;
-      margin-top: 16px;
-    }
-    .refresh {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-      border: 1px solid var(--divider-color, #e0e0e0);
-      border-radius: 16px;
-      padding: 5px 12px;
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-      font: inherit;
-      font-size: 0.85rem;
-    }
-    .refresh svg {
-      width: 16px;
-      height: 16px;
-      fill: currentColor;
-    }
-    .refresh:disabled {
-      opacity: 0.6;
-      cursor: default;
-    }
-    .read-at {
-      color: var(--secondary-text-color);
-      font-size: 0.8rem;
-    }
-    .version {
-      margin-left: auto;
-      color: var(--secondary-text-color);
-      font-size: 0.75rem;
-    }
-    .reload {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-top: 12px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      background: var(--warning-color, #ffa600);
-      color: var(--text-primary-color, #fff);
-    }
-    .reload button {
-      cursor: pointer;
-      border: none;
-      border-radius: 6px;
-      padding: 4px 12px;
-      background: var(--primary-color, #03a9f4);
-      color: var(--text-primary-color, #fff);
-      font: inherit;
-    }
-  `;
+DanfossAllyRoomCard.styles = [
+  cardSharedStyles,
+  i$3`
+      .climate {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin: 12px 0 4px;
+      }
+      .metric {
+        display: flex;
+        flex-direction: column;
+      }
+      .big {
+        font-size: 2rem;
+        font-weight: 300;
+        line-height: 1.1;
+        color: var(--primary-text-color);
+      }
+      .big.heating {
+        color: var(--danfoss-comfort-color, var(--primary-color, #ff8a33));
+      }
+      .metric-label {
+        font-size: 0.85rem;
+        color: var(--secondary-text-color);
+      }
+      .setpoint {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .target {
+        font-size: 1.4rem;
+        font-variant-numeric: tabular-nums;
+        min-width: 3.5rem;
+        text-align: center;
+        color: var(--primary-text-color);
+      }
+      .step {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: 1px solid var(--divider-color, #e0e0e0);
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color);
+        cursor: pointer;
+      }
+      .step svg {
+        width: 20px;
+        height: 20px;
+        fill: currentColor;
+      }
+      .step:hover:not(:disabled) {
+        background: var(--secondary-background-color, #f0f0f0);
+      }
+      .step:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+    `
+];
 __decorateClass$1([
   n2({ attribute: false })
 ], DanfossAllyRoomCard.prototype, "hass", 2);
@@ -3380,19 +3118,6 @@ __decorateClass$1([
 DanfossAllyRoomCard = __decorateClass$1([
   t$1("danfoss-ally-room-card")
 ], DanfossAllyRoomCard);
-const ICON_MINUS = w`<svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14z" /></svg>`;
-const ICON_PLUS = w`<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z" /></svg>`;
-const ICON_ALERT = w`<svg viewBox="0 0 24 24"><path d="M13 14h-2V9h2m0 9h-2v-2h2M1 21h22L12 2z" /></svg>`;
-const ICON_WRENCH = w`<svg viewBox="0 0 24 24"><path d="M22.7 19 13.6 9.9c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z" /></svg>`;
-const ICON_WIFI = w`<svg viewBox="0 0 24 24"><path d="M12 21 2 9c5.5-5 14.5-5 20 0zm0-3.5 3.5-4.2a5.3 5.3 0 0 0-7 0z" /></svg>`;
-const ICON_WIFI_OFF = w`<svg viewBox="0 0 24 24"><path d="M2.3 4.3 1 5.6l2.3 2.3C2.8 8.3 2.4 8.6 2 9l10 12 3.3-4L18 19.7l1.3-1.4zM20.6 8.3A14 14 0 0 0 9.9 5.8l9.1 9.1 2.9-3.6c-.4-.3-.8-.7-1.3-1z" /></svg>`;
-const ICON_REFRESH = w`<svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z" /></svg>`;
-const ICON_EDIT = w`<svg viewBox="0 0 24 24"><path d="M20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.93l-3.75-3.75z" /></svg>`;
-const ICON_RESTORE = w`<svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l4 4 4-4H6a7 7 0 1 1 7 7c-1.9 0-3.6-.8-4.9-2l-1.4 1.4A9 9 0 1 0 13 3m-1 5v5l4 2 .7-1.2-3.2-1.9V8z" /></svg>`;
-const ICON_BATTERY = w`<svg viewBox="0 0 24 24"><path d="M16.67 4H15V2H9v2H7.33C6.6 4 6 4.6 6 5.33v15.33C6 21.4 6.6 22 7.33 22h9.33c.74 0 1.34-.6 1.34-1.33V5.33C18 4.6 17.4 4 16.67 4" /></svg>`;
-const ICON_VALVE = w`<svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7.76A4 4 0 1 0 15 16a4 4 0 0 0-2-3.24V5a1 1 0 0 1 2 0h2a3 3 0 0 0-3-3z" /></svg>`;
-const ICON_WINDOW = w`<svg viewBox="0 0 24 24"><path d="M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1m7 2H5v6h6zm2 0v6h6V5zm-2 8H5v6h6zm2 0v6h6v-6z" /></svg>`;
-const ICON_LOCK = w`<svg viewBox="0 0 24 24"><path d="M12 17a2 2 0 0 0 2-2 2 2 0 0 0-2-2 2 2 0 0 0-2 2 2 2 0 0 0 2 2m6-9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h1V6a5 5 0 0 1 10 0v2zM12 3a3 3 0 0 0-3 3v2h6V6a3 3 0 0 0-3-3" /></svg>`;
 function isSingleHead(room) {
   return room.kind === "single_head";
 }

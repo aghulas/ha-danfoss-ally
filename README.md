@@ -55,26 +55,34 @@ is no need to delete and re-add it.
 > [`docs/architecture.md`](docs/architecture.md) ("Tuya session and coexistence with the MCP
 > connector").
 
-## Embedded frontend (dashboard card)
+## Embedded frontend (dashboard cards and side panel)
 
-The integration **ships its own Lovelace card** `danfoss-ally-schedule-card` (a room's schedule).
-Nothing more to install: after installation via HACS and a restart, the card appears directly in the
-**card picker** ("Add card").
+The integration **ships its own Lovelace cards and sidebar panel**:
+
+- **`danfoss-ally-schedule-card`** — a room's weekly schedule (read and administrator edit).
+- **`danfoss-ally-room-card`** — a room at a glance (live temperature, mode, `±` setpoint adjustment via `climate.set_temperature`, comfort/setback chips, 7-day schedule strip, inline schedule editing, and per-head badges).
+- **`danfoss-ally-panel`** — the **"Danfoss Ally"** sidebar panel showing the building / fleet overview in read-only mode (totals banner, per-home holiday and gateway status, grouped rooms and single-head rooms, boiler relays).
+
+Nothing more to install: after installation via HACS and a restart, the cards appear directly in the
+**card picker** ("Add card") and the panel appears in the Home Assistant sidebar.
 
 ![Danfoss Ally Schedule card](docs/images/schedule-card.png)
 
-The card shows, read-only, for the chosen room: its name, the **comfort** and **setback** setpoints,
-the **seven-day grid** (comfort slots positioned over 24 h), the **head states** (online, schedule
-active, inconsistent, mounting — icons and tooltips), a **"refresh"** button and the **last-read
-date**. Light / dark theme via Home Assistant variables, keyboard-usable, `en` / `fr` texts. Editing
-will come later.
+In **read mode**, `danfoss-ally-schedule-card` shows for the chosen room: its name, the **comfort**
+and **setback** setpoints, the **seven-day grid** (comfort slots positioned over 24 h), the **head
+states** (online, schedule active, inconsistent, mounting — icons and tooltips), a **"refresh"**
+button and the **last-read date**. For an **administrator**, it also offers **schedule editing**
+(add, drag/resize or delete comfort slots, direct keyboard/mobile time input, live R1 transition
+counter `n / 6`, copy a day to other days, save modified days only, `WriteJob` tracking via
+WebSocket, and **"back to schedule"** when a head was left in manual mode). Light / dark theme via
+Home Assistant variables, keyboard-usable, `en` / `fr` texts.
 
 How it works:
 
 - the integration serves its frontend at URL `/danfoss_ally_cloud/frontend/` and declares the
-  resource `…/danfoss-ally-cloud.js?v=<version>` for **storage-mode** dashboards (the default) — no
-  manual step needed;
-- the card checks its version on load and **offers to reload** the page when a new version has been
+  resource `…/danfoss-ally-cloud.js?v=<version>` for **storage-mode** dashboards (the default), as
+  well as the `/danfoss-ally-cloud` custom panel — no manual step needed;
+- the cards check their version on load and **offer to reload** the page when a new version has been
   installed.
 
 ### YAML-mode dashboard
@@ -94,6 +102,13 @@ Then, in a manual card:
 
 ```yaml
 type: custom:danfoss-ally-schedule-card
+room_id: "13000000" # the room's group_id
+```
+
+or for the full room card:
+
+```yaml
+type: custom:danfoss-ally-room-card
 room_id: "13000000" # the room's group_id
 ```
 
@@ -223,7 +238,10 @@ it: `docs/cloud-mqtt-coverage.md`.
 
 ## Status
 
-**v0.1 — cloud read-only**: each head appears as a thermostat (temperature, setpoint); battery,
-valve-opening and fault-code sensors; online / window binary sensors. No write yet. Embedded
-frontend: `danfoss-ally-schedule-card` in **read** mode (setpoints, weekly grid, head states,
-refresh). See `docs/roadmap.md`.
+**v1.2 — three-channel routing (`cloud HTTP`, `Tuya cloud MQTT`, `local Zigbee tunnel`), embedded Lovelace cards and fleet panel**:
+- **Per-room devices**: aggregated thermostat (`climate`), durable comfort & setback `number` setpoints (group publish + schedule rewrite, R3), `schedule_active` binary sensor, `inconsistent_heads` count sensor.
+- **Per-head devices**: battery, valve opening, heat request and fault sensors; connectivity, open-window and `schedule_active` binary sensors; child-lock, open-window detection and (via local tunnel) preheat switches; isolated-head thermostat, setpoint bounds and comfort/setback/pause setpoints (via Tuya cloud MQTT when `enable_cloud_mqtt` is enabled).
+- **Per-home & boiler-relay devices**: holiday active & holiday setpoint sensors; boiler relay state and linked-rooms count sensors.
+- **Actions & WebSocket API**: schedule read/validate/set/copy/restore with `WriteJob` tracking, room create/rename/delete/attach/detach, relay-room binding, gated holiday writes, gated sub-device unbind, and local-tunnel survey/override/descaling.
+- **MQTT publishing**: `discovery` and `zigbee2mqtt` modes.
+- **Embedded frontend**: `danfoss-ally-schedule-card` (read & edit), `danfoss-ally-room-card`, and `danfoss-ally-panel` (fleet overview). See [`docs/architecture.md`](docs/architecture.md) and [`docs/roadmap.md`](docs/roadmap.md).
