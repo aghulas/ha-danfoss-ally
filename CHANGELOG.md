@@ -16,7 +16,8 @@ except for the refusals listed under "Changed", which are deliberate.
   and the hold over a night are not established; DP 1 stays a closed candidate.
 - **Not validated on real hardware**: the isolated-head thermostat write, the runtime creation and
   retirement of entities, the embedded schedule editor and the editor fixes, the schedule-write
-  guards, the device actions and the polling backoff (unit tests only).
+  guards, the device actions, the polling backoff, the reconfigure step and the Repairs issues
+  (unit tests only).
 
 **Known issue, not fixed in this release.** A preheat change written by the preheat switch (local
 tunnel only) does not survive the night: on 2026-11-19/20, heads whose preheat differed from the
@@ -50,6 +51,13 @@ cloud's value were back to the cloud's value by about 05:00, with no write from 
   source: the icons hard-coded in the entities are gone, so a few fixed icons change.
 - **Building overview**: each gateway of `get_overview` says what it carries (`head_count`,
   `relay_count`).
+
+- **Reconfigure step**: the region, country code, password or installation secrets of an entry
+  can be changed from its page without deleting it (fields left empty keep their value). The
+  account cannot be changed there, and the new values are checked by a real sign-in before the
+  entry is updated and reloaded.
+- **Repairs issues**: a warning for an offline gateway and for a head reporting a hardware fault,
+  removed automatically when the device recovers or the entry is unloaded. No secret in them.
 
 ### Changed
 
@@ -87,6 +95,12 @@ cloud's value were back to the cloud's value by about 05:00, with no write from 
   confirmed) when the link stops.
 - `operations.py` is split into `ops_common`, `ops_views`, `ops_rooms` and `ops_local`
   (re-exported from `operations`; no behaviour change).
+
+- **Password and installation secrets are typed in masked fields** in the user, re-authentication
+  and reconfigure steps, instead of plain text fields shown on screen.
+- Manifest: `pycryptodome` is a version range instead of an exact pin, to coexist with other
+  integrations; `tinytuya` stays on an exact version on purpose (the local tunnel rides it for a
+  reverse-engineered protocol). `loggers` is declared.
 
 ### Fixed
 
