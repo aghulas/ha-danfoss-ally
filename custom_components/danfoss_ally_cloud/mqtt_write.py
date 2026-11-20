@@ -12,8 +12,9 @@ so they all follow the same rule (docs/architecture.md, "Rules for adding a rout
    the cloud returns.
 
 Preheat (DP 1) is the exception to rule 3: the echo and the cloud read may both answer from the
-gateway's cache. ``async_mqtt_write`` refuses it; ``async_mqtt_write_preheat`` publishes it and
-accepts ONE confirmation only, the head's attribute 0x0025 read through the local tunnel.
+gateway's cache. ``async_mqtt_write`` refuses it; ``async_mqtt_write_preheat`` publishes it, posts
+the settings block as the app does, and accepts ONE confirmation only, the head's attribute 0x0025
+read through the local tunnel.
 """
 
 from __future__ import annotations
@@ -28,7 +29,14 @@ from homeassistant.exceptions import HomeAssistantError
 from .api import MQTT_TUNNEL_CONFIRMED_DPS, CloudError, DanfossDevice, mqtt_write_value
 from .api.local.manager import Head
 from .api.mqtt_client import CloudMqttLink
-from .const import DATA_MQTT_SUPERVISED_DPS, DATA_MQTT_SUPERVISED_HEAD
+from .const import (
+    DATA_MQTT_SUPERVISED_DPS,
+    DATA_MQTT_SUPERVISED_HEAD,
+    DP_AT_HOME_SETPOINT,
+    DP_HOLIDAY_SETPOINT,
+    DP_LEAVING_HOME_SETPOINT,
+    DP_PREHEAT,
+)
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,15 +51,43 @@ CONFIRMED_BY_CLOUD = "cloud"
 CONFIRMED_BY_TUNNEL = "tunnel"
 UNCHANGED = "unchanged"  # the head already had the value: nothing was published
 
-DP_PREHEAT = 1
 # Preheat over cloud MQTT is confirmed by the local tunnel only. The head is read every
 # PREHEAT_CONFIRM_INTERVAL seconds until its attribute 0x0025 shows the value, for at most
-# PREHEAT_CONFIRM_TIMEOUT seconds (the stop rule of docs/first-write-procedure.md: an independent
-# source that does not show the change within about a minute is the "accepted but not applied"
-# failure). One tunnel read takes several seconds, hence the interval; the last read starts before
-# the deadline and may end after it, so the error reports the time really elapsed.
-PREHEAT_CONFIRM_TIMEOUT = 60.0
+# PREHEAT_CONFIRM_TIMEOUT seconds. The app's own toggle was seen on the head 20 to 60 s later
+# (2026-11-20, three toggles on one head): the head is reprogrammed through the Zigbee tunnel after
+# the toggle, which takes that long. Two minutes leaves a margin; past it, the write is the
+# "accepted but not applied" failure. One tunnel read takes several seconds, hence the interval;
+# the last read starts before the deadline and may end after it, so the error reports the time
+# really elapsed.
+PREHEAT_CONFIRM_TIMEOUT = 120.0
 PREHEAT_CONFIRM_INTERVAL = 10.0
+
+# The app's "Settings" block: after publishing a setting of this block over MQTT, the app also
+# posts the WHOLE block through ``settings.change`` (the cloud-side store of the workflow, contract
+# §4.2). Keys in the order the app sends them.
+SETTINGS_BLOCK_DPS: tuple[int, ...] = (
+    DP_PREHEAT,
+    DP_AT_HOME_SETPOINT,
+    DP_LEAVING_HOME_SETPOINT,
+    DP_HOLIDAY_SETPOINT,
+)
+
+
+def settings_block(dev: DanfossDevice, changed: dict[int, Any]) -> dict[str, object]:
+    """The whole settings block to post after a write of one of its settings: the head's current
+    values, as the cloud holds them, with ``changed`` applied. Raises ``HomeAssistantError`` when a
+    value of the block is unknown: the block is sent whole or not at all, never with a guessed
+    value."""
+    block: dict[str, object] = {}
+    for dp in SETTINGS_BLOCK_DPS:
+        value = changed.get(dp, dev.dps.get(str(dp)))
+        if value is None or value == "":
+            raise HomeAssistantError(
+                f"write refused: DP {dp} of the head's settings block is unknown, so the block "
+                "the app posts with a change of that block cannot be built"
+            )
+        block[str(dp)] = value
+    return block
 
 
 def supervised_for(entry_data: dict[str, Any], device_id: str) -> frozenset[int]:
@@ -139,30 +175,39 @@ async def async_mqtt_write(
 
 async def async_mqtt_write_preheat(
     local: DanfossLocalCoordinator,
+    coordinator: DanfossCoordinator,
     link: CloudMqttLink,
     dev: DanfossDevice,
     active: bool,
     *,
     supervised: frozenset[int] = frozenset(),
 ) -> str:
-    """Publish preheat (``{"1": active}``) to ``dev`` over cloud MQTT and confirm it through the
-    LOCAL TUNNEL only. Returns ``CONFIRMED_BY_TUNNEL``, or ``UNCHANGED`` when the head already had
-    the value (nothing is published then: an unchanged head would prove nothing).
+    """Write preheat on ``dev`` the way the app is understood to (publish ``{"1": active}`` over
+    cloud MQTT, then post the whole settings block through ``settings.change``) and confirm it
+    through the LOCAL TUNNEL only. Returns ``CONFIRMED_BY_TUNNEL``, or ``UNCHANGED`` when the head
+    already had the value (nothing is sent then: an unchanged head would prove nothing).
 
-    The gateway's echo and the cloud's DP 1 are deliberately ignored: over HTTP, DP 1 only changed
-    the gateway cache while the head's real preheat (attribute 0x0025, bit 1) did not move. So:
+    Why both calls: the MQTT publish alone changed the cloud's DP 1 and not the head (supervised
+    write of 2026-11-20), while the app's toggle is followed by a reprogramming of the head through
+    the Zigbee tunnel. The settings block is what the app posts next to the publish for the
+    settings of that block; whether that pair is what triggers the reprogramming is NOT proven —
+    this function is the trial of it (docs/cloud-mqtt-preheat-proposal.md).
 
-    - the head is read through the tunnel BEFORE the publish; without an answer nothing is sent,
-      since the write could not be confirmed afterwards;
-    - after the publish the head is read again until it shows the value, or a clear error is
+    The gateway's echo and the cloud's DP 1 are deliberately ignored: they showed the new value
+    while the head had not moved. So:
+
+    - the settings block is built first; if a value of it is unknown nothing is sent;
+    - the head is read through the tunnel BEFORE anything is sent; without an answer nothing is
+      sent, since the write could not be confirmed afterwards;
+    - after the two calls the head is read again until it shows the value, or a clear error is
       raised. Every read updates the preheat switch, which therefore only ever shows what the head
       itself said (unavailable when it did not answer).
 
     Limit, by design: this function cannot put the CLOUD's DP 1 back in step with the head. After
-    a "not confirmed" (the gateway cache may have taken the value while the head did not), asking
-    for the head's own value again returns ``UNCHANGED`` and publishes nothing, because a publish
-    the head has no reason to react to could not be confirmed by the tunnel. That resynchronisation
-    is done from the Danfoss app (docs/first-write-procedure.md, DP 1 sheet)."""
+    a "not confirmed" (the cloud may have taken the value while the head did not), asking for the
+    head's own value again returns ``UNCHANGED`` and sends nothing, because a write the head has no
+    reason to react to could not be confirmed by the tunnel. That resynchronisation is done from
+    the Danfoss app (docs/first-write-procedure.md, DP 1 sheet)."""
     if not dev.node_id or not dev.mesh_id:
         raise HomeAssistantError(
             "cloud-MQTT write impossible: the head's gateway address is unknown"
@@ -171,6 +216,8 @@ async def async_mqtt_write_preheat(
         value = mqtt_write_value(DP_PREHEAT, active, supervised)
     except CloudError as err:
         raise HomeAssistantError(f"cloud-MQTT write refused: {err}") from err
+    # Build the HTTP block BEFORE anything is sent: if it cannot be built, nothing goes out.
+    block = settings_block(dev, {DP_PREHEAT: value})
     head = Head(dev.id, dev.node_id, dev.mesh_id)
 
     before = await local.async_refresh_head(head)
@@ -186,9 +233,19 @@ async def async_mqtt_write_preheat(
         await link.publish_dp(dev.mesh_id, dev.node_id, {str(DP_PREHEAT): value})
     except Exception as err:  # noqa: BLE001 - surface any send failure, never a blind write
         raise HomeAssistantError(f"cloud-MQTT write failed: {err}") from err
-
     loop = asyncio.get_running_loop()
     sent_at = loop.time()
+    try:
+        # ``gwId`` = the head's own devId for this block, as the app sends it.
+        await coordinator.client.async_write_setting(dev.id, dev.product_id or "", block)
+    except CloudError as err:
+        await local.async_refresh_head(head)  # show what the head says, whatever happened
+        raise HomeAssistantError(
+            "cloud-MQTT preheat write incomplete: the frame was sent, but the settings block "
+            f"was refused by the cloud ({err}). The cloud's DP 1 may now differ from the head: "
+            "read both again before any other write"
+        ) from err
+
     deadline = sent_at + PREHEAT_CONFIRM_TIMEOUT
     while True:
         await asyncio.sleep(PREHEAT_CONFIRM_INTERVAL)
@@ -200,10 +257,10 @@ async def async_mqtt_write_preheat(
             return CONFIRMED_BY_TUNNEL
         if loop.time() >= deadline:
             raise HomeAssistantError(
-                "cloud-MQTT preheat write not confirmed: the frame was sent, and "
-                f"{loop.time() - sent_at:.0f} s later the head's attribute 0x0025, read through "
-                "the local tunnel, does not show the value (the gateway's echo and the cloud are "
-                "not accepted as confirmation for preheat). The head may still apply it later, "
-                "and the cloud's DP 1 may now differ from the head: read both again before "
-                "any other write"
+                "cloud-MQTT preheat write not confirmed: the frame and the settings block were "
+                f"sent, and {loop.time() - sent_at:.0f} s later the head's attribute 0x0025, "
+                "read through the local tunnel, does not show the value (the gateway's echo and "
+                "the cloud are not accepted as confirmation for preheat). The head may still "
+                "apply it later, and the cloud's DP 1 may now differ from the head: read both "
+                "again before any other write"
             )

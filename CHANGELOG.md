@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Preheat (DP 1) cloud-MQTT candidate: the trial write now also posts the settings block.**
+  Still closed by default and confirmed by the local tunnel only. The supervised write of
+  2026-11-20 showed that the bare `{"1": bool}` publish changes the cloud's DP 1 and not the
+  head, and a listen showed that the app's own toggle is followed by a reprogramming of the head
+  through the Zigbee tunnel. The candidate write therefore publishes DP 1 and then posts the whole
+  settings block through `settings.change`, as the app does for the settings of that block; the
+  tunnel confirmation window goes from 60 to 120 s. **Not tried on real hardware yet.** Nothing
+  changes for an install that has not armed the trial (docs/cloud-mqtt-preheat-proposal.md).
+
 ## 1.2.0 — Cloud-MQTT channel for isolated heads (gated), non-blocking local start, stale cleanup, reauth
 
 Minor release. It gathers the sections previously listed as unreleased: the gated cloud-MQTT write

@@ -59,11 +59,9 @@ from .const import (
     DATA_MQTT_LINK,
     DOMAIN,
     DP_AT_HOME_SETPOINT,
-    DP_HOLIDAY_SETPOINT,
     DP_LEAVING_HOME_SETPOINT,
     DP_LOWER_TEMP,
     DP_PAUSE_SETPOINT,
-    DP_PREHEAT,
     DP_TEMP_SET,
     DP_UPPER_TEMP,
     MODE_GROUP_SETPOINT_DP,
@@ -74,7 +72,12 @@ from .const import (
 )
 from .coordinator import DanfossCoordinator
 from .entity import DanfossEntity
-from .mqtt_write import async_mqtt_write, supervised_for
+from .mqtt_write import (  # noqa: F401 - block helpers re-exported
+    SETTINGS_BLOCK_DPS,
+    async_mqtt_write,
+    settings_block,
+    supervised_for,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -410,17 +413,6 @@ class DanfossHeadBound(_HeadMqttNumber):
 
 # --- isolated head: comfort / setback / pause setpoints over Tuya cloud MQTT ----------------------
 
-# The app's "Settings" block: after publishing a setpoint of this block over MQTT, the app also
-# posts the WHOLE block through ``settings.change`` (the cloud-side store of the workflow, contract
-# §4.2). Keys in the order the app sends them.
-SETTINGS_BLOCK_DPS: tuple[int, ...] = (
-    DP_PREHEAT,
-    DP_AT_HOME_SETPOINT,
-    DP_LEAVING_HOME_SETPOINT,
-    DP_HOLIDAY_SETPOINT,
-)
-
-
 # Modes (cloud DP 2) in which a head follows its weekly schedule. A write that carries DP 16
 # (``temp_set``, the head's effective setpoint) is proven in these only: the head goes back to its
 # schedule's value by itself. In manual, pause or holiday mode nothing observed says the current
@@ -471,22 +463,6 @@ HEAD_SETPOINTS: tuple[HeadSetpointDescription, ...] = (
         dp=DP_PAUSE_SETPOINT,
     ),
 )
-
-
-def settings_block(dev: DanfossDevice, changed: dict[int, int]) -> dict[str, object]:
-    """The whole settings block to post after a setpoint write: the head's current values, as the
-    cloud holds them, with ``changed`` applied. Raises ``HomeAssistantError`` when a value of the
-    block is unknown: the block is sent whole or not at all, never with a guessed value."""
-    block: dict[str, object] = {}
-    for dp in SETTINGS_BLOCK_DPS:
-        value = changed.get(dp, dev.dps.get(str(dp)))
-        if value is None or value == "":
-            raise HomeAssistantError(
-                f"setpoint write refused: DP {dp} of the head's settings block is unknown, so the "
-                "block the app posts with a setpoint change cannot be built"
-            )
-        block[str(dp)] = value
-    return block
 
 
 class DanfossHeadSetpoint(_HeadMqttNumber):

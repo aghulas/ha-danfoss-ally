@@ -5,6 +5,7 @@ cloud read are never accepted for it; only the head's attribute 0x0025, read thr
 confirms a write. Doubles only, synthetic data.
 """
 
+import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import paho.mqtt.client as paho
@@ -14,7 +15,12 @@ from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.danfoss_ally_cloud import mqtt_write
-from custom_components.danfoss_ally_cloud.api import CloudWriteError, GatewayKey, writes
+from custom_components.danfoss_ally_cloud.api import (
+    CloudError,
+    CloudWriteError,
+    GatewayKey,
+    writes,
+)
 from custom_components.danfoss_ally_cloud.const import (
     CONF_CLOUD_MQTT_SUPERVISED_DPS,
     CONF_CLOUD_MQTT_SUPERVISED_HEAD,
@@ -31,11 +37,27 @@ from custom_components.danfoss_ally_cloud.mqtt_write import (
 )
 from custom_components.danfoss_ally_cloud.switch import PATH_LOCAL, PATH_MQTT, DanfossPreheat
 
-from .common import ENTRY_DATA, FakeCloudClient, head
+from .common import ENTRY_DATA, FakeCloudClient
+from .common import head as _bare_head
 from .test_coordinator_local import FakeManager
 from .test_mqtt_client import _FakePaho
 
 _ARMED = frozenset({1})
+# The cloud's values of the app's settings block (preheat, comfort, setback, holiday setpoints).
+_BLOCK = {"1": False, "118": 210, "119": 140, "121": 145}
+
+
+def head(*args, **kw):
+    """A synthetic head whose cloud DPs carry the settings block."""
+    kw.setdefault("dps", dict(_BLOCK))
+    return _bare_head(*args, **kw)
+
+
+def _cloud(write_setting=None):
+    """Double of the cloud coordinator: only the HTTP settings call is used."""
+    cloud = MagicMock()
+    cloud.client.async_write_setting = write_setting or AsyncMock()
+    return cloud
 
 
 @pytest.fixture(autouse=True)
@@ -111,7 +133,7 @@ async def test_generic_mqtt_write_refuses_dp1_even_when_armed():
 async def test_preheat_write_closed_by_default_sends_and_reads_nothing():
     local, link = _Local([False]), _link()
     with pytest.raises(HomeAssistantError, match="supervised first write"):
-        await async_mqtt_write_preheat(local, link, head(), True)
+        await async_mqtt_write_preheat(local, _cloud(), link, head(), True)
     assert local.read_heads == []
     link.publish_dp.assert_not_awaited()
 
@@ -119,20 +141,25 @@ async def test_preheat_write_closed_by_default_sends_and_reads_nothing():
 async def test_preheat_write_refused_when_the_tunnel_does_not_answer_first():
     local, link = _Local([None]), _link()
     with pytest.raises(HomeAssistantError, match="does not answer through the local tunnel"):
-        await async_mqtt_write_preheat(local, link, head(), True, supervised=_ARMED)
+        await async_mqtt_write_preheat(local, _cloud(), link, head(), True, supervised=_ARMED)
     link.publish_dp.assert_not_awaited()
 
 
 async def test_preheat_write_needs_the_gateway_address():
     local, link = _Local([False]), _link()
     with pytest.raises(HomeAssistantError, match="gateway address"):
-        await async_mqtt_write_preheat(local, link, head(node_id=None), True, supervised=_ARMED)
+        await async_mqtt_write_preheat(
+            local, _cloud(), link, head(node_id=None), True, supervised=_ARMED
+        )
     link.publish_dp.assert_not_awaited()
 
 
 async def test_preheat_already_at_the_value_publishes_nothing():
     local, link = _Local([True]), _link()
-    assert await async_mqtt_write_preheat(local, link, head(), True, supervised=_ARMED) == UNCHANGED
+    assert (
+        await async_mqtt_write_preheat(local, _cloud(), link, head(), True, supervised=_ARMED)
+        == UNCHANGED
+    )
     link.publish_dp.assert_not_awaited()
 
 
@@ -140,9 +167,17 @@ async def test_preheat_confirmed_by_the_tunnel_read(monkeypatch):
     monkeypatch.setattr(mqtt_write, "PREHEAT_CONFIRM_TIMEOUT", 60.0)
     local, link = _Local([False, False, True]), _link()  # before, still old, then the new value
     dev = head("dev-1", node_id="node-1", mesh_id="gw-1")
-    result = await async_mqtt_write_preheat(local, link, dev, True, supervised=_ARMED)
+    order: list[str] = []
+    link.publish_dp.side_effect = lambda *a: order.append("mqtt")
+    cloud = _cloud(AsyncMock(side_effect=lambda *a: order.append("http")))
+    result = await async_mqtt_write_preheat(local, cloud, link, dev, True, supervised=_ARMED)
     assert result == CONFIRMED_BY_TUNNEL
     link.publish_dp.assert_awaited_once_with("gw-1", "node-1", {"1": True})
+    # Then the WHOLE settings block over HTTP, as the app does, with only DP 1 changed.
+    cloud.client.async_write_setting.assert_awaited_once_with(
+        "dev-1", "03wvrwpv", {"1": True, "118": 210, "119": 140, "121": 145}
+    )
+    assert order == ["mqtt", "http"]
     assert [(h.dev_id, h.node_id, h.gateway_id) for h in local.read_heads] == [
         ("dev-1", "node-1", "gw-1")
     ] * 3
@@ -153,9 +188,9 @@ async def test_preheat_not_confirmed_when_the_head_does_not_change():
     """The "accepted but not applied" case: the gateway would echo, the head keeps its value."""
     local, link = _Local([False, False]), _link()
     with pytest.raises(HomeAssistantError, match="not confirmed") as err:
-        await async_mqtt_write_preheat(local, link, head(), True, supervised=_ARMED)
+        await async_mqtt_write_preheat(local, _cloud(), link, head(), True, supervised=_ARMED)
     # The message does not claim more than is known: the frame left, and may still apply later.
-    assert "the frame was sent" in str(err.value)
+    assert "the frame and the settings block were sent" in str(err.value)
     assert " s later" in str(err.value)  # the time really elapsed, not the nominal timeout
     assert "may still apply it later" in str(err.value)
     link.publish_dp.assert_awaited_once()
@@ -169,9 +204,10 @@ async def test_toggling_back_after_a_failed_trial_publishes_nothing():
     the Danfoss app (DP 1 sheet of docs/first-write-procedure.md), never by a blind publish."""
     local, link = _Local([False, False, False]), _link()
     with pytest.raises(HomeAssistantError, match="not confirmed"):
-        await async_mqtt_write_preheat(local, link, head(), True, supervised=_ARMED)
+        await async_mqtt_write_preheat(local, _cloud(), link, head(), True, supervised=_ARMED)
     assert (
-        await async_mqtt_write_preheat(local, link, head(), False, supervised=_ARMED) == UNCHANGED
+        await async_mqtt_write_preheat(local, _cloud(), link, head(), False, supervised=_ARMED)
+        == UNCHANGED
     )
     link.publish_dp.assert_awaited_once_with("gw-1", "node-1", {"1": True})  # the trial only
 
@@ -179,16 +215,49 @@ async def test_toggling_back_after_a_failed_trial_publishes_nothing():
 async def test_preheat_not_confirmed_when_the_tunnel_stops_answering():
     local, link = _Local([False, None]), _link()
     with pytest.raises(HomeAssistantError, match="not confirmed"):
-        await async_mqtt_write_preheat(local, link, head(), True, supervised=_ARMED)
+        await async_mqtt_write_preheat(local, _cloud(), link, head(), True, supervised=_ARMED)
     assert local.data["dev-1"] is None  # unknown: the switch is unavailable, not optimistic
+
+
+async def test_preheat_refused_when_the_settings_block_cannot_be_built():
+    """A value of the block unknown in the cloud: nothing is read, nothing is sent."""
+    local, link, cloud = _Local([False]), _link(), _cloud()
+    dev = head(dps={"1": False, "118": 210, "119": 140})  # DP 121 missing
+    with pytest.raises(HomeAssistantError, match="settings block is unknown"):
+        await async_mqtt_write_preheat(local, cloud, link, dev, True, supervised=_ARMED)
+    assert local.read_heads == []
+    link.publish_dp.assert_not_awaited()
+    cloud.client.async_write_setting.assert_not_awaited()
+
+
+async def test_preheat_settings_block_refused_by_the_cloud_is_surfaced():
+    """The frame left, the HTTP block was refused: a clear error, and the head is read once so the
+    switch shows what it says. No confirmation loop: the trial is of the pair, not of the frame."""
+    local, link = _Local([False, False]), _link()
+    cloud = _cloud(AsyncMock(side_effect=CloudError("refused")))
+    with pytest.raises(HomeAssistantError, match="settings block was refused"):
+        await async_mqtt_write_preheat(local, cloud, link, head(), True, supervised=_ARMED)
+    link.publish_dp.assert_awaited_once()
+    assert len(local.read_heads) == 2
+    assert local.data["dev-1"] is False
+
+
+async def test_nothing_goes_over_http_when_nothing_is_published():
+    for reads in ([None], [True]):  # tunnel silent; head already at the value
+        local, link, cloud = _Local(reads), _link(), _cloud()
+        with contextlib.suppress(HomeAssistantError):
+            await async_mqtt_write_preheat(local, cloud, link, head(), True, supervised=_ARMED)
+        cloud.client.async_write_setting.assert_not_awaited()
 
 
 async def test_preheat_publish_failure_is_surfaced():
     local, link = _Local([False]), _link()
     link.publish_dp.side_effect = RuntimeError("not connected")
+    cloud = _cloud()
     with pytest.raises(HomeAssistantError, match="write failed"):
-        await async_mqtt_write_preheat(local, link, head(), True, supervised=_ARMED)
+        await async_mqtt_write_preheat(local, cloud, link, head(), True, supervised=_ARMED)
     assert len(local.read_heads) == 1  # no read-back loop after a failed send
+    cloud.client.async_write_setting.assert_not_awaited()  # and no HTTP block either
 
 
 # --- the preheat switch -------------------------------------------------------------------------
@@ -199,6 +268,7 @@ def _switch(local, link, *, enabled=True, supervised=_ARMED, dev=None, grouped=F
     cloud = MagicMock()
     cloud.data = {dev.id: dev}
     cloud.group_of = MagicMock(return_value="g-synth" if grouped else None)
+    cloud.client.async_write_setting = AsyncMock()
     ent = DanfossPreheat(local, cloud, dev.id, link, enabled, supervised)
     ent.hass = MagicMock()
     ent.hass.async_add_executor_job = AsyncMock(
@@ -218,6 +288,7 @@ async def test_switch_on_trial_writes_over_mqtt_and_never_through_the_tunnel(mon
     }
     await ent.async_turn_on()
     link.publish_dp.assert_awaited_once_with("gw-1", "node-1", {"1": True})
+    ent._cloud.client.async_write_setting.assert_awaited_once()
     local.manager.write_preheat.assert_not_called()
 
 

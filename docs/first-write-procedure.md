@@ -218,8 +218,10 @@ nothing here; **only `0x0025` read through the local tunnel does**. Background a
 
 Result on 2026-11-20 (tables in the proposal): stage A positive — the app's toggle reached the head
 within a minute; stage B **not passed** — the integration's `{"1": true}` changed the cloud's DP 1
-and not the head, 15 minutes later still. DP 1 stays a closed candidate. Do not repeat stage B
-with the same frame: change what is sent first (see the proposal's open question).
+and not the head, 15 minutes later still. DP 1 stays a closed candidate. A listen the same day
+showed that the app's toggle is followed by a reprogramming of the head through the Zigbee tunnel,
+which the bare publish does not trigger. The write was changed accordingly (below): **stage B is
+to be run again with it; the earlier result says nothing about the new write.**
 
 Preconditions for both, on top of the generic ones: the local tunnel answers **this head** right
 before starting (its preheat switch has a value, not "unavailable"), and a raw read of `0x0025`
@@ -256,7 +258,10 @@ Reading the result:
 
 **Stage B — supervised write from the integration** (generic procedure, with these specifics).
 
-- **What is sent**: one MQTT frame `{"1": bool}`.
+- **What is sent**: one MQTT frame `{"1": bool}`, then `settings.change` over HTTP with the whole
+  settings block `{"1", "118", "119", "121"}` (the cloud's current values, DP 1 changed), as the
+  app does for the settings of that block. Whether that pair is what makes the cloud reprogram the
+  head is the question of this trial. If a value of the block is unknown, nothing is sent.
 - **Arm**: `enable_local` and `enable_cloud_mqtt` on, the test head designated, DP 1 ticked.
   Without `enable_local` there is no preheat switch at all, so ticking DP 1 does nothing. The
   head's preheat switch must show `write_path: cloud_mqtt` and `write_trial: true`; the preheat
@@ -264,9 +269,13 @@ Reading the result:
   head's preheat: with the MQTT link down the write fails instead of falling back.
 - **Trial value**: the opposite of `V0`'s bit 1.
 - **What the call does**: reads the head through the tunnel first (no answer → nothing sent;
-  already at the value → nothing sent), publishes, then reads the head every 10 s for 60 s at most.
-  It returns only when bit 1 shows the value; otherwise it raises "not confirmed". The echo and the
-  cloud are not consulted.
+  already at the value → nothing sent), publishes, posts the block, then reads the head every 10 s
+  for 120 s at most (the app's toggle took 20 to 60 s to show on the head). It returns only when
+  bit 1 shows the value; otherwise it raises "not confirmed". The echo and the cloud are not
+  consulted. A caller that times out before that (60 s for some clients) has not failed the write:
+  read the task's result, do not resend.
+- **Also check**, since the cloud may rewrite the schedule: the head's weekly schedule and
+  current setpoint through the tunnel, before and after — they must be unchanged.
 - **Independent read-back** by the supervisor: raw `0x0025` through the tunnel (bit 1 at the new
   value, **bit 0 unchanged** — the code does not check bit 0), then the app, then cloud DP 1 and
   DP 172 for the record.
