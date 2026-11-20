@@ -471,6 +471,8 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   | 119 | Setback setpoint | **Proven** (2026-11-19, tunnel and app), on a head following its schedule | same check. `{"119": v}` alone (no DP 109) |
   | 1 | Preheat | **Candidate**, supervised write **not passed** (2026-11-20: the publish changed the cloud's DP 1, not the head, while the app's own toggle did reach it). Confirmed by the local tunnel only (attribute `0x0025`, bit 1): the gateway's echo and the cloud read are not accepted | boolean; the head must answer through the tunnel before anything is sent |
   | 120 | Pause setpoint | **Proven** (see above) | same check. `{"120": v}` |
+  | 133 | Orientation (mounting vertical / horizontal) | **Candidate**, not tried. Confirmed by the local tunnel only (Danfoss attribute `0x4014`, the flag read back); the echo and the cloud's DP 133 are not accepted | exactly `"Vertical"` or `"Horizontal"`; the head must give its flag through the tunnel, and the flag and the cloud's DP 133 must agree under false = horizontal (Zigbee2MQTT's reading, not established) before anything is sent |
+  | 101 | Viewing direction | **Candidate**, not tried. Confirmed by the per-device cloud route only (the echo is not accepted; the tunnel does not read the user-interface cluster); the proof that the head applied it is its display | boolean; the per-device route must give DP 101 before anything is sent |
 
   Observed during the 2026-11-19 writes, on an isolated head: raising the lower bound above the
   head's current setpoint does **not** move that setpoint (the head kept 5 °C under a 6 °C bound);
@@ -730,6 +732,15 @@ by the MCP connector (`smartlife.m.*` family; the APK also exposes the `thing.m.
   the read that gave the value). Unavailable until read once and while the head is offline; a
   head that misses a pass keeps its last value. Value tables and their real-hardware status:
   `docs/zigbee2mqtt-alignment.md` §6.
+- Only on the head designated for a supervised trial, while the trial of the DP is armed
+  (`enable_cloud_mqtt` on, DP ticked, isolated head of a verified model), config category: a
+  `switch` "viewing direction" (DP 101, state = the cloud's DP 101, unavailable when absent) and a
+  `select` "mounting orientation" (`horizontal` / `vertical`, DP 133, also needs the local tunnel;
+  state = the head's flag `0x4014` read through the tunnel, the cloud's value in `cloud_value`;
+  unavailable after a write that was sent and not confirmed, until the head is read again).
+  Attributes `write_path`, `write_scope`, `write_trial`, and the last attempt's `trial_result`,
+  `trial_at`, `trial_error`. Removed from the registry when the trial is disarmed. Writes and
+  their confirmation: §4.2; procedure: docs/viewing-orientation-trial.md.
 - **Thermostat (`climate`)**: no `comfort` / `setback` / `holiday` preset tied to DP 2 (R5).
   **Durable setpoint write at the room level**: in modes `comfort` (`at_home`) and `setback`
   (`leaving_home`), changing the temperature publishes the setpoint on the group then rewrites one

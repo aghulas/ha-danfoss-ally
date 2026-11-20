@@ -15,6 +15,13 @@ Preheat (DP 1) is the exception to rule 3: the echo and the cloud read may both 
 gateway's cache. ``async_mqtt_write`` refuses it; ``async_mqtt_write_preheat`` publishes it, posts
 the settings block as the app does, and accepts ONE confirmation only, the head's attribute 0x0025
 read through the local tunnel.
+
+Viewing direction (DP 101) and orientation (DP 133) are candidates too (batch C of
+docs/zigbee2mqtt-alignment.md), each with its own confirmation and never the echo:
+``async_mqtt_write_orientation`` reads the head's flag 0x4014 back through the tunnel;
+``async_mqtt_write_viewing_direction`` reads the per-device cloud route (the tunnel does not read
+the user-interface cluster), the trial's proof being the head's display
+(docs/viewing-orientation-trial.md).
 """
 
 from __future__ import annotations
@@ -26,16 +33,27 @@ from typing import Any
 
 from homeassistant.exceptions import HomeAssistantError
 
-from .api import MQTT_TUNNEL_CONFIRMED_DPS, CloudError, DanfossDevice, mqtt_write_value
+from .api import (
+    MQTT_CLOUD_CONFIRMED_DPS,
+    MQTT_TUNNEL_CONFIRMED_DPS,
+    CloudError,
+    DanfossDevice,
+    mqtt_dp_open,
+    mqtt_write_value,
+    write_allowed,
+)
 from .api.local.manager import Head
 from .api.mqtt_client import CloudMqttLink
 from .const import (
+    DATA_CLOUD_MQTT,
     DATA_MQTT_SUPERVISED_DPS,
     DATA_MQTT_SUPERVISED_HEAD,
     DP_AT_HOME_SETPOINT,
     DP_HOLIDAY_SETPOINT,
     DP_LEAVING_HOME_SETPOINT,
+    DP_ORIENTATION,
     DP_PREHEAT,
+    DP_VIEWING_DIRECTION,
 )
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 
@@ -128,6 +146,13 @@ async def async_mqtt_write(
         raise HomeAssistantError(
             f"cloud-MQTT write refused: DP {unconfirmable} can only be confirmed through the "
             "local tunnel"
+        )
+    echo_untrusted = sorted(MQTT_CLOUD_CONFIRMED_DPS.intersection(dps))
+    if echo_untrusted:
+        # The echo would be accepted here: these DPs have their own write and confirmation.
+        raise HomeAssistantError(
+            f"cloud-MQTT write refused: DP {echo_untrusted} is confirmed by its own supervised "
+            "write only (the gateway's echo is not accepted)"
         )
     try:
         values = {dp: mqtt_write_value(dp, value, supervised) for dp, value in dps.items()}
@@ -263,4 +288,185 @@ async def async_mqtt_write_preheat(
                 "the cloud are not accepted as confirmation for preheat). The head may still "
                 "apply it later, and the cloud's DP 1 may now differ from the head: read both "
                 "again before any other write"
+            )
+
+
+class WriteNotConfirmed(HomeAssistantError):
+    """A supervised trial write sent its frame (or may have) and nothing confirmed it: what the
+    entity showed before can no longer be trusted until the head is read again."""
+
+
+# --- supervised trials of batch C: viewing direction (DP 101) and orientation (DP 133) ---------
+
+# Orientation: the head's flag 0x4014 is read through the tunnel (two frames, several seconds)
+# every ORIENTATION_CONFIRM_INTERVAL seconds, for at most ORIENTATION_CONFIRM_TIMEOUT seconds. No
+# delay is known for this setting: the preheat trial's two minutes are used as the margin.
+ORIENTATION_CONFIRM_TIMEOUT = 120.0
+ORIENTATION_CONFIRM_INTERVAL = 15.0
+# Viewing direction: the per-device cloud route is read every VIEWING_CONFIRM_INTERVAL seconds
+# for at most VIEWING_CONFIRM_TIMEOUT seconds: four reads at most on the user's account. The
+# cloud takes a change into account in about 15 s (POST_COMMAND_SETTLE).
+VIEWING_CONFIRM_TIMEOUT = 60.0
+VIEWING_CONFIRM_INTERVAL = 15.0
+
+# Meaning of the head's orientation flag (Danfoss attribute 0x4014) as Zigbee2MQTT reads it:
+# false = horizontal, true = vertical. NOT established on real hardware here (open question of
+# docs/zigbee2mqtt-alignment.md §6). The write therefore refuses to send when the tunnel's flag and
+# the cloud's DP 133 disagree under this mapping: one of them, or the mapping, is wrong.
+ORIENTATION_FLAG: dict[str, bool] = {"Horizontal": False, "Vertical": True}
+
+
+def trial_dp_armed(
+    entry_data: dict[str, Any], coordinator: DanfossCoordinator, dev: DanfossDevice, dp: int
+) -> bool:
+    """True if the supervised trial of candidate ``dp`` is armed on ``dev``: the cloud-MQTT option
+    is on, ``dev`` is the designated trial head with ``dp`` listed, and it is an isolated head of
+    a verified model (the app publishes these settings for an isolated head only). The entities of
+    batch C exist only then."""
+    return (
+        bool(entry_data.get(DATA_CLOUD_MQTT))
+        and dev.is_head
+        and write_allowed(dev)
+        and coordinator.group_of(dev.id) is None
+        and mqtt_dp_open(dp, supervised_for(entry_data, dev.id))
+    )
+
+
+async def _publish(link: CloudMqttLink, dev: DanfossDevice, dp: int, value: Any) -> None:
+    try:
+        await link.publish_dp(dev.mesh_id or "", dev.node_id or "", {str(dp): value})
+    except Exception as err:  # noqa: BLE001 - surface any send failure, never a blind write
+        # The frame may have left before the failure: treated as sent, not confirmed.
+        raise WriteNotConfirmed(f"cloud-MQTT write failed: {err}") from err
+
+
+def _validated(dp: int, value: Any, supervised: frozenset[int], dev: DanfossDevice) -> Any:
+    if not dev.node_id or not dev.mesh_id:
+        raise HomeAssistantError(
+            "cloud-MQTT write impossible: the head's gateway address is unknown"
+        )
+    try:
+        return mqtt_write_value(dp, value, supervised)
+    except CloudError as err:
+        raise HomeAssistantError(f"cloud-MQTT write refused: {err}") from err
+
+
+async def async_mqtt_write_orientation(
+    local: DanfossLocalCoordinator,
+    coordinator: DanfossCoordinator,
+    link: CloudMqttLink,
+    dev: DanfossDevice,
+    orientation: str,
+    *,
+    supervised: frozenset[int] = frozenset(),
+) -> str:
+    """Write the mounting orientation of ``dev`` as the app does (``{"133": "Vertical"}`` or
+    ``"Horizontal"`` over cloud MQTT) and confirm it through the LOCAL TUNNEL only: the head's
+    flag 0x4014 read back. Returns ``CONFIRMED_BY_TUNNEL``, or ``UNCHANGED`` when the head already
+    has the value (nothing is sent). Raises ``HomeAssistantError`` otherwise, nothing optimistic.
+
+    Before anything is sent: the value must be exactly ``"Vertical"`` or ``"Horizontal"``; the head
+    must answer through the tunnel with its flag; and when the cloud carries DP 133, the flag and
+    the cloud's value must agree under ``ORIENTATION_FLAG`` (they do not when the mapping, the
+    cloud or the head is wrong, and a confirmation would then prove nothing)."""
+    value = _validated(DP_ORIENTATION, orientation, supervised, dev)
+    expected = ORIENTATION_FLAG[str(value)]
+    head = Head(dev.id, dev.node_id or "", dev.mesh_id or "")
+
+    before = await local.async_refresh_settings(head)
+    flag = None if before is None else before.get("orientation")
+    if not isinstance(flag, bool):
+        raise HomeAssistantError(
+            "cloud-MQTT orientation write refused: the head does not give its orientation flag "
+            "(0x4014) through the local tunnel, so the write could not be confirmed"
+        )
+    cloud = dev.orientation
+    if cloud is not None and ORIENTATION_FLAG[cloud] != flag:
+        raise HomeAssistantError(
+            f"cloud-MQTT orientation write refused: the head's flag 0x4014 is {flag} and the "
+            f"cloud's DP 133 is {cloud!r}, which disagree if false means horizontal (Zigbee2MQTT's "
+            "reading, not established here). Nothing was sent: settle that first "
+            "(docs/viewing-orientation-trial.md)"
+        )
+    if flag == expected:
+        return UNCHANGED
+
+    await _publish(link, dev, DP_ORIENTATION, value)
+    coordinator.note_commanded([dev.id])
+    loop = asyncio.get_running_loop()
+    sent_at = loop.time()
+    deadline = sent_at + ORIENTATION_CONFIRM_TIMEOUT
+    while True:
+        await asyncio.sleep(ORIENTATION_CONFIRM_INTERVAL)
+        after = await local.async_refresh_settings(head)
+        if after is not None and after.get("orientation") is expected:
+            _LOGGER.debug(
+                "cloud-MQTT orientation confirmed by the local tunnel after %.0f s",
+                loop.time() - sent_at,
+            )
+            await coordinator.async_request_refresh()
+            return CONFIRMED_BY_TUNNEL
+        if loop.time() >= deadline:
+            await coordinator.async_request_refresh()
+            raise WriteNotConfirmed(
+                "cloud-MQTT orientation write not confirmed: the frame was sent, and "
+                f"{loop.time() - sent_at:.0f} s later the head's flag 0x4014, read through the "
+                "local tunnel, does not show the value (the gateway's echo and the cloud are not "
+                "accepted as confirmation). The head may still apply it later, and the cloud's "
+                "DP 133 may now differ from the head: read both again before any other write"
+            )
+
+
+async def async_mqtt_write_viewing_direction(
+    coordinator: DanfossCoordinator,
+    link: CloudMqttLink,
+    dev: DanfossDevice,
+    on: bool,
+    *,
+    supervised: frozenset[int] = frozenset(),
+) -> str:
+    """Write the viewing direction of ``dev`` as the app does (``{"101": bool}`` over cloud MQTT)
+    and confirm it by the PER-DEVICE cloud route, read until it shows the value. Returns
+    ``CONFIRMED_BY_CLOUD``, or ``UNCHANGED`` when the cloud already has the value (nothing is
+    sent). Raises ``HomeAssistantError`` otherwise.
+
+    The gateway's echo is not accepted. The tunnel does not read the user-interface cluster where
+    the head keeps this setting, so the cloud is the only read source here; it is still the
+    gateway's view, and the trial's proof that the head applied it is its display."""
+    value = _validated(DP_VIEWING_DIRECTION, on, supervised, dev)
+    key = str(DP_VIEWING_DIRECTION)
+
+    async def read() -> Any:
+        try:
+            fresh = await coordinator.client.async_get_device_dps(dev.id)
+        except CloudError as err:
+            _LOGGER.debug("viewing direction read failed (%s)", type(err).__name__)
+            return None
+        return None if not fresh else fresh.get(key)
+
+    before = await read()
+    if not isinstance(before, bool):
+        raise HomeAssistantError(
+            "cloud-MQTT viewing direction write refused: the per-device cloud route does not "
+            "give DP 101, so the write could not be confirmed"
+        )
+    if before == value:
+        return UNCHANGED
+
+    await _publish(link, dev, DP_VIEWING_DIRECTION, value)
+    coordinator.note_commanded([dev.id])
+    loop = asyncio.get_running_loop()
+    sent_at = loop.time()
+    deadline = sent_at + VIEWING_CONFIRM_TIMEOUT
+    while True:
+        await asyncio.sleep(VIEWING_CONFIRM_INTERVAL)
+        if await read() is value:
+            await coordinator.async_request_refresh()
+            return CONFIRMED_BY_CLOUD
+        if loop.time() >= deadline:
+            await coordinator.async_request_refresh()
+            raise WriteNotConfirmed(
+                "cloud-MQTT viewing direction write not confirmed: the frame was sent, and "
+                f"{loop.time() - sent_at:.0f} s later the per-device cloud route does not show "
+                "the value (the gateway's echo is not accepted)"
             )

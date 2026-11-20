@@ -86,6 +86,9 @@ def _account_id(username: str) -> str:
 # Labels of the cloud-MQTT candidate DPs in the supervised-trial selector.
 _CANDIDATE_DP_LABELS = {
     1: "1 — preheat (confirmed only by the local tunnel, attribute 0x0025: needs enable_local)",
+    101: "101 — viewing direction (confirmed by the per-device cloud route; check the display)",
+    133: "133 — orientation, vertical / horizontal (confirmed only by the local tunnel, "
+    "attribute 0x4014: needs enable_local)",
 }
 
 

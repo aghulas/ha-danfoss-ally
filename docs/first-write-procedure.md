@@ -30,7 +30,9 @@ setting go out in one frame, and the write is confirmed by the gateway's echo (i
 report, 15 s) or, failing that, by one read of the head through the per-device cloud route.
 Otherwise the call raises a clear error. Nothing is ever shown that was not read back.
 One exception, preheat (DP 1): the echo and the cloud read prove nothing for it, so its write is
-confirmed by a read of the head through the local tunnel only (its sheet below).
+confirmed by a read of the head through the local tunnel only (its sheet below). Viewing direction
+(DP 101) and orientation (DP 133) do not accept the echo either; they have a sheet of their own,
+`docs/viewing-orientation-trial.md`.
 
 ## Generic procedure
 
@@ -208,6 +210,11 @@ Home Assistant and in the app.
 - **Neighbouring settings unchanged**: the real preheat and the schedule mode.
 - **Not covered**: the same write during a comfort slot (the value is then not in force; the
   schedule read above is what establishes it), and a head in manual mode.
+
+### DP 101 — viewing direction, DP 133 — orientation (candidates, not tried)
+
+Sheet of its own: `docs/viewing-orientation-trial.md` (DP 133 confirmed by the tunnel flag
+`0x4014`, DP 101 by the per-device route and the head's display).
 
 ### DP 1 — preheat (candidate; stage A positive, stage B failed, 2026-11-20)
 

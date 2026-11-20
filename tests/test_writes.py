@@ -116,7 +116,7 @@ def test_mqtt_proven_and_candidate_sets():
     from custom_components.danfoss_ally_cloud.api import writes
 
     assert sorted(writes.MQTT_WRITE_DPS) == [16, 18, 27, 30, 116, 118, 119, 120]
-    assert sorted(writes.MQTT_CANDIDATE_DPS) == [1]
+    assert sorted(writes.MQTT_CANDIDATE_DPS) == [1, 101, 133]
 
 
 def test_mqtt_write_value_tenths_range_and_step():

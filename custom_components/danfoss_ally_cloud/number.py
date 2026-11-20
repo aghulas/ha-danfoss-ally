@@ -71,7 +71,7 @@ from .const import (
     WRITE_VERIFIED_PRODUCTS,
 )
 from .coordinator import DanfossCoordinator
-from .entity import DanfossEntity
+from .entity import DanfossEntity, remove_registry_entries
 from .mqtt_write import (  # noqa: F401 - block helpers re-exported
     SETTINGS_BLOCK_DPS,
     async_mqtt_write,
@@ -191,16 +191,7 @@ def remove_closed_head_numbers(
     room's numbers (``<group id>_comfort_setpoint``) are never touched. An entity that is merely
     not created because the link failed to start is not in the list, so a transient failure costs
     no customisation."""
-    if not unique_ids:
-        return
-    registry = er.async_get(hass)
-    for unique_id in unique_ids:
-        entity_id = registry.async_get_entity_id("number", DOMAIN, unique_id)
-        if entity_id is None:
-            continue
-        registered = registry.async_get(entity_id)
-        if registered is not None and registered.config_entry_id == entry.entry_id:
-            registry.async_remove(entity_id)
+    remove_registry_entries(hass, entry, "number", unique_ids)
 
 
 class DanfossRoomSetpoint(CoordinatorEntity[DanfossCoordinator], NumberEntity):

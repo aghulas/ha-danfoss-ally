@@ -103,6 +103,9 @@
       },
       "preheat": {
         "default": "mdi:heat-wave"
+      },
+      "viewing_direction": {
+        "default": "mdi:screen-rotation"
       }
     },
     "number": {
@@ -120,6 +123,11 @@
       },
       "pause_setpoint": {
         "default": "mdi:snowflake-thermometer"
+      }
+    },
+    "select": {
+      "orientation_setting": {
+        "default": "mdi:phone-rotate-landscape"
       }
     }
   },

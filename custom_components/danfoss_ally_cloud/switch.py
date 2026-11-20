@@ -28,6 +28,11 @@ Its state always comes from the tunnel. DP 1 over cloud MQTT is a CANDIDATE, clo
 publish reaches the head at all is not established (docs/cloud-mqtt-preheat-proposal.md). Armed for
 a supervised trial on the designated isolated head, the write goes out over cloud MQTT and is
 confirmed by the tunnel alone; everywhere else, and always by default, the tunnel writes.
+
+Viewing direction (DP 101, Zigbee2MQTT ``viewing_direction``): a CANDIDATE on cloud MQTT, closed.
+The switch exists only while its supervised trial is armed for the designated isolated head
+(docs/viewing-orientation-trial.md). Its state is the cloud's DP 101 (unavailable when the cloud
+does not carry it); a write is confirmed by the per-device cloud route, never by the echo.
 """
 
 from __future__ import annotations
@@ -64,13 +69,16 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
-from .entity import DanfossEntity
+from .entity import DanfossEntity, DanfossTrialEntity, remove_registry_entries
 from .mqtt_write import (  # noqa: F401 - timeout re-exported
     DP_PREHEAT,
+    DP_VIEWING_DIRECTION,
     MQTT_CONFIRM_TIMEOUT,
     async_mqtt_write,
     async_mqtt_write_preheat,
+    async_mqtt_write_viewing_direction,
     supervised_for,
+    trial_dp_armed,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -149,6 +157,22 @@ async def async_setup_entry(
             for dev in coordinator.data.values()
             if dev.is_head and dev.node_id and dev.mesh_id in gws
         ]
+    # Viewing direction: only while its supervised trial is armed for this head. Otherwise its
+    # registry entry is removed (trial disarmed or moved); kept when only the link is missing.
+    closed: list[str] = []
+    for dev in coordinator.data.values():
+        if not dev.is_head:
+            continue
+        uid = f"{dev.id}_viewing_direction"
+        if not trial_dp_armed(data, coordinator, dev, DP_VIEWING_DIRECTION):
+            closed.append(uid)
+        elif mqtt_link is not None:
+            entities.append(
+                DanfossViewingDirection(
+                    coordinator, dev.id, mqtt_link, supervised_for(data, dev.id)
+                )
+            )
+    remove_registry_entries(hass, entry, "switch", closed)
     async_add_entities(entities)
 
 
@@ -444,6 +468,52 @@ class DanfossPreheat(CoordinatorEntity[DanfossLocalCoordinator], SwitchEntity):
         await self.coordinator.async_refresh_head(head)
         if not accepted:
             raise HomeAssistantError("local preheat write rejected by the head")
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self._async_write(True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self._async_write(False)
+
+
+class DanfossViewingDirection(DanfossTrialEntity, SwitchEntity):
+    """Viewing direction of an ISOLATED head (DP 101), under supervised trial on cloud MQTT.
+
+    State: the cloud's DP 101 (the gateway's view), unavailable when the cloud does not carry it.
+    Write: ``async_mqtt_write_viewing_direction``, confirmed by the per-device cloud route."""
+
+    _attr_translation_key = "viewing_direction"
+    _dp = DP_VIEWING_DIRECTION
+
+    def __init__(
+        self,
+        coordinator: DanfossCoordinator,
+        device_id: str,
+        link: CloudMqttLink,
+        supervised_dps: frozenset[int],
+    ) -> None:
+        super().__init__(coordinator, device_id, link, supervised_dps)
+        self._attr_unique_id = f"{device_id}_viewing_direction"
+
+    @property
+    def available(self) -> bool:
+        dev = self.device
+        return super().available and dev is not None and dev.viewing_direction is not None
+
+    @property
+    def is_on(self) -> bool | None:
+        dev = self.device
+        return dev.viewing_direction if dev else None
+
+    async def _async_write(self, on: bool) -> None:
+        dev = self.device
+        if dev is None or self._write_path(dev) != PATH_MQTT:
+            raise HomeAssistantError("viewing direction write unavailable for this head")
+        await self._async_run_trial(
+            async_mqtt_write_viewing_direction(
+                self.coordinator, self._link, dev, on, supervised=self._supervised_dps
+            )
+        )
 
     async def async_turn_on(self, **kwargs) -> None:
         await self._async_write(True)

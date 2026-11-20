@@ -184,6 +184,9 @@
    },
    "preheat": {
     "name": "Pré-chauffage"
+   },
+   "viewing_direction": {
+    "name": "Sens d'affichage"
    }
   },
   "number": {
@@ -201,6 +204,15 @@
    },
    "pause_setpoint": {
     "name": "Consigne pause"
+   }
+  },
+  "select": {
+   "orientation_setting": {
+    "name": "Orientation de montage",
+    "state": {
+     "horizontal": "Horizontale",
+     "vertical": "Verticale"
+    }
    }
   }
  },

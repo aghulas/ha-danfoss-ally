@@ -384,6 +384,9 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
         # entry: these settings hardly ever change, and ``read_at`` says how old the value is.
         self.settings: dict[str, dict[str, Any]] = {}
         self._settings_at: float | None = None
+        # Heads whose settings were read on their own (after a write) while a settings pass runs:
+        # that read is fresher, the pass must not overwrite it with a pre-write value.
+        self._settings_read_back: set[str] = set()
 
     def heads(self) -> list[Head]:
         """Heads reachable through the tunnel (node_id + gateway known to the manager)."""
@@ -433,6 +436,28 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
         self.async_update_listeners()
         return value
 
+    async def async_refresh_settings(self, head: Head) -> dict[str, Any] | None:
+        """Re-read ONE head's Danfoss settings through the tunnel and update its ``settings``
+        entry (with a fresh ``read_at``). Returns what the head gave, None without an answer.
+
+        The settings counterpart of ``async_refresh_head``, used to read a setting back after a
+        write (orientation). An unanswered read leaves the last entry as it was (dated by its
+        ``read_at``), as the daily pass does; a caller that has just written must therefore look
+        at ``read_at`` or at the returned value, never at the stored entry alone."""
+        attrs: dict[str, Any] | None
+        try:
+            attrs = await self.hass.async_add_executor_job(self.manager.read_settings, head)
+        except Exception as err:  # noqa: BLE001 - best-effort, as the pass
+            _LOGGER.debug("local settings read-back failed (%s)", type(err).__name__)
+            attrs = None
+        if attrs is None:
+            return None
+        if self._surveying:
+            self._settings_read_back.add(head.dev_id)
+        self.settings[head.dev_id] = {**attrs, "read_at": dt_util.utcnow()}
+        self.async_update_listeners()
+        return attrs
+
     def _store_attributes(self, dev_id: str, attrs: dict[str, Any] | None) -> bool:
         """Keep (or drop, for a head that did not answer) a head's attributes. True if changed."""
         if attrs is None:
@@ -453,7 +478,7 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
     @callback
     def _async_head_settings(self, dev_id: str, attrs: dict[str, Any] | None) -> None:
         """Keep the settings of ONE head just read by the settings pass (event loop)."""
-        if not self._surveying or attrs is None:
+        if not self._surveying or attrs is None or dev_id in self._settings_read_back:
             return
         self.settings[dev_id] = {**attrs, "read_at": dt_util.utcnow()}
         self.async_update_listeners()
@@ -526,6 +551,7 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
         stop = threading.Event()
         stop_settings = threading.Event()
         self._read_back = {}
+        self._settings_read_back = set()
         self._surveying = True
         try:
             try:

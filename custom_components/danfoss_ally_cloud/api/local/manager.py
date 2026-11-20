@@ -211,6 +211,18 @@ class LocalTunnelManager:
         finally:
             link.close()
 
+    def read_settings(self, head: Head) -> dict[str, Any] | None:
+        """Read ONE head's Danfoss settings attributes (``tunnel.read_settings``: two frames, one
+        for a head that does not answer). None without a response. Raises LocalUnavailable on an
+        unknown gateway. Used to read a setting back after a write (orientation, 0x4014)."""
+        if head.gateway_id not in self._gateways:
+            raise tunnel.LocalUnavailable(f"unknown gateway: {head.gateway_id}")
+        link = self._open_link(self._gateways[head.gateway_id])
+        try:
+            return tunnel.read_settings(link, head.dev_id, head.node_id)
+        finally:
+            link.close()
+
     def read_programming_mode(
         self, head: Head, *, duration: float = 8, attempts: int = 1
     ) -> int | None:
