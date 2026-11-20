@@ -144,6 +144,25 @@ class LocalTunnelManager:
         finally:
             link.close()
 
+    def read_programming_mode(
+        self, head: Head, *, duration: float = 8, attempts: int = 1
+    ) -> int | None:
+        """Read ONE head's raw 0x0025 (bit 0 schedule, bit 1 preheat). None without a response.
+
+        A short, single-attempt read by default: it serves as a guard before a schedule write
+        (is the head really following a schedule?), where a head that does not answer must not
+        hold the call for long. Raises LocalUnavailable on an unknown gateway.
+        """
+        if head.gateway_id not in self._gateways:
+            raise tunnel.LocalUnavailable(f"unknown gateway: {head.gateway_id}")
+        link = self._open_link(self._gateways[head.gateway_id])
+        try:
+            return tunnel.read_programming_mode(
+                link, head.dev_id, head.node_id, duration=duration, attempts=attempts
+            )
+        finally:
+            link.close()
+
     def write_preheat(self, head: Head, active: bool) -> bool:
         """Enable/disable preheat (reads 0x0025, writes the bit, schedule preserved).
 

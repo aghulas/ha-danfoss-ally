@@ -312,3 +312,25 @@ def test_survey_preheat_unreachable_gateway_reports_none():
     mgr = LocalTunnelManager(_gw(), open_link=boom)
     res = mgr.survey_preheat([Head("dev1", "node1", "gw1")], lambda d, v: seen.append((d, v)))
     assert res == {"dev1": None} and seen == [("dev1", None)]
+
+
+def test_read_programming_mode_one_head(monkeypatch):
+    """The schedule-write guard's read: raw 0x0025, short and single-attempt by default."""
+    calls = []
+
+    def fake_read(link, dev_id, node_id, **kw):
+        calls.append((dev_id, node_id, kw))
+        return 0x01
+
+    monkeypatch.setattr(tunnel, "read_programming_mode", fake_read)
+    link = _RWFakeLink("node1", 0x01)
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: link)
+    assert mgr.read_programming_mode(Head("dev1", "node1", "gw1")) == 0x01
+    assert calls == [("dev1", "node1", {"duration": 8, "attempts": 1})]
+    assert link.closed is True
+
+
+def test_read_programming_mode_unknown_gateway():
+    mgr = LocalTunnelManager(_gw(), open_link=lambda g: None)
+    with pytest.raises(tunnel.LocalUnavailable):
+        mgr.read_programming_mode(Head("devX", "nodeX", "gw-inconnue"))

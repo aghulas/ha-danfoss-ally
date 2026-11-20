@@ -275,7 +275,10 @@ def async_register_services(hass: HomeAssistant) -> None:
             src = await ops.get_schedule(store, call.data["source"])
             only = call.data.get("days")
             days = {d: r for d, r in src["days"].items() if only is None or d in only}
-            jobs = [await ops.set_schedule(hass, store, t, days) for t in call.data["targets"]]
+            targets = call.data["targets"]
+            for t in targets:  # every target is checked before the first one is written
+                await ops.check_schedule_target(hass, store, t)
+            jobs = [await ops.set_schedule(hass, store, t, days, checked=True) for t in targets]
             return {"jobs": jobs}
         except ops.OperationError as err:
             _raise(err)

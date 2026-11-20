@@ -29,9 +29,12 @@ from .api import (
 )
 from .api import schedule as sch
 from .api.client import CloudError
+from .api.local import tunnel
+from .api.local.manager import Head
 from .const import (
     DATA_COORDINATOR,
     DATA_JOBS,
+    DATA_LOCAL,
     DATA_SCHEDULES,
     DATA_VACATION_WRITE,
     SETPOINT_MAX,
@@ -397,9 +400,66 @@ def _check_not_grouped(store: dict, target: dict) -> None:
         raise OperationError("grouped_device", "grouped head: target its room")
 
 
-async def set_schedule(hass: HomeAssistant, store: dict, target: dict, days: dict) -> dict:
-    jobs: JobManager = store[DATA_JOBS]
+# Cloud modes (DP 2) in which a head follows its weekly schedule. Same set as the isolated-head
+# comfort number (``number.SCHEDULE_MODES``).
+_SCHEDULE_MODES = frozenset({"at_home", "leaving_home"})
+
+
+def _not_following(reason: str) -> OperationError:
+    return OperationError(
+        "head_not_following_schedule",
+        f"isolated head not following a schedule ({reason}): a schedule write over the cloud is "
+        "only proven on an isolated head that follows its schedule",
+    )
+
+
+async def check_schedule_target(hass: HomeAssistant, store: dict, target: dict) -> None:
+    """Guards of a schedule write, before anything is sent. A room target passes untouched.
+
+    A grouped head targeted directly is refused (contract §5.4). An ISOLATED head must be
+    following a schedule: on such a head the HTTP schedule write is proven (2026-11-17), whereas
+    on an isolated head the cloud holds in ``manual`` it was accepted and left the head in manual
+    mode at the cloud's comfort value, asking for heat (2026-11-19,
+    docs/isolated-head-schedule-writes.md). So the head must be online, in a schedule mode for the
+    cloud (DP 2), not reported without its schedule bit (DP 172), and - when the local tunnel is
+    enabled and the head answers - with bit 0 of attribute 0x0025 set: the cloud's mode is known
+    to be wrong on some heads. A head that does not answer locally is judged on the cloud alone.
+    """
     _check_not_grouped(store, target)
+    if target.get("type") != "device":
+        return
+    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    dev = coordinator.data.get(str(target.get("id")))
+    if dev is None or not dev.is_head:
+        raise OperationError("unknown_target", f"head not found: {target.get('id')}")
+    if not dev.online:
+        raise _not_following("head offline")
+    if dev.mode not in _SCHEDULE_MODES:
+        raise _not_following(f"cloud mode {dev.mode!r}")
+    if dev.schedule_active is False:
+        raise _not_following("the cloud reports no active schedule")
+    local = store.get(DATA_LOCAL)
+    if local is None or not dev.node_id or not dev.mesh_id:
+        return
+    if dev.mesh_id not in local.manager.gateway_ids:
+        return
+    try:
+        mode = await hass.async_add_executor_job(
+            local.manager.read_programming_mode, Head(dev.id, dev.node_id, dev.mesh_id)
+        )
+    except (tunnel.LocalError, tunnel.LocalUnavailable):  # no local answer: the cloud's view stands
+        return
+    if mode is not None and not mode & 0x01:
+        raise _not_following("the head itself reports manual mode")
+
+
+async def set_schedule(
+    hass: HomeAssistant, store: dict, target: dict, days: dict, *, checked: bool = False
+) -> dict:
+    """Write the given days. ``checked``: the caller already ran ``check_schedule_target``."""
+    jobs: JobManager = store[DATA_JOBS]
+    if not checked:
+        await check_schedule_target(hass, store, target)
     errors = sch.validate_days(days)
     if errors:
         raise OperationError(errors[0]["code"], errors[0]["message"], errors, errors[0].get("day"))
@@ -413,8 +473,19 @@ async def set_schedule(hass: HomeAssistant, store: dict, target: dict, days: dic
 
 
 async def restore_schedule(hass: HomeAssistant, store: dict, target: dict) -> dict:
+    """Back to schedule (R4) for a ROOM. Refused on an isolated head: no proven route there.
+
+    On an isolated head the rewrite did not bring the head back (2026-11-19) and the closing
+    ``at_home`` label goes through ``settings.change``, accepted and never applied for such a head
+    (contract §4.2). Refused until the app's own path is known.
+    """
     jobs: JobManager = store[DATA_JOBS]
     _check_not_grouped(store, target)
+    if target.get("type") == "device":
+        raise OperationError(
+            "isolated_restore_unproven",
+            "back to schedule has no proven route for an isolated head; use the Danfoss app",
+        )
     await _run_write(store[DATA_COORDINATOR].client.async_restore_schedule, target)
     _invalidate(store, target)
     head_ids = _head_ids(store, target)

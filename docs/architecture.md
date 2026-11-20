@@ -72,7 +72,7 @@ frames, so neither channel asks anything more of the user.
 |---|---|---|
 | Comfort / setback setpoint | Cloud HTTP: room publish, then rewrite the room schedule (R3) | Cloud MQTT when enabled and connected (proven 2026-11-19/20 on a head following its schedule), followed by the settings block over HTTP, as the app does; otherwise no `number` entity and a read-only thermostat. Two entry points, one write: the head's `number` entities (comfort or setback, chosen by the entity) and the head's thermostat (the setting of the mode the cloud reports, below). The comfort write is refused when the head is not in a schedule mode. The head rewrites its own schedule transitions: no schedule rewrite |
 | Pause setpoint | No path | Cloud MQTT when enabled and connected (proven 2026-11-19, read back in the app and the cloud only); otherwise no entity |
-| Weekly schedule | Cloud HTTP | Cloud HTTP |
+| Weekly schedule | Cloud HTTP | Cloud HTTP, **only for a head following its schedule** (proven 2026-11-17); refused otherwise. Back to schedule: no proven route, refused (`docs/isolated-head-schedule-writes.md`) |
 | Child lock | Cloud HTTP: room publish (applies to **every** head of the room) | Cloud MQTT when enabled and connected; otherwise unavailable |
 | Window detection | Cloud HTTP: room publish (whole room) | Local tunnel when the head answers locally; otherwise cloud MQTT when enabled and connected (proven 2026-11-19); otherwise unavailable |
 | Setpoint bounds (upper, lower) | No path yet | Cloud MQTT when enabled and connected (proven 2026-11-19); otherwise no entity |
@@ -146,7 +146,10 @@ for a DP proven on it; (4) otherwise unavailable.
   write and `restore_schedule` over HTTP, both accepted, had not reached such a head after five
   minutes; an effect appeared more than ten minutes later and left the head in manual mode, at
   the cloud's comfort value. What the app does to bring an isolated head back to its schedule is
-  not established; do not rely on the HTTP path for it.
+  not established; do not rely on the HTTP path for it. Since then both are refused before any
+  send: a schedule write to an isolated head that is not following a schedule, and
+  `restore_schedule` on any isolated head (`docs/isolated-head-schedule-writes.md`, with the
+  timeline and the trials that would settle it).
 - **Thermostat comfort write outside a comfort slot.** The isolated head's thermostat picks
   comfort or setback from the reported mode (a label, R5). Whether a comfort write should be
   refused when the head's active setpoint shows it is not in a comfort slot is not decided; today
