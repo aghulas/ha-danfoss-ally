@@ -98,7 +98,6 @@ SWITCHES: tuple[DanfossSwitchDescription, ...] = (
         key="child_lock",
         translation_key="child_lock",
         entity_category=EntityCategory.CONFIG,
-        icon="mdi:lock",
         dp=30,
         value=lambda d: d.child_lock,
     ),
@@ -106,7 +105,6 @@ SWITCHES: tuple[DanfossSwitchDescription, ...] = (
         key="window_detection",
         translation_key="window_detection",
         entity_category=EntityCategory.CONFIG,
-        icon="mdi:window-open-variant",
         dp=116,
         value=lambda d: d.window_detection,
         local_setting="window_detection",  # W-4 ✅ through the tunnel
@@ -346,7 +344,6 @@ class DanfossPreheat(CoordinatorEntity[DanfossLocalCoordinator], SwitchEntity):
 
     _attr_has_entity_name = True
     _attr_translation_key = "preheat"
-    _attr_icon = "mdi:fire"
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(

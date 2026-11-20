@@ -115,7 +115,6 @@ class DanfossRelay(DanfossEntity, BinarySensorEntity):
 
     _attr_device_class = BinarySensorDeviceClass.RUNNING
     _attr_translation_key = "boiler_relay"
-    _attr_icon = "mdi:water-boiler"
 
     def __init__(self, coordinator: DanfossCoordinator, device_id: str) -> None:
         super().__init__(coordinator, device_id)
@@ -138,7 +137,6 @@ class DanfossHoliday(DanfossHomeEntity, BinarySensorEntity):
     """
 
     _attr_translation_key = "holiday"
-    _attr_icon = "mdi:bag-suitcase"
 
     def __init__(self, coordinator: DanfossCoordinator, gid: str, name: str | None) -> None:
         super().__init__(coordinator, gid, name)
