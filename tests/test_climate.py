@@ -347,3 +347,61 @@ async def test_head_climate_mqtt_refuses_a_setpoint_outside_the_heads_own_bounds
 
     await cl.async_set_temperature(**{ATTR_TEMPERATURE: 21.0})  # the bound itself is allowed
     assert link.published == [("gw-1", "node-1", {"118": 210, "16": 210})]
+
+
+def _mqtt_climate(dev, *, link=None, enabled=True, groups=None):
+    from .test_switch import _FakeMqttLink
+
+    coord = _FakeCoord(data={dev.id: dev})
+    if groups:
+        coord.group_of = lambda head_id: groups.get(head_id)
+    link = link or _FakeMqttLink()
+    return DanfossHeadClimate(coord, dev.id, link=link, cloud_mqtt_enabled=enabled)
+
+
+@pytest.mark.parametrize(("mode", "setting"), [("at_home", "comfort"), ("leaving_home", "setback")])
+def test_head_climate_says_which_setting_a_write_would_change(mode, setting):
+    attrs = _mqtt_climate(_mqtt_head(mode=mode)).extra_state_attributes
+    assert attrs["write_path"] == "cloud_mqtt"
+    assert attrs["write_setting"] == setting
+
+
+async def test_head_climate_write_setting_matches_what_is_written():
+    """The announced setting is the one the write changes (DP 118 comfort, DP 119 setback)."""
+    from .test_switch import _FakeClient as _MqttFakeClient
+    from .test_switch import _FakeMqttLink
+
+    for mode, setting_dp in (("at_home", "118"), ("leaving_home", "119")):
+        dev = _mqtt_head(mode=mode)
+        coord = _FakeCoord(data={dev.id: dev}, client=_MqttFakeClient())
+        link = _FakeMqttLink()
+        cl = DanfossHeadClimate(coord, dev.id, link=link, cloud_mqtt_enabled=True)
+        announced = cl.extra_state_attributes["write_setting"]
+        await cl.async_set_temperature(**{ATTR_TEMPERATURE: 19.0})
+        assert setting_dp in link.published[0][2]
+        assert announced == {"118": "comfort", "119": "setback"}[setting_dp]
+
+
+@pytest.mark.parametrize("mode", ["manual", "pause", "holiday", None])
+def test_head_climate_announces_no_write_outside_schedule_modes(mode):
+    attrs = _mqtt_climate(_mqtt_head(mode=mode)).extra_state_attributes
+    assert attrs["write_path"] == "none"
+    assert "write_setting" not in attrs
+
+
+def test_head_climate_announces_no_write_without_a_usable_route():
+    from .test_switch import _FakeMqttLink
+
+    dev = _mqtt_head()
+    cases = (
+        _mqtt_climate(dev, enabled=False),  # option off: read-only
+        DanfossHeadClimate(_FakeCoord(data={dev.id: dev}), dev.id),  # no link at all
+        _mqtt_climate(dev, link=_FakeMqttLink(connected=False)),  # link down
+        _mqtt_climate(dev, link=_FakeMqttLink(gateways=("gw-x",))),  # gateway unknown to the link
+        _mqtt_climate(dev, groups={dev.id: "g1"}),  # grouped since setup
+        _mqtt_climate(_mqtt_head(product_id="other")),  # product not write-verified
+    )
+    for cl in cases:
+        attrs = cl.extra_state_attributes
+        assert attrs["write_path"] == "none"
+        assert "write_setting" not in attrs

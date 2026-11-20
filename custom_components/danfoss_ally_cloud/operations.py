@@ -3,6 +3,13 @@
 One implementation per operation (contract §5.3): rooms (with head states), schedule read / write,
 back to schedule, room management, vacation writes, and local-tunnel commands. Split into domain
 sub-modules (``ops_common``, ``ops_views``, ``ops_rooms``, ``ops_local``) and re-exported here.
+Built on the room model of PR #12 (`coordinator.rooms` = RoomState, `coordinator.group_of`) and on
+the schedule editing of the `api/` layer (R1 validation). Writes create a `WriteJob` tracked by
+`jobs/subscribe` and verified in a deferred way (never blocking). Errors = stable contract codes
+(§5.4).
+
+The durable room setpoint is NOT here: it is carried by the room thermostat (PR #12,
+`climate.async_set_temperature` -> `async_set_group_setpoint`).
 """
 
 from __future__ import annotations
@@ -157,7 +164,12 @@ def _vacation_temperature_tenths(temperature: float) -> int:
 
 
 async def _resolve_vacation_rooms(coordinator, gid: str, rooms: list[dict] | None) -> list[str]:
-    """Tuya room ids (type 4) the vacation applies to."""
+    """Tuya room ids (type 4) the vacation applies to.
+
+    ``rooms`` is an optional list of room targets ({type:"room", id:group_id}); each is resolved to
+    its Tuya room id (``_resolve_room_id``). When omitted, the vacation covers EVERY room of the
+    home (what the app does). Raises ``empty_rooms`` if the home has none.
+    """
     if rooms:
         out: list[str] = []
         for target in rooms:
@@ -183,7 +195,13 @@ async def _resolve_home(coordinator, home: str) -> str:
 
 
 def _at_home_target_groups(coordinator, gid: str, rooms: list[dict] | None) -> list[str]:
-    """Schedule-group ids the at-home Saturday pre-check must inspect."""
+    """Schedule-group ids the at-home Saturday pre-check must inspect.
+
+    Explicit ``rooms`` (group targets) are validated against the home; omitted = every room the
+    integration tracks in that home. These are the ids whose *weekly schedule* is read (an at-home
+    vacation makes a head follow its Saturday program), distinct from the Tuya room ids sent in the
+    request body (``_resolve_vacation_rooms``).
+    """
     if rooms:
         groups: list[str] = []
         for target in rooms:
@@ -196,7 +214,14 @@ def _at_home_target_groups(coordinator, gid: str, rooms: list[dict] | None) -> l
 
 
 async def _ensure_saturday_program(store: dict, group_ids: list[str]) -> None:
-    """Reproduce the app's client-side guard for at-home vacations (field-confirmed 2026-11)."""
+    """Reproduce the app's client-side guard for at-home vacations (field-confirmed 2026-11).
+
+    An at-home vacation makes each head follow its **Saturday** schedule; when NO targeted room has
+    a Saturday slot the cloud answers a bare, cryptic ``REMOTE_API_RUN_UNKNOW_FAILED`` ("the server
+    is busy"). We pre-read each target room's weekly schedule (``tuya.m.custom.wkf.week.timer.list``
+    via ``get_schedule``) and refuse with a clear error BEFORE any send if none has a Saturday
+    window.
+    """
     for group_id in group_ids:
         schedule = await get_schedule(store, {"type": "room", "id": group_id})
         if schedule.get("days", {}).get("sat"):
@@ -263,7 +288,12 @@ async def set_vacation_at_home(
     rooms: list[dict] | None = None,
     time_zone: str = "Europe/Paris",
 ) -> dict:
-    """Set / edit an *at-home* vacation (contract §4.5, ``vacation.plan.athome``). GATED."""
+    """Set / edit an *at-home* vacation (contract §4.5, ``vacation.plan.athome``). GATED.
+
+    No temperature: each head follows its Saturday schedule. A client-side pre-check refuses with
+    ``at_home_no_saturday`` when no targeted room has a Saturday slot (the cloud otherwise answers a
+    cryptic ``REMOTE_API_RUN_UNKNOW_FAILED``), mirroring the app's own guard.
+    """
     _require_vacation_write(store)
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     gid = await _resolve_home(coordinator, home)
@@ -490,7 +520,11 @@ def _defer_verification(hass: HomeAssistant, store: dict, job: WriteJob) -> None
 
 
 async def verify_job(store: dict, job: WriteJob) -> None:
-    """Verify a job: DP 172 for the mode (R6); schedule = `unverified`."""
+    """Verify a job: DP 172 for the mode (R6); schedule = `unverified`.
+
+    The local re-read of the schedule (via the tunnel) is a separate follow-up, proven at the real
+    validation of writes: we never claim `applied` without having observed it.
+    """
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     jobs: JobManager = store[DATA_JOBS]
     await coordinator.async_request_refresh()

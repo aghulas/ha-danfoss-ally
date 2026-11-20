@@ -513,6 +513,13 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   setpoint", "pause setpoint"), present for every isolated head on a verified model while `enable_cloud_mqtt` is on. They are
   removed from the registry when their DPs close, like the bounds below.
 
+  The **thermostat (`climate`) of an isolated head** is a second entry point to the same comfort
+  and setback writes (§5.1): with `enable_cloud_mqtt` on and the link connected, a setpoint change
+  writes the setting of the mode the cloud reports — comfort (DP 118 + 16) in `at_home`, setback
+  (DP 119) in `leaving_home` — then the settings block, after checking the value against the
+  head's own bounds. Other modes are refused. Everything above applies unchanged, in particular
+  the effect of DP 16 outside a comfort slot.
+
   The bounds are `number` entities of an **isolated** head ("upper setpoint bound", "lower setpoint
   bound"), present for every isolated head on a verified model while `enable_cloud_mqtt` is on.
   When a number's DP is closed (`enable_cloud_mqtt` off, head grouped, or for a candidate: trial
@@ -703,9 +710,32 @@ by the MCP connector (`smartlife.m.*` family; the APK also exposes the `thing.m.
   **Durable setpoint write at the room level**: in modes `comfort` (`at_home`) and `setback`
   (`leaving_home`), changing the temperature publishes the setpoint on the group then rewrites one
   schedule day (R3) — the same path as the `number` entities above (`async_set_room_setpoint`,
-  proven on real hardware 2026-11-16, PR #10). Outside these modes, or for an ungrouped head, the
-  write fails cleanly (an error rather than a misleading value). The room's `number` entities offer
-  the same setting, per room; the thermostat remains the per-head access.
+  proven on real hardware 2026-11-16, PR #10). Outside these modes the write fails cleanly (an error
+  rather than a misleading value). The room's `number` entities offer the same setting, per room.
+- **Thermostat of an isolated head**: its target temperature is the head's **active** setpoint
+  (DP 171). It is **read-only** while `enable_cloud_mqtt` is off (the default): no HTTP setpoint
+  write is proven for a head outside a room, and a change is refused with a clear error. With
+  `enable_cloud_mqtt` on and the link connected, a change in mode `at_home` or `leaving_home` is
+  written over Tuya cloud MQTT (§4.2); other modes are refused. Attributes:
+  - `write_path`: `cloud_mqtt` when a setpoint change would be sent right now, `none` when it
+    would be refused (option off, link down, gateway unknown to the link, unverified product, head
+    in a room, mode outside `at_home` / `leaving_home`);
+  - `write_setting`, present only with `write_path: cloud_mqtt`: `comfort` or `setback`, the
+    setting a change would write. It follows the mode the cloud reports, which is a label (R5): it
+    names the setting written, not the slot the head's schedule is in.
+
+  A comfort write when the head is not in a comfort slot changes the comfort setting and, through
+  DP 16, the current setpoint: 1 to 5 minutes of heat demand, then the head goes back to its
+  schedule's value by itself (2026-11-19, §4.2). The target temperature then shows the schedule's
+  value again; the value written is in `setpoints.comfort`. The head's "comfort setpoint" and
+  "setback setpoint" numbers write the same settings without depending on the reported mode.
+- **Entities follow the topology at runtime**, with no reload: a room that appears gets its
+  thermostat and numbers; a head that becomes isolated gets its own thermostat (and its
+  isolated-head numbers when `enable_cloud_mqtt` is on); a head that joins a room loses them. A
+  room's entities are removed only on positive evidence that the room is gone
+  (`DanfossCoordinator.room_retired`: complete device list, complete topology read, room no longer
+  listed). On a partial or degraded read they stay, unavailable, so that the entity ids, names and
+  areas set by the user survive it.
 - **Holiday (read only)**: per home, a `binary_sensor` "holiday active" (on only while a holiday is
   **in progress**, `isRunning`; attribute `scheduled` for a planned one, `detail` the raw record)
   and a `sensor` "holiday setpoint" (the temperature of the holiday on record, in progress or
@@ -789,6 +819,16 @@ on for a supervised real-hardware validation session. Values are validated befor
 
 The WebSocket commands and the actions share the same implementation: one function per operation.
 
+**Which account a command applies to.** Every command accepts an optional `entry_id`, which always
+decides. With a single account it is not needed. With several accounts and no `entry_id` (the
+Lovelace cards), the account is the one that owns what the command addresses: its `target` (room
+or head), `relay`, `devices` (all of them) or `home`. When that does not resolve:
+
+- a **read** is answered from the first account;
+- a **write** (every command reserved for administrators) is refused with `ambiguous_entry` and
+  nothing is sent: a write never lands on an account chosen by default. It is also refused when
+  more than one account claims the command.
+
 ### 5.4 Errors
 
 Shape: `{"code": "…", "message": "…", "day": "mon" | null}`. The message is translated; the code is
@@ -805,6 +845,7 @@ stable.
 | `head_not_following_schedule` | schedule write to an isolated head that is offline, in manual mode or without an active schedule |
 | `isolated_restore_unproven` | `restore_schedule` on an isolated head: no proven route |
 | `not_admin` | write by a non-administrator user |
+| `ambiguous_entry` | WebSocket write with several accounts configured, no `entry_id`, and no single account owning the target (§5.3): pass `entry_id` |
 | `cloud_refused` | the cloud refused the call |
 | `session_expired` | session to renew (re-authentication in progress) |
 | `unknown_room` | named room not found in the account |

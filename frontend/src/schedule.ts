@@ -34,28 +34,48 @@ export interface Bar {
   widthPct: number;
 }
 
+/** Barre d'édition : garde l'indice de sa plage dans la liste d'origine. */
+export interface IndexedBar extends Bar {
+  index: number;
+}
+
+/**
+ * Comme `dayBars`, mais chaque barre garde l'indice de sa plage dans `ranges`.
+ * L'éditeur en a besoin : les barres sont triées et les plages mal formées
+ * ignorées, donc la position d'une barre n'est PAS l'indice de sa plage.
+ */
+export function indexedDayBars(ranges: TimeRange[]): IndexedBar[] {
+  const bars: IndexedBar[] = [];
+  ranges.forEach((range, index) => {
+    const start = parseHHMM(range.start);
+    const end = parseHHMM(range.end);
+    if (start === null || end === null || end <= start) {
+      return;
+    }
+    bars.push({
+      index,
+      start: range.start,
+      end: range.end,
+      leftPct: (start / MINUTES_PER_DAY) * 100,
+      widthPct: ((end - start) / MINUTES_PER_DAY) * 100,
+    });
+  });
+  bars.sort((a, b) => a.leftPct - b.leftPct);
+  return bars;
+}
+
 /**
  * Convertit les plages d'un jour en barres positionnées (0–100 %). Les plages
  * mal formées ou vides (`start` ≥ `end`) sont ignorées, et les barres sont triées
  * par heure de début.
  */
 export function dayBars(ranges: TimeRange[]): Bar[] {
-  const bars: Bar[] = [];
-  for (const range of ranges) {
-    const start = parseHHMM(range.start);
-    const end = parseHHMM(range.end);
-    if (start === null || end === null || end <= start) {
-      continue;
-    }
-    bars.push({
-      start: range.start,
-      end: range.end,
-      leftPct: (start / MINUTES_PER_DAY) * 100,
-      widthPct: ((end - start) / MINUTES_PER_DAY) * 100,
-    });
-  }
-  bars.sort((a, b) => a.leftPct - b.leftPct);
-  return bars;
+  return indexedDayBars(ranges).map(({ start, end, leftPct, widthPct }) => ({
+    start,
+    end,
+    leftPct,
+    widthPct,
+  }));
 }
 
 /** Vrai si le jour n'a aucune plage de confort valide (entièrement en réduit). */

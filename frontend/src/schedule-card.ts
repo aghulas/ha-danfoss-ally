@@ -57,7 +57,7 @@ import {
   sortRanges,
 } from "./edit";
 import { dayLabel, errorText, t } from "./localize";
-import { DAY_KEYS, type Bar, dayBars } from "./schedule";
+import { DAY_KEYS, type IndexedBar, indexedDayBars } from "./schedule";
 import type {
   DayKey,
   HassLike,
@@ -97,6 +97,8 @@ export class DanfossAllyScheduleCard extends LitElement {
   @state() private _schedule: Schedule | null = null;
   @state() private _loaded = false;
   @state() private _refreshing = false;
+  /** Vrai une fois la première lecture terminée (réussie ou non). */
+  @state() private _ready = false;
 
   // --- Édition (lot 5) ---
   @state() private _editing = false;
@@ -110,8 +112,12 @@ export class DanfossAllyScheduleCard extends LitElement {
   @state() private _serverValidation: ValidateResponse | null = null;
 
   private _unsubscribe: (() => void) | null = null;
+  private _subscribing = false;
   private _validateTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Numéro de la dernière validation serveur lancée : une réponse plus ancienne est ignorée. */
+  private _validateSeq = 0;
   private _drag?: {
+    pointerId: number;
     day: DayKey;
     index: number;
     mode: "move" | "start" | "end";
@@ -132,11 +138,21 @@ export class DanfossAllyScheduleCard extends LitElement {
     if (!config) {
       throw new Error("Configuration invalide");
     }
+    const roomChanged = config.room_id !== this._config?.room_id;
     // Changer de pièce abandonne une édition en cours (pas de fuite entre pièces).
-    if (this._editing && config.room_id !== this._config?.room_id) {
+    if (this._editing && roomChanged) {
       this._leaveEdit(false);
     }
     this._config = config;
+    if (roomChanged && this._loaded) {
+      // Rien de l'ancienne pièce ne doit rester affiché — ni servir de base à une
+      // édition — sous le nom de la nouvelle : on efface et on relit.
+      this._schedule = null;
+      this._job = null;
+      this._error = null;
+      this._ready = false;
+      void this._load();
+    }
   }
 
   public getCardSize(): number {
@@ -151,6 +167,18 @@ export class DanfossAllyScheduleCard extends LitElement {
   /** Demande la sortie d'édition avec confirmation si des jours ont été modifiés. */
   public cancelEdit(): void {
     this._cancelEdit();
+  }
+
+  public connectedCallback(): void {
+    super.connectedCallback();
+    // Home Assistant détache puis rattache les cartes (changement de colonnes,
+    // mode édition) : sans cela le suivi des lots resterait coupé après coup.
+    if (this._loaded) {
+      void this._subscribe();
+    }
+    if (this._editing) {
+      globalThis.addEventListener?.("beforeunload", this._onBeforeUnload);
+    }
   }
 
   public disconnectedCallback(): void {
@@ -178,22 +206,38 @@ export class DanfossAllyScheduleCard extends LitElement {
       return;
     }
     const target = this._target;
+    const roomId = this._config?.room_id;
     const [info, rooms, schedule] = await Promise.all([
       fetchInfo(this.hass),
       this.embedded ? Promise.resolve([] as Room[]) : fetchRooms(this.hass),
       target ? fetchSchedule(this.hass, target) : Promise.resolve(null),
     ]);
+    if (roomId !== this._config?.room_id) {
+      // La pièce a changé pendant la lecture : cette réponse n'est plus la sienne.
+      return;
+    }
     this._info = info;
     if (!this.embedded) {
       this._rooms = rooms;
     }
     this._schedule = schedule;
+    this._ready = true;
     if (this.embedded && !this._editing && this._isAdmin && this._schedule) {
       this._beginEdit();
     }
-    // Suivi des lots d'écriture (si la connexion WS le permet).
-    if (!this._unsubscribe && !this.embedded) {
+    await this._subscribe();
+  }
+
+  /** Suivi des lots d'écriture (si la connexion WS le permet) ; le parent s'en charge en mode imbriqué. */
+  private async _subscribe(): Promise<void> {
+    if (!this.hass || this.embedded || this._unsubscribe || this._subscribing) {
+      return;
+    }
+    this._subscribing = true;
+    try {
       this._unsubscribe = await subscribeJobs(this.hass, (job) => this._onJob(job));
+    } finally {
+      this._subscribing = false;
     }
   }
 
@@ -212,7 +256,7 @@ export class DanfossAllyScheduleCard extends LitElement {
     this._refreshing = true;
     try {
       const schedule = await fetchSchedule(this.hass, target, true);
-      if (schedule) {
+      if (schedule && target.id === this._config?.room_id) {
         this._schedule = schedule;
       }
     } finally {
@@ -256,8 +300,9 @@ export class DanfossAllyScheduleCard extends LitElement {
     globalThis.addEventListener?.("beforeunload", this._onBeforeUnload);
   }
 
-  private _leaveEdit(notifyParent = true): void {
+  private _leaveEdit(notifyParent = true, saved = false): void {
     this._editing = false;
+    this._validateSeq += 1;
     this._draft = null;
     this._copyFrom = null;
     this._serverValidation = null;
@@ -270,7 +315,9 @@ export class DanfossAllyScheduleCard extends LitElement {
     if (this.embedded && notifyParent) {
       this.dispatchEvent(
         new CustomEvent("schedule-edit-close", {
-          detail: { schedule: this._schedule, job: this._job },
+          // Le programme n'est remonté qu'après un enregistrement : à l'annulation,
+          // le parent garde sa propre lecture (peut-être plus fraîche que la nôtre).
+          detail: { schedule: saved ? this._schedule : null, job: this._job, saved },
           bubbles: true,
           composed: true,
         }),
@@ -296,7 +343,9 @@ export class DanfossAllyScheduleCard extends LitElement {
   };
 
   private _setDay(day: DayKey, ranges: TimeRange[]): void {
-    if (!this._draft) {
+    // Pendant l'envoi le brouillon est gelé : ce qui s'affichera comme enregistré
+    // doit être exactement ce qui est parti.
+    if (!this._draft || this._saving) {
       return;
     }
     this._draft = { ...this._draft, [day]: ranges };
@@ -324,7 +373,13 @@ export class DanfossAllyScheduleCard extends LitElement {
     for (const day of this._modified) {
       days[day] = this._draft[day];
     }
-    this._serverValidation = await validateSchedule(this.hass, days);
+    const seq = ++this._validateSeq;
+    const result = await validateSchedule(this.hass, days);
+    if (seq !== this._validateSeq || !this._editing) {
+      // Réponse dépassée (édition quittée ou validation plus récente lancée).
+      return;
+    }
+    this._serverValidation = result;
   }
 
   // --- Opérations d'édition ---
@@ -381,7 +436,7 @@ export class DanfossAllyScheduleCard extends LitElement {
   }
 
   private _applyCopy(): void {
-    if (!this._draft || !this._copyFrom || this._copyTargets.size === 0) {
+    if (!this._draft || this._saving || !this._copyFrom || this._copyTargets.size === 0) {
       return;
     }
     this._draft = copyDay(this._draft, this._copyFrom, [...this._copyTargets]);
@@ -409,13 +464,21 @@ export class DanfossAllyScheduleCard extends LitElement {
     }
     try {
       const job = await setSchedule(this.hass, target, days);
-      this._job = job;
-      // Optimiste : le programme affiché reflète les jours envoyés.
-      if (this._schedule) {
-        this._schedule = { ...this._schedule, days: cloneDays(this._draft) };
+      if (target.id !== this._config?.room_id) {
+        // La pièce a changé pendant l'envoi : ce résultat n'est pas le sien.
+        return;
       }
-      this._leaveEdit(true);
+      this._job = job;
+      // Optimiste : le programme affiché reflète les jours envoyés — ceux-là
+      // exactement (`days`), pas l'état du brouillon au retour de l'appel.
+      if (this._schedule) {
+        this._schedule = { ...this._schedule, days: { ...this._schedule.days, ...days } };
+      }
+      this._leaveEdit(true, true);
     } catch (err) {
+      if (target.id !== this._config?.room_id) {
+        return;
+      }
       const code = err instanceof ScheduleCommandError ? err.code : "unknown";
       this._error = errorText(this.hass, code, { max: MAX_TRANSITIONS_PER_DAY });
     } finally {
@@ -448,7 +511,7 @@ export class DanfossAllyScheduleCard extends LitElement {
     mode: "move" | "start" | "end",
     ev: PointerEvent,
   ): void {
-    if (!this._draft) {
+    if (!this._draft || this._saving) {
       return;
     }
     ev.preventDefault();
@@ -459,6 +522,7 @@ export class DanfossAllyScheduleCard extends LitElement {
       return;
     }
     this._drag = {
+      pointerId: ev.pointerId,
       day,
       index,
       mode,
@@ -469,11 +533,11 @@ export class DanfossAllyScheduleCard extends LitElement {
     handle.setPointerCapture?.(ev.pointerId);
     globalThis.addEventListener?.("pointermove", this._onDragMove);
     globalThis.addEventListener?.("pointerup", this._onDragEnd);
-    globalThis.addEventListener?.("pointercancel", this._onDragEnd);
+    globalThis.addEventListener?.("pointercancel", this._onDragCancel);
   }
 
   private readonly _onDragMove = (ev: PointerEvent): void => {
-    if (!this._drag || !this._draft) {
+    if (!this._drag || !this._draft || ev.pointerId !== this._drag.pointerId) {
       return;
     }
     const { day, index, mode, startX, trackWidth, orig } = this._drag;
@@ -483,10 +547,24 @@ export class DanfossAllyScheduleCard extends LitElement {
     this._setDay(day, next);
   };
 
-  private readonly _onDragEnd = (): void => {
-    if (this._drag && this._draft) {
+  private readonly _onDragEnd = (ev: PointerEvent): void => {
+    if (!this._drag || ev.pointerId !== this._drag.pointerId) {
+      return; // un autre pointeur (second doigt) : le glisser continue
+    }
+    if (this._draft) {
       const day = this._drag.day;
       this._setDay(day, sortRanges(this._draft[day] ?? []));
+    }
+    this._teardownDrag();
+  };
+
+  /** Geste interrompu par le système (`pointercancel`) : la plage reprend sa place d'avant. */
+  private readonly _onDragCancel = (ev: PointerEvent): void => {
+    if (!this._drag || ev.pointerId !== this._drag.pointerId) {
+      return;
+    }
+    if (this._draft) {
+      this._setDay(this._drag.day, this._drag.orig);
     }
     this._teardownDrag();
   };
@@ -495,7 +573,7 @@ export class DanfossAllyScheduleCard extends LitElement {
     this._drag = undefined;
     globalThis.removeEventListener?.("pointermove", this._onDragMove);
     globalThis.removeEventListener?.("pointerup", this._onDragEnd);
-    globalThis.removeEventListener?.("pointercancel", this._onDragEnd);
+    globalThis.removeEventListener?.("pointercancel", this._onDragCancel);
   }
 
   // --- Rendu ---
@@ -541,7 +619,18 @@ export class DanfossAllyScheduleCard extends LitElement {
               </div>
               ${this._renderEditor()}
             `
-          : html`<div class="hint">${t(this.hass, "schedule_unavailable")}</div>`}
+          : html`
+              <div class="embedded-bar">
+                <span class="read-at">
+                  ${this._ready ? t(this.hass, "schedule_unavailable") : nothing}
+                </span>
+                <div class="actions">
+                  <button class="btn ghost" @click=${this._cancelEdit}>
+                    ${t(this.hass, "cancel")}
+                  </button>
+                </div>
+              </div>
+            `}
       </div>
     `;
   }
@@ -643,7 +732,7 @@ export class DanfossAllyScheduleCard extends LitElement {
   private _renderEditDay(day: DayKey): TemplateResult {
     const ranges = this._draft![day] ?? [];
     const result = validateDay(ranges, day);
-    const bars = dayBars(ranges);
+    const bars = indexedDayBars(ranges);
     const counterClass = result.valid ? "counter" : "counter invalid";
     const codes = this._dayErrorCodes(day, result.errors.map((e) => e.code));
     const indexedRanges = sortIndexedRanges(ranges);
@@ -652,7 +741,7 @@ export class DanfossAllyScheduleCard extends LitElement {
         <div class="eday-row">
           <span class="day-label">${dayLabel(this.hass, day)}</span>
           <div class="track editable">
-            ${bars.map((bar, i) => this._renderEditBar(day, i, bar))}
+            ${bars.map((bar) => this._renderEditBar(day, bar))}
           </div>
           <span
             class=${counterClass}
@@ -671,13 +760,17 @@ export class DanfossAllyScheduleCard extends LitElement {
         <div class="ranges">
           ${indexedRanges.map(({ range, index }) => this._rangeRow(day, index, range))}
           <div class="range-tools">
-            <button class="btn tiny" @click=${() => this._addRange(day)}>
+            <button
+              class="btn tiny"
+              @click=${() => this._addRange(day)}
+              ?disabled=${this._saving}
+            >
               ${ICON_PLUS}<span>${t(this.hass, "add_range")}</span>
             </button>
             <button
               class="btn tiny"
               @click=${() => this._openCopy(day)}
-              ?disabled=${ranges.length === 0 && (this._draft![day]?.length ?? 0) === 0}
+              ?disabled=${ranges.length === 0 || this._saving}
               aria-expanded=${this._copyFrom === day ? "true" : "false"}
             >
               ${ICON_COPY}<span>${t(this.hass, "copy_day")}</span>
@@ -711,7 +804,10 @@ export class DanfossAllyScheduleCard extends LitElement {
     return [...codes];
   }
 
-  private _renderEditBar(day: DayKey, index: number, bar: Bar): TemplateResult {
+  private _renderEditBar(day: DayKey, bar: IndexedBar): TemplateResult {
+    // `bar.index` est l'indice de la plage dans le brouillon ; la position de la
+    // barre (triée, plages mal formées exclues) n'en est pas un.
+    const index = bar.index;
     return html`
       <div class="bar edit" style="left:${bar.leftPct}%;width:${bar.widthPct}%">
         <span
@@ -740,6 +836,7 @@ export class DanfossAllyScheduleCard extends LitElement {
             type="time"
             step="300"
             .value=${r.start}
+            ?disabled=${this._saving}
             @change=${(ev: Event) => this._onTimeInput(day, index, "start", ev)}
           />
         </label>
@@ -750,12 +847,14 @@ export class DanfossAllyScheduleCard extends LitElement {
             type="time"
             step="300"
             .value=${r.end}
+            ?disabled=${this._saving}
             @change=${(ev: Event) => this._onTimeInput(day, index, "end", ev)}
           />
         </label>
         <button
           class="btn icon"
           @click=${() => this._deleteRange(day, index)}
+          ?disabled=${this._saving}
           aria-label=${t(this.hass, "delete_range")}
           title=${t(this.hass, "delete_range")}
         >
@@ -796,7 +895,7 @@ export class DanfossAllyScheduleCard extends LitElement {
           <button
             class="btn primary tiny"
             @click=${this._applyCopy}
-            ?disabled=${this._copyTargets.size === 0}
+            ?disabled=${this._copyTargets.size === 0 || this._saving}
           >
             ${t(this.hass, "copy_apply")}
           </button>
