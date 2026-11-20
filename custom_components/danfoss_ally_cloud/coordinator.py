@@ -65,6 +65,9 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         # refresh from the cached topology and the current head state.
         self.rooms: dict[str, RoomState] = {}
         self.grouped_ids: set[str] = set()
+        # False until a topology read in which every home that lists rooms also gave their
+        # members (see ``room_retired``).
+        self._topology_complete = False
         # Per-home holiday state (read only, contract §4.5), keyed by gid. Refreshed on the
         # topology cadence (hourly): a holiday changes rarely and the read is best-effort.
         self.holidays: dict[str, dict] = {}
@@ -282,10 +285,15 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         """Read the rooms (groups) and their members of each home (path 1a)."""
         rooms_topology: dict[str, Room] = {}
         group_of: dict[str, str] = {}
+        complete = True
         for home in await self.client.async_get_homes():
             gid = home["gid"]
             groups = await self.client.async_list_groups(gid)
             members = await self.client.async_group_members(gid)
+            if groups and not members:
+                # Rooms listed but no membership at all for this home: a degraded answer, not a
+                # home whose rooms vanished. Its rooms are left out, and nothing may be retired.
+                complete = False
             for g in groups:
                 gid_s = str(g["group_id"])
                 member_ids = tuple(members.get(gid_s, ()))
@@ -296,7 +304,24 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
                 )
                 for devid in member_ids:
                     group_of[devid] = gid_s
+        self._topology_complete = complete
         return rooms_topology, group_of
+
+    def room_retired(self, group_id: str) -> bool:
+        """True only when a room is positively known to be gone, so its entities may be removed.
+
+        A room leaves ``rooms`` as soon as none of its heads is in the last device list, and that
+        list can be a SUBSET without any error when one home does not answer
+        (``CloudClient.device_list_complete``). Removing registry entries then would drop the
+        entity ids, names and areas the user set, on a single degraded poll. So a room is retired
+        only when the last device list was complete, the last topology read was complete, and
+        that topology no longer lists the room. Anything less: the entities stay (unavailable).
+        """
+        if group_id in self.rooms or group_id in self._rooms_topology:
+            return False
+        if not self._topology_complete:
+            return False
+        return bool(getattr(self.client, "device_list_complete", False))
 
 
 class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):

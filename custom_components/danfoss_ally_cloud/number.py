@@ -164,7 +164,8 @@ async def async_setup_entry(
         def _async_sync_topology() -> None:
             registry = er.async_get(hass)
             for group_id in list(known_rooms):
-                if group_id not in coordinator.rooms:
+                # Never on a mere absence from ``rooms`` (a partial device list empties it).
+                if coordinator.room_retired(group_id):
                     known_rooms.discard(group_id)
                     for desc in SETPOINTS:
                         uid = f"{group_id}_{desc.key}"

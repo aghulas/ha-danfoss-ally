@@ -326,3 +326,24 @@ async def test_head_climate_mqtt_refuses_out_of_bounds_and_block_error():
     coord.client = _RefusingClient()
     with pytest.raises(HomeAssistantError, match="written on the head and confirmed"):
         await cl.async_set_temperature(**{ATTR_TEMPERATURE: 15.0})
+
+
+async def test_head_climate_mqtt_refuses_a_setpoint_outside_the_heads_own_bounds():
+    """The climate's fixed 5-35 °C range is not the limit: the head's own bounds are, as for the
+    setpoint numbers. Nothing is published for a value the head's upper bound excludes."""
+    from .test_switch import _FakeClient as _MqttFakeClient
+    from .test_switch import _FakeMqttLink
+
+    dev = _mqtt_head(mode="at_home", min_setpoint=5.0, max_setpoint=21.0)
+    client = _MqttFakeClient()
+    coord = _FakeCoord(data={dev.id: dev}, client=client)
+    link = _FakeMqttLink()
+    cl = DanfossHeadClimate(coord, dev.id, link=link, cloud_mqtt_enabled=True)
+
+    with pytest.raises(HomeAssistantError, match="setpoint refused"):
+        await cl.async_set_temperature(**{ATTR_TEMPERATURE: 25.0})  # inside 5-35, above 21
+    assert link.published == []
+    assert client.calls == []
+
+    await cl.async_set_temperature(**{ATTR_TEMPERATURE: 21.0})  # the bound itself is allowed
+    assert link.published == [("gw-1", "node-1", {"118": 210, "16": 210})]

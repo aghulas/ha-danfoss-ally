@@ -139,7 +139,8 @@ async def async_setup_entry(
         """Create or retire climate entities when rooms or group memberships change at runtime."""
         registry = er.async_get(hass)
         for group_id in list(known_rooms):
-            if group_id not in coordinator.rooms:
+            # Never on a mere absence from ``rooms`` (a partial device list empties it).
+            if coordinator.room_retired(group_id):
                 known_rooms.discard(group_id)
                 ent_id = registry.async_get_entity_id("climate", DOMAIN, group_id)
                 if ent_id is not None:
@@ -398,8 +399,12 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
         all_dps = (setting_dp, *companions)
         if not all(mqtt_dp_open(dp, self._supervised_dps) for dp in all_dps):
             raise HomeAssistantError("setpoint write unavailable for this head")
+        # Against the head's OWN bounds, as ``DanfossHeadSetpoint`` does: what a head does with a
+        # setpoint left outside its bounds is not established, so it is refused before sending.
+        low = dev.min_setpoint if dev.min_setpoint is not None else self.min_temp
+        high = dev.max_setpoint if dev.max_setpoint is not None else self.max_temp
         try:
-            raw = encode_setpoint(temp, self.min_temp, self.max_temp, SETPOINT_STEP)
+            raw = encode_setpoint(temp, low, high, SETPOINT_STEP)
         except CloudError as err:
             raise HomeAssistantError(f"setpoint refused: {err}") from err
         block = settings_block(dev, {setting_dp: raw})
