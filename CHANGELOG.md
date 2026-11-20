@@ -1,9 +1,27 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 — Isolated-head thermostat, runtime topology, embedded schedule editor, safer schedule writes
 
-**Not validated on real hardware**: the isolated-head thermostat write, the runtime creation and
-retirement of entities, and the embedded schedule editor are covered by unit tests only.
+Minor release. It also carries what was prepared as 1.2.1, which was never released (a
+`1.2.1-rc1` pre-release exists). Every write path added here is off by default or goes through an
+existing, guarded service: an updated install behaves as 1.2.0 until an option is turned on,
+except for the refusals listed under "Changed", which are deliberate.
+
+**Validation on real hardware**
+
+- Replayed on a real install (2026-11-20, `1.2.1-rc1`): the gateway homes of the building
+  overview.
+- Tried once on a real head (2026-11-20): the reworked preheat write of the cloud-MQTT candidate
+  (publish, then settings block), OFF to ON, confirmed through the local tunnel. The return to OFF
+  and the hold over a night are not established; DP 1 stays a closed candidate.
+- **Not validated on real hardware**: the isolated-head thermostat write, the runtime creation and
+  retirement of entities, the embedded schedule editor and the editor fixes, the schedule-write
+  guards, the device actions and the polling backoff (unit tests only).
+
+**Known issue, not fixed in this release.** A preheat change written by the preheat switch (local
+tunnel only) does not survive the night: on 2026-11-19/20, heads whose preheat differed from the
+cloud's value were back to the cloud's value by about 05:00, with no write from the integration
+(docs/preheat-tunnel-durability.md). The switch is unchanged here.
 
 ### Added
 
@@ -13,7 +31,8 @@ retirement of entities, and the embedded schedule editor are covered by unit tes
   the path proven for the setpoint numbers. The value is checked against the head's own bounds
   before anything is sent; other modes are refused. Off by default: the climate stays read-only.
   The mode is the one the cloud reports; outside a comfort slot a comfort write causes a few
-  minutes of heat demand, as for the comfort number.
+  minutes of heat demand, as for the comfort number. The entity says what a change would do:
+  attributes `write_path` (`cloud_mqtt` / `none`) and `write_setting` (`comfort` / `setback`).
 - **Rooms and isolated heads follow the topology at runtime.** Climates and setpoint numbers are
   created when a room appears or a head becomes isolated, without reloading the integration. A
   room's entities are removed only on positive evidence that the room is gone: a complete device
@@ -22,47 +41,75 @@ retirement of entities, and the embedded schedule editor are covered by unit tes
   unavailable until the next complete read.
 - **Room card: the schedule editor opens inside the card** (embedded mode of the schedule card),
   without a second card frame.
+- **Device actions** in the automation editor: "set target temperature" on a room or an isolated
+  head (through `climate.set_temperature`, which keeps its own checks) and "restore weekly
+  schedule" on a room. The climate is referenced by its entity registry id, so an automation
+  survives a rename.
+- **`icons.json`**: icons of the entities, some by state (online, window, holiday, boiler relay,
+  child lock, window detection, valve opening, fault), and of the services. It is the single
+  source: the icons hard-coded in the entities are gone, so a few fixed icons change.
+- **Building overview**: each gateway of `get_overview` says what it carries (`head_count`,
+  `relay_count`).
 
 ### Changed
 
-- Start-up: the session opened by the first refresh is reused for the cloud-MQTT link, and the
-  gateway keys are fetched once for the local tunnel and the cloud-MQTT link.
-- Cloud-MQTT link: pending write confirmations are guarded across threads and resolved (as not
-  confirmed) when the link stops.
-- WebSocket commands sent without an `entry_id` on an install with several accounts are routed to
-  the account that owns the targeted room, device or home.
-- `operations.py` is split into `ops_common`, `ops_views`, `ops_rooms` and `ops_local`
-  (re-exported from `operations`; no behaviour change).
-
-### Fixed
-
-- Schedule editor: ranges with the same start were mis-indexed; a cancelled drag is handled.
-
-## 1.2.1 — Building overview: gateway homes; preheat cloud-MQTT candidate reworked (still closed)
-
-Patch release. Nothing changes for an install that has not armed a supervised trial: no new
-option, no new default.
-
-**Not validated on real hardware**: the gateway-home change was not replayed on the real install,
-and the reworked preheat write (publish, then settings block) has never been tried — DP 1 is still
-a closed candidate, and the preheat switch keeps writing through the local tunnel as before.
-
-### Changed
-
+- **Schedule writes on an isolated head are guarded.** `set_schedule` and `copy_schedule` refuse
+  an isolated head unless it is online and following a schedule (cloud mode `at_home` /
+  `leaving_home`, schedule reported active, and, when the local tunnel answers, the schedule bit
+  of attribute 0x0025): on an isolated head the cloud holds in manual, the write was accepted and
+  left the head in manual at the cloud's comfort value, asking for heat (real install,
+  2026-11-19). `copy_schedule` checks every target before writing the first. New error
+  `head_not_following_schedule`. Rooms are unaffected.
+- **`restore_schedule` refuses an isolated head** (`isolated_restore_unproven`): it did not bring
+  the head back, and its closing step goes through a route that is accepted and never applied
+  for such a head. Use the Danfoss app. Rooms are unaffected.
+- **WebSocket commands on an install with several accounts**: without `entry_id`, a command is
+  routed to the account that owns the targeted room, device or home; a command that **writes**
+  is refused (`ambiguous_entry`) when no single account owns its target, instead of being applied
+  to the first account. Read commands still fall back to the first account.
 - **Building overview: a gateway's home is voted by everything it carries.** Since 1.2.0 a gateway
   is listed under the home of its heads; relays and sensors now vote too, so a gateway that
-  carries only a boiler relay follows that relay's home instead of a fallback (seen on a real
-  install, 2026-11-20: the listing was already right there, by fallback). Each gateway of
-  `get_overview` also says what it carries (`head_count`, `relay_count`). No frontend change.
-  Not replayed on real hardware.
+  carries only a boiler relay follows that relay's home instead of a fallback.
 - **Preheat (DP 1) cloud-MQTT candidate: the trial write now also posts the settings block.**
   Still closed by default and confirmed by the local tunnel only. The supervised write of
   2026-11-20 showed that the bare `{"1": bool}` publish changes the cloud's DP 1 and not the
   head, and a listen showed that the app's own toggle is followed by a reprogramming of the head
   through the Zigbee tunnel. The candidate write therefore publishes DP 1 and then posts the whole
   settings block through `settings.change`, as the app does for the settings of that block; the
-  tunnel confirmation window goes from 60 to 120 s. **Not tried on real hardware yet.** Nothing
-  changes for an install that has not armed the trial (docs/cloud-mqtt-preheat-proposal.md).
+  tunnel confirmation window goes from 60 to 120 s. Nothing changes for an install that has not
+  armed the trial (docs/cloud-mqtt-preheat-proposal.md).
+- **Polling backs off on repeated cloud errors**: the interval doubles on consecutive transient
+  failures, up to 15 minutes, and returns to the configured value at the first success. A refused
+  sign-in still triggers re-authentication at once.
+- Start-up: the session opened by the first refresh is reused for the cloud-MQTT link, and the
+  gateway keys are fetched once for the local tunnel and the cloud-MQTT link.
+- Cloud-MQTT link: pending write confirmations are guarded across threads and resolved (as not
+  confirmed) when the link stops.
+- `operations.py` is split into `ops_common`, `ops_views`, `ops_rooms` and `ops_local`
+  (re-exported from `operations`; no behaviour change).
+
+### Fixed
+
+- Schedule editor: dragging a bar always moves that bar's own range (the wrong range could move
+  after a keyboard time edit, next to a reversed range, or with two ranges of the same start).
+- Schedule editor: an interrupted drag (`pointercancel`) restores the range instead of keeping
+  the half-done move; a second finger no longer ends the drag.
+- Schedule editor: the draft is frozen while saving, so the schedule shown after a save is
+  exactly what was sent; late server-validation answers are ignored.
+- Schedule and room cards: changing the card's room no longer leaves the previous room's schedule
+  and write job on screen; late responses for the previous room are dropped. Write-job tracking
+  resumes after Home Assistant detaches and re-attaches the card.
+- Room card: the embedded schedule editor can always be closed, even when the schedule cannot be
+  read, and cancelling it no longer replaces the card's own, fresher schedule read.
+
+### Documentation
+
+- `docs/isolated-head-schedule-writes.md`: what the schedule services send to an isolated head,
+  what happened on 2026-11-19, and the trials still to run.
+- `docs/preheat-tunnel-durability.md`: a tunnel-only preheat write does not survive the night.
+- `docs/architecture.md`, `docs/interface-contract.md`: isolated-head thermostat write and its
+  behaviour outside a comfort slot, runtime topology sync and `DanfossCoordinator.room_retired`,
+  account resolution of the WebSocket commands, schedule-write guards.
 
 ## 1.2.0 — Cloud-MQTT channel for isolated heads (gated), non-blocking local start, stale cleanup, reauth
 
