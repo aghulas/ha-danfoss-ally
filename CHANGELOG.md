@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Building overview: a gateway's home is voted by everything it carries.** Since 1.2.0 a gateway
+  is listed under the home of its heads; relays and sensors now vote too, so a gateway that
+  carries only a boiler relay follows that relay's home instead of a fallback (seen on a real
+  install, 2026-11-20: the listing was already right there, by fallback). Each gateway of
+  `get_overview` also says what it carries (`head_count`, `relay_count`). No frontend change.
+  Not replayed on real hardware.
+
 ## 1.2.0 — Cloud-MQTT channel for isolated heads (gated), non-blocking local start, stale cleanup, reauth
 
 Minor release. It gathers the sections previously listed as unreleased: the gated cloud-MQTT write
@@ -130,9 +141,6 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   to the earlier home); one that carries no head of a known home falls back to its own home in the
   per-home device lists, then to the first home as before. `totals.gateways` is unchanged. No
   frontend change: the panel already reads `gateways` per home.
-  Relays and sensors vote too, so a gateway that carries only a boiler relay follows that relay's
-  home (real install, 2026-11-20), and each gateway of the overview now says what it carries
-  (`head_count`, `relay_count`).
 - **An offline boiler relay showed `off` instead of unavailable.** The relay binary sensor stayed
   available while the relay was offline and served the last DP 1 the cloud kept (seen on a real
   install, 2026-11-19, while the relay's MQTT availability said offline). It is now unavailable

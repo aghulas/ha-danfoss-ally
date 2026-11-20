@@ -299,8 +299,9 @@ cached state** — no extra cloud call (added in 0.6.0, axis D).
   gateway named after a building of one home carries only the relay of the other, and belongs
   there). A gateway carrying nothing of a known home is listed under its own home in the per-home
   device lists, else under the first home. Every gateway is listed once, so `totals.gateways` is
-  the gateway count. `head_count` / `relay_count` say what the gateway carries. (Until 1.2.0-rc4
-  every gateway was listed under the first home.)
+  the gateway count. `head_count` / `relay_count` say what the gateway carries (after 1.2.0, as
+  the vote of relays and sensors: in 1.2.0 only heads vote). (Until 1.2.0-rc4 every gateway was
+  listed under the first home.)
 - **Home of a single head**: exact, from the per-home device list (`tuya.m.my.group.device.list`
   with `gid`). A head of unknown home goes to the first home (kept visible and counted).
 - **Name of a single-head room**: the app room (type 4) of a head **cannot be read**. Observed on
