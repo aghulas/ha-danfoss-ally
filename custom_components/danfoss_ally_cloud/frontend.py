@@ -3,7 +3,7 @@
 Contract §6:
 - serves the `frontend/` folder at URL `/danfoss_ally_cloud/frontend/`
   (`async_register_static_paths`);
-- declares the Lovelace resource `…/danfoss-ally-cloud.js?v=<version>` for storage-mode
+- declares the Lovelace resource `…/danfoss-ally-cloud.js?v=<version>-<hash>` for storage-mode
   dashboards, so the card appears in the picker without manual steps (in YAML mode the user adds
   it themselves — see README);
 - registration IN `async_setup` (once per instance), never in `async_setup_entry`;
@@ -23,6 +23,7 @@ gracefully (see below).
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 
@@ -120,15 +121,31 @@ def _async_remove_panel(hass: HomeAssistant) -> None:
     hass.data[_DATA_PANEL_REGISTERED] = False
 
 
+def _bundle_digest() -> str | None:
+    """First 8 hex characters of the bundle's SHA-256, or None if it cannot be read (blocking)."""
+    try:
+        return hashlib.sha256((FRONTEND_DIR / JS_FILENAME).read_bytes()).hexdigest()[:8]
+    except OSError:
+        return None
+
+
 async def _async_resource_url(hass: HomeAssistant) -> str:
-    """Resource URL with the integration version (cache-busting, contract §6)."""
+    """Resource URL with the integration version and the bundle's hash (cache-busting, §6).
+
+    The version alone is not enough: every pre-release of a version (``1.3.0-rc1``, ``-rc2``...)
+    ships the same manifest version, so the browser kept serving the previous bundle from its cache
+    until a forced reload (seen on 1.3.0-rc3). The hash of the bundle changes whenever its content
+    does, whatever the version.
+    """
     version = "0"
     try:
         integration = await async_get_integration(hass, DOMAIN)
         version = str(integration.version)
     except Exception as err:  # noqa: BLE001 - the version is not vital
         _LOGGER.debug("Integration version not found: %s", err)
-    return f"{FRONTEND_URL_BASE}/{JS_FILENAME}?v={version}"
+    digest = await hass.async_add_executor_job(_bundle_digest)
+    tag = f"{version}-{digest}" if digest else version
+    return f"{FRONTEND_URL_BASE}/{JS_FILENAME}?v={tag}"
 
 
 async def _async_register_static_path(hass: HomeAssistant) -> None:

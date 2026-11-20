@@ -80,7 +80,7 @@ Home Assistant variables, keyboard-usable, `en` / `fr` texts.
 How it works:
 
 - the integration serves its frontend at URL `/danfoss_ally_cloud/frontend/` and declares the
-  resource `…/danfoss-ally-cloud.js?v=<version>` for **storage-mode** dashboards (the default), as
+  resource `…/danfoss-ally-cloud.js?v=<version>-<bundle hash>` for **storage-mode** dashboards (the default), as
   well as the `/danfoss-ally-cloud` custom panel — no manual step needed;
 - the cards check their version on load and **offer to reload** the page when a new version has been
   installed.

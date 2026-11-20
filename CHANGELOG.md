@@ -170,6 +170,11 @@ cloud's value were back to the cloud's value by about 05:00, with no write from 
 
 ### Fixed
 
+- **The cards' bundle was cached across pre-releases.** Its URL only carried the manifest
+  version (`?v=1.3.0`), the same for every `1.3.0-rcN`, so after an update the browser kept the
+  previous cards and panel until a forced reload (seen on 1.3.0-rc3). The URL now also carries the
+  first 8 characters of the bundle's SHA-256 (`?v=1.3.0-<hash>`); an existing Lovelace resource
+  is updated in place on the next start.
 - **Per-device cloud read returned nothing for every head.** `smartlife.m.device.get` v4.0 carries
   the DPs under `dataPointInfo.dps`, not at the top level, so the read always came back empty. Two
   consequences, both fixed: the post-command refresh (`post_command_refresh`) never overlaid

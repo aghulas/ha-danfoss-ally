@@ -31,13 +31,13 @@ from custom_components.danfoss_ally_cloud.writejob import JobManager
 
 async def test_frontend_error_paths_and_idempotency(hass: HomeAssistant) -> None:
     """Best-effort error paths and idempotency in frontend registration/cleanup."""
-    # _async_resource_url falls back to ?v=0 on integration lookup failure
+    # _async_resource_url falls back to version 0 on integration lookup failure (hash kept)
     with patch(
         "custom_components.danfoss_ally_cloud.frontend.async_get_integration",
         side_effect=RuntimeError("boom"),
     ):
         url = await frontend._async_resource_url(hass)
-    assert url.endswith("?v=0")
+    assert "?v=0-" in url
 
     # _async_register_static_path: once registered, second call is a no-op
     hass.data[frontend._DATA_STATIC_REGISTERED] = True
