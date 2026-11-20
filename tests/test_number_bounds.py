@@ -184,11 +184,32 @@ class _Hass:
 
 
 class _Entry:
+    """The shape of a config entry the platform setup uses: an id and unload callbacks."""
+
     entry_id = "e1"
+
+    def __init__(self):
+        self.unloads: list = []
+
+    def async_on_unload(self, func):
+        self.unloads.append(func)
 
 
 class _SetupCoord(_FakeCloudCoord):
+    """A coordinator as the platform setup sees it: rooms, and listeners for the topology sync."""
+
     rooms: dict = {}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.listeners: list = []
+
+    def async_add_listener(self, update_callback, context=None):
+        self.listeners.append(update_callback)
+        return lambda: self.listeners.remove(update_callback)
+
+    def room_retired(self, group_id):
+        return False
 
 
 REMOVED: list[str] = []  # unique ids the last platform setup flagged as closed

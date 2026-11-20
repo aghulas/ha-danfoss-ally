@@ -32,6 +32,19 @@ class _FakeCoord:
         self.commanded: list[str] = []
         self.members = {"77": ("h1", "h2")}
 
+        self.listeners: list = []
+        self.retired: set[str] = set()
+
+    def group_of(self, head_id):
+        return next((g for g, heads in self.members.items() if head_id in heads), None)
+
+    def async_add_listener(self, update_callback, context=None):
+        self.listeners.append(update_callback)
+        return lambda: self.listeners.remove(update_callback)
+
+    def room_retired(self, group_id):
+        return group_id in self.retired
+
     def room_members(self, group_id):
         return self.members.get(group_id, ())
 
@@ -71,9 +84,13 @@ def _num(desc_key, room=None, client=None):
 async def _setup(room):
     coord = _FakeCoord(rooms={room.group_id: room})
     hass = SimpleNamespace(data={DOMAIN: {"e1": {DATA_COORDINATOR: coord}}})
-    entry = SimpleNamespace(entry_id="e1")
+    unloads: list = []
+    entry = SimpleNamespace(entry_id="e1", async_on_unload=unloads.append)
     ajoutees = []
     await number.async_setup_entry(hass, entry, ajoutees.append)
+    # The platform always subscribes to the coordinator for the runtime topology sync, and hands
+    # the unsubscribe to the entry.
+    assert len(coord.listeners) == 1 and len(unloads) == 1
     return ajoutees[0]
 
 

@@ -21,7 +21,8 @@ the setpoint bounds and the pause, comfort and setback setpoints of an isolated 
 2026-11-20); preheat (DP 1, confirmed by the tunnel only) is implemented as a candidate, closed
 until its supervised write; a diagnostic entity reports the link state. Wire format: `docs/cloud-mqtt-publish.md`; procedure for a first
 write of a new DP: `docs/first-write-procedure.md`. With the option off, an isolated head's child
-lock, bounds and setpoints have no path (the switch is unavailable, the numbers are absent).
+lock, bounds and setpoints have no path (the switch is unavailable, the numbers are absent, and
+the head's thermostat is read-only).
 
 "MQTT" names two unrelated things in this project. **Tuya cloud MQTT** is a channel *to the heads*
 (above). **MQTT publishing** (`mqtt_publisher.py`) sends the integration's state *to the user's own
@@ -69,7 +70,7 @@ frames, so neither channel asks anything more of the user.
 
 | Operation | Grouped head (in a room) | Isolated head |
 |---|---|---|
-| Comfort / setback setpoint | Cloud HTTP: room publish, then rewrite the room schedule (R3) | Cloud MQTT when enabled and connected (proven 2026-11-19/20 on a head following its schedule), followed by the settings block over HTTP, as the app does; otherwise no entity. The comfort write is refused when the head is not in a schedule mode. The head rewrites its own schedule transitions: no schedule rewrite |
+| Comfort / setback setpoint | Cloud HTTP: room publish, then rewrite the room schedule (R3) | Cloud MQTT when enabled and connected (proven 2026-11-19/20 on a head following its schedule), followed by the settings block over HTTP, as the app does; otherwise no `number` entity and a read-only thermostat. Two entry points, one write: the head's `number` entities (comfort or setback, chosen by the entity) and the head's thermostat (the setting of the mode the cloud reports, below). The comfort write is refused when the head is not in a schedule mode. The head rewrites its own schedule transitions: no schedule rewrite |
 | Pause setpoint | No path | Cloud MQTT when enabled and connected (proven 2026-11-19, read back in the app and the cloud only); otherwise no entity |
 | Weekly schedule | Cloud HTTP | Cloud HTTP |
 | Child lock | Cloud HTTP: room publish (applies to **every** head of the room) | Cloud MQTT when enabled and connected; otherwise unavailable |
@@ -83,6 +84,22 @@ frames, so neither channel asks anything more of the user.
 
 A setting switch states its route in its attributes (`write_path`, `write_scope`,
 `room_head_count`), so the user sees when a write will touch the whole room.
+
+**Thermostat of an isolated head.** Read-only while `enable_cloud_mqtt` is off: a setpoint change
+is refused with a clear error. With the option on and the link connected, in the modes `at_home`
+and `leaving_home`, a setpoint change writes over cloud MQTT the **setting of the mode the cloud
+reports**: comfort (DP 118 + 16) for `at_home`, setback (DP 119) for `leaving_home`, then the
+settings block over HTTP; the value is checked against the head's own bounds first. This is the
+write of the head's setpoint numbers, with nothing added. The entity says what a write would do in
+its attributes: `write_path` (`cloud_mqtt` or `none`) and, when a write is possible,
+`write_setting` (`comfort` or `setback`).
+
+The reported mode is a label (R5): it does not say whether the head is in a comfort slot of its
+schedule. A comfort write made outside a comfort slot still changes the comfort setting, and its
+DP 16 sets the head's current setpoint at once: the head asks for heat for 1 to 5 minutes, then
+goes back to its schedule's value by itself (real hardware, 2026-11-19). The thermostat's target
+temperature stays the **active** setpoint (DP 171), so after such a write it shows the schedule's
+value again, not the value written; the comfort setting is in `setpoints.comfort`.
 
 Order for an isolated head's setting: (1) a DP under **supervised trial** on cloud MQTT goes through
 cloud MQTT, so the trial exercises the channel it is meant to prove and the tunnel stays free to
@@ -130,6 +147,32 @@ for a DP proven on it; (4) otherwise unavailable.
   minutes; an effect appeared more than ten minutes later and left the head in manual mode, at
   the cloud's comfort value. What the app does to bring an isolated head back to its schedule is
   not established; do not rely on the HTTP path for it.
+- **Thermostat comfort write outside a comfort slot.** The isolated head's thermostat picks
+  comfort or setback from the reported mode (a label, R5). Whether a comfort write should be
+  refused when the head's active setpoint shows it is not in a comfort slot is not decided; today
+  it is sent, and the entity states which setting it changes (`write_setting`).
+
+## Entities follow the topology at runtime
+
+Rooms and memberships change while Home Assistant runs (room management actions, or the Danfoss
+app). The `climate` and `number` platforms listen to the coordinator and adjust their entities on
+each update, with no reload of the entry:
+
+| Change seen in the topology | Effect |
+|---|---|
+| A room appears | Its thermostat and its comfort / setback numbers are created (numbers: verified products only) |
+| A head leaves its room (isolated) | It gets its own thermostat; with `enable_cloud_mqtt` on and a link, its bounds and setpoint numbers |
+| A head joins a room | Its own thermostat and its isolated-head numbers are removed from the registry |
+| A room is gone | Its thermostat and numbers are removed from the registry, **on positive evidence only** |
+
+Adding is safe on any poll. Removing a room's entities deletes the entity ids, names and areas the
+user set, so it needs proof: `DanfossCoordinator.room_retired` is true only when the last device
+list was **complete** (every home answered), the last topology read was **complete** (every home
+that lists rooms also gave their members), and that topology no longer lists the room. A room that
+merely drops out of `coordinator.rooms` (one home did not answer, so none of its heads is in the
+list; or a degraded topology read) keeps its entities, unavailable, and they come back by
+themselves at the next complete read. A head's own thermostat is removed when the topology places
+the head in a room, which is positive by nature.
 
 ## Layers
 
@@ -149,8 +192,9 @@ for a DP proven on it; (4) otherwise unavailable.
 - `mqtt_write.py` — the one cloud-MQTT write routine shared by the entities: validate, publish,
   confirm (echo, else per-device read), clear error otherwise.
 - `coordinator.py` — conservative cloud polling, per-device overlay for recently commanded heads,
-  overlay of the local truths.
-- Platforms: `climate` (setpoint, presets), `sensor` (battery, valve, heat request, fault code),
+  overlay of the local truths; room topology and `room_retired` (above).
+- Platforms: `climate` (room thermostat; isolated head's thermostat, written over cloud MQTT when
+  enabled), `sensor` (battery, valve, heat request, fault code),
   `binary_sensor` (online, window), `number` (room setpoints; an isolated head's bounds and
   setpoints over cloud MQTT), `switch` (child lock, window, preheat).
 - `mqtt_publisher.py` — MQTT publishing, modes `discovery` / `zigbee2mqtt`, source `cloud` /

@@ -19,6 +19,10 @@ if TYPE_CHECKING:
     from .coordinator import DanfossCoordinator
 
 
+# --- Room management writes (contract §4.7, §5.2). Admin-gated by the callers; structural writes
+# on the live account -> gated on real-hardware validation. ------------------------------------
+
+
 def _validate_heads(coordinator, devices: list[str], *, require_verified: bool) -> None:
     if not devices:
         raise OperationError("empty_devices", "give at least one head")
@@ -83,7 +87,14 @@ async def create_room(
     devices: list[str],
     home: str | None = None,
 ) -> dict:
-    """Create a room and attach the given heads (contract §4.7). Verified products only."""
+    """Create a room and attach the given heads (contract §4.7). Verified products only.
+
+    The room MUST be created in the home the heads belong to, otherwise the heads cannot join it and
+    the room is left empty. ``home`` (a gid) selects it explicitly (the reliable path on a
+    multi-home account, mirroring the app, which creates in the current home); when omitted the home
+    is **inferred from the devices** and a single shared home must resolve, else ``ambiguous_home``
+    (pass ``home``) or ``unknown_home``.
+    """
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     _validate_heads(coordinator, devices, require_verified=True)
     gid = await _resolve_devices_home(coordinator, list(devices), home)
@@ -96,7 +107,13 @@ async def create_room(
 async def _resolve_devices_home(
     coordinator, devices: list[str], explicit_home: str | None = None
 ) -> str:
-    """The home gid to create the room in: explicit if given (validated), else inferred."""
+    """The home gid to create the room in: explicit if given (validated), else inferred.
+
+    Inference: the single home that contains ALL the devices. Raises ``unknown_home`` if a device is
+    in no home (or the explicit gid is unknown) and ``ambiguous_home`` if no single home holds them
+    all (heads span homes, or the backend did not filter the device list by gid) — never a silent
+    guess, which would create the room in the wrong home.
+    """
     homes = await _run_cloud_write(coordinator.client.async_get_homes)
     valid = {str(h["gid"]) for h in homes}
     if explicit_home is not None:
@@ -166,7 +183,11 @@ async def detach_heads(hass: HomeAssistant, store: dict, target: dict, devices: 
 async def set_relay_room(
     hass: HomeAssistant, store: dict, relay: str, target: dict, linked: bool
 ) -> dict:
-    """Link / unlink a room to a boiler relay (contract §4.6)."""
+    """Link / unlink a room to a boiler relay (contract §4.6). ⚠ Gated on real-hardware validation.
+
+    The room is matched by name against the relay's eligible rooms (``relay_rooms`` cache), so its
+    cloud ``roomId`` is used for the edit. Admin-gated by the caller.
+    """
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     dev = coordinator.data.get(relay)
     if dev is None or not dev.is_relay:
@@ -193,7 +214,15 @@ async def set_relay_room(
     return {"relay": relay, "room_id": str(match["room_id"]), "linked": bool(linked)}
 
 
-# --- Sub-device UNBIND / "disconnect" (contract write-safety). -----------------------------------
+# --- Sub-device UNBIND / "disconnect" (contract write-safety). The most DESTRUCTIVE cloud write:
+# the device leaves the Zigbee network and disappears from the account; re-pairing needs a physical
+# action on site. Scope (widened 2026-11-18, mirroring the MCP connector PR #7): ANY sub-device —
+# head, sensor, relay or other — but a GATEWAY is REFUSED (unbinding it would drop all its heads at
+# once). Unbind is a Tuya-generic call keyed on the category, NOT on a verified product, so the
+# head-only ``write_allowed`` gate does not apply here; the safety is the category check plus the
+# triple gate: opt-in (DATA_HEAD_UNBIND, OFF by default), admin with allow_internal=False (caller),
+# AND an explicit ``confirm`` flag — no one-click path. Captured/validated on real hardware via the
+# MCP connector (2026-11-18); validation THROUGH this integration is still pending. ----------------
 
 
 def _require_unbind(store: dict) -> None:
@@ -206,7 +235,15 @@ def _require_unbind(store: dict) -> None:
 
 
 def _require_unbindable_device(coordinator: DanfossCoordinator, target: dict):
-    """Resolve a ``{type:"device", id}`` target to a known, UNBINDABLE sub-device, or raise."""
+    """Resolve a ``{type:"device", id}`` target to a known, UNBINDABLE sub-device, or raise.
+
+    Mirrors the MCP connector: the target must be ``type=device`` (``device_only``) and a known
+    device (``unknown_target``); a GATEWAY is refused (``gateway_target``) because unbinding it
+    would drop every head it carries. Any other category — head, sensor, relay, or other
+    sub-device — is accepted. No verified-product gate: unbind is a Tuya-generic call keyed on the
+    category, so the head-only ``write_allowed`` check (local-tunnel writes) must NOT block a
+    legitimate sensor/relay. Returns the resolved ``DanfossDevice``.
+    """
     if target.get("type") != "device":
         raise OperationError("device_only", "disconnect_head targets a sub-device (type=device)")
     dev = coordinator.data.get(str(target.get("id")))
@@ -228,7 +265,22 @@ async def disconnect_head(
     wipe_data: bool = False,
     confirm: bool = False,
 ) -> dict:
-    """Unbind (disconnect) a sub-device via ``smartlife.m.device.reset``. ⚠ DESTRUCTIVE."""
+    """Unbind (disconnect) a sub-device via ``smartlife.m.device.reset``. ⚠ DESTRUCTIVE.
+
+    Scope: any sub-device — head, sensor, relay or other — but a GATEWAY is refused. The name
+    ``disconnect_head`` is kept for backward compatibility (the service shipped head-only); it now
+    covers every detachable sub-device, mirroring the MCP connector.
+
+    Gates, in order: opt-in flag (``unbind_disabled``), target is a known non-gateway sub-device
+    (``device_only`` / ``unknown_target`` / ``gateway_target``), and an explicit ``confirm=True``
+    (``confirmation_required``) so it can never fire by accident. The caller also enforces admin
+    (``allow_internal=False``). No verified-product gate (category-generic call).
+
+    ``wipe_data`` (= ``resetFactory``): ``False`` = "disconnect" (identity kept; re-added on its own
+    gateway without a wipe, the device returns with the SAME devId); ``True`` = "disconnect and wipe
+    data" (factory reset — a NEW devId, identity/name LOST, IRREVERSIBLE on the identity). In both
+    cases re-pairing needs a physical action on site (permit-join is MQTT, not path 1a).
+    """
     _require_unbind(store)
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     dev = _require_unbindable_device(coordinator, target)
