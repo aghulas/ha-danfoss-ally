@@ -94,6 +94,15 @@ HA and in the published MQTT state within one to two polls, while the bulk list 
 old value: `smartlife.m.device.get` **is** fresher than the bulk list for a head. The option stays
 off by default (extra reads on the user's account).
 
+**Correction (2026-11-20).** That conclusion cannot have come from the per-device route: version 4.0
+carries the DPs under `dataPointInfo.dps`, and `async_get_device_dps` read only a top-level `dps`,
+so it returned `None` for every head and the overlay never applied. What was observed on 2026-11-19
+is the extra refresh at the end of the settle delay (bulk list). Found when the viewing-direction
+trial (DP 101) was refused for want of that read; fixed by reading `dataPointInfo.dps`. A direct
+read of a head on 2026-11-20 shows `dataPointInfo.dpsTime` stamping DP 133 at the second the
+orientation was written, so the route is fresh; its effect through the overlay is still to observe
+on real hardware.
+
 ## Tuya cloud MQTT channel — staged, each stage gated
 
 Background and routing: `docs/architecture.md`. The app writes an isolated head's settings with a DP

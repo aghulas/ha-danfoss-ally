@@ -345,9 +345,20 @@ class CloudClient:
         HEAD is the R-3 hypothesis to confirm on real hardware (pending a validation session). If it
         proves not fresher, only this method's backing route changes (e.g. the official Danfoss REST
         per-device route), not the mechanism.
+
+        Shape (observed on real hardware, 2026-11-20): version 4.0 carries the DPs under
+        ``dataPointInfo.dps`` (with ``dataPointInfo.dpsTime``), NOT at the top level. Reading only a
+        top-level ``dps`` returned None for every head, which silently disabled the post-command
+        overlay and every confirmation that reads this route (DP 101). A top-level ``dps`` is still
+        accepted when ``dataPointInfo`` carries none.
         """
         r = await self._request("smartlife.m.device.get", "4.0", {"devId": dev_id})
-        dps = r.get("dps") if isinstance(r, dict) else None
+        if not isinstance(r, dict):
+            return None
+        info = r.get("dataPointInfo")
+        dps = info.get("dps") if isinstance(info, dict) else None
+        if not isinstance(dps, dict) or not dps:
+            dps = r.get("dps")
         if not isinstance(dps, dict) or not dps:
             return None
         return {str(k): v for k, v in dps.items()}
