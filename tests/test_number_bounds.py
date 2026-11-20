@@ -265,11 +265,11 @@ async def test_bound_entities_only_for_isolated_verified_heads():
 
 
 async def test_a_trial_on_another_head_does_not_touch_the_bounds():
-    """A trial of the remaining candidates armed on one head changes nothing for the proven
+    """A trial of the remaining candidate armed on one head changes nothing for the proven
     bounds: both isolated heads keep theirs, unmarked."""
     ents = await _setup(
         [_head(dev_id="iso"), _head(dev_id="iso2")],
-        supervised=frozenset({118, 16, 119}),
+        supervised=frozenset({1}),
         trial_head="iso",
     )
     assert len(ents) == 4 and _removed_bounds() == []

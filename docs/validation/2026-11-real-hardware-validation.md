@@ -1,6 +1,6 @@
 # Real-hardware validation — results
 
-**Dates:** 2026-11-18 / 2026-11-19.
+**Dates:** 2026-11-18 / 2026-11-19 / 2026-11-20.
 Real-hardware validation on a large real install (~99 heads, two homes). Anonymised: room names,
 identifiers and site details replaced by neutral labels.
 Plan: [`../real-validation-plan.md`](../real-validation-plan.md). Preheat curve reading (§3):
@@ -27,6 +27,7 @@ Plan: [`../real-validation-plan.md`](../real-validation-plan.md). Preheat curve 
 | Head R | Preheat ON, switched OFF in the controlled trial |
 | Room S | Three-head room at 5 °C (frost protection); head #3 offline |
 | Sensor T | A Danfoss room sensor (not a head) |
+| Head U | Isolated head (no room) following its own weekly schedule; test head of the DP 118 / 119 trial |
 | relay 1 / relay 2 | Danfoss relays of Building 1 / Building 2 |
 
 Entity ids are written with placeholders, e.g. `switch.<room_a>_child_lock`.
@@ -699,7 +700,8 @@ where it was found in mode 3 with a flat 5 °C schedule and preheat on. How the 
 produced is not known, and it was not recreated. To re-read through the tunnel the next morning.
 
 **To run the two remaining trials**: an isolated head that already follows a schedule, during one
-of its comfort slots, in daytime.
+of its comfort slots, in daytime. (Run the same night and the next morning on another head: see
+the section after the incident below.)
 
 ### Incident — Home Assistant restarted by other sessions during the trial
 
@@ -708,6 +710,102 @@ Home Assistant was restarted three times by other sessions while the trial was a
 163 s for the write lock, then ran after the restart and was read back through the tunnel. No write
 was lost, but the "one driver of the live install at a time" rule did not hold. The options stayed
 armed across the restarts, as designed.
+
+## Supervised cloud-MQTT first writes (DP 119, DP 118 + 16), 2026-11-19 ~23:00 – 2026-11-20 ~08:40
+
+Procedure: `docs/first-write-procedure.md`. Build `1.2.0-rc4` (commit `c8fa583`). Test head:
+**Head U**, an isolated head on a verified model that follows its own weekly schedule — comfort
+slots 08:30–17:30 on four days, transitions 00:00 → 14 °C, 08:30 → 21 °C, 17:30 → 14 °C. Its
+schedule was **not** touched to prepare the trial (a schedule write pushes the whole week, R2, and
+would have blurred the very question asked). The owner at the keyboard with the Danfoss app, one
+explicit go-ahead per step. One setting opened at a time on that head only. Independent read-back:
+the head read through the **local tunnel** by the MCP connector (weekly schedule, current setpoint
+`0x0012`, setpoint source, schedule mode, preheat `0x0025`).
+
+Options found and left: `enable_cloud_mqtt` off, no supervised DP, no trial head,
+`cloud_mqtt_probe` on (same options fingerprint before and after).
+
+Baseline (tunnel, cloud per-device route and Home Assistant agreeing): comfort 21 °C, setback
+14 °C, current setpoint 14 °C (night, setback period), bounds 5 / 21 °C, schedule mode 3, preheat
+on, setpoint source "schedule", child lock on.
+
+**Armed entity**: on Head U the setting's number showed `write_path: cloud_mqtt`,
+`write_scope: head`, `write_trial: true`; another isolated head had no comfort or setback number,
+and its pause number (proven DP) carried no trial marker.
+
+### DP 119 — setback 14 → 13.5 → 14 °C, during a setback period ✅
+
+| Time | Step | Schedule: setback transitions | Schedule: comfort | Current setpoint | Source |
+|---|---|---|---|---|---|
+| 23:00 | baseline | 14 | 21 | 14 | schedule |
+| 23:03:46 | write 13.5 (returned ok in 0.6 s) | | | | |
+| +15 s | | 14 | 21 | 14 | schedule |
+| +1 min 15 | | **13.5** (00:00 and 17:30, seven days) | 21 | 14 | schedule |
+| +5 min | | 13.5 | 21 | **13.5** | schedule |
+| +15 min | | 13.5 | 21 | 13.5 | schedule |
+| 23:19:06 | restore 14 (ok in 0.6 s) | | | | |
+| +1 min 30 | | **14** | 21 | **14** | schedule |
+| +5 min | | 14 | 21 | 14 | schedule |
+
+Cloud (per-device route): `leaving_home_setting` already at the new value 15 s after each write;
+`OccupiedSetpoint` followed the head's current setpoint, `SetpointChangeSource` "Schedule". Home
+Assistant: setback and active setpoint agreeing at each step. App (owner): setback 13.5, then 14.
+Schedule mode 3 and preheat on at every read.
+
+### DP 118 + 16 — comfort 21 → 20.5 °C outside a comfort slot, 20.5 → 21 °C inside one ✅
+
+After re-arming (23:39) the "Cloud MQTT link" sensor stayed "connecting" for about a minute before
+"connected" (a few seconds at 23:02); the write was sent once it was connected.
+
+| Time | Step | Schedule: comfort transitions | Current setpoint | Source |
+|---|---|---|---|---|
+| 23:39 | baseline | 21 | 14 | schedule |
+| 23:41:48 | write 20.5 (ok in 0.7 s) | | | |
+| +15 s | | 21 | **20.5** | **external** |
+| +1 min 15 | | **20.5** (08:30, the four days) | 20.5 | external |
+| +5 min | | 20.5 | **14** | **schedule** |
+| +15 min | | 20.5 | 14 | schedule |
+| night | head left at comfort 20.5, trial armed | | | |
+| 08:29 | | 20.5 | 14 | schedule |
+| 08:30:36 | comfort slot started | 20.5 | **20.5** | schedule |
+| 08:30:45 | restore 21 (ok in 0.6 s) | | | |
+| +15 s | | 20.5 | **21** | external |
+| +50 s | | **21** | 21 | external |
+| +5 min | | 21 | 21 | **schedule** |
+
+Cloud: `at_home_setting` and `temp_set` at the new value 15 s after each write;
+`SetpointChangeSource` "Externally" then "Schedule", following the head; `work_state` "Heat"
+while the current setpoint was at the comfort value at night, "NoHeat" once it fell back. Home
+Assistant and the app (owner: comfort 20.5, then 21) agreeing. Setback transitions, bounds,
+schedule mode 3 and preheat on unchanged at every read.
+
+What the two trials establish:
+
+- **An isolated head rewrites its own schedule transitions**, comfort and setback alike, about a
+  minute after the write. No schedule rewrite is needed (R3 is a rule for rooms). The 08:30
+  transition, which applied the value written the evening before, confirms it from the head's own
+  behaviour.
+- **DP 16 sets the current setpoint at once** (source "external"); the head returns to its
+  schedule within five minutes. Outside a comfort slot that means a few minutes of heat demand at
+  the comfort value, then the setback value again; inside one, the value stays.
+- **DP 119 alone does not set the current setpoint at once**; in a setback period the head aligns
+  by itself one to five minutes later.
+- **The settings block** posted after each write (`{"1", "118", "119", "121"}`) did not change the
+  real preheat.
+- **Confirmation**: every call returned in 0.6–0.7 s, which fits the gateway's echo; as before the
+  source was not read from the logs.
+- Seen at 08:30, before the restore write: the cloud's `switch_state` went from true to false at
+  the same time as the head's "preheat in progress" flag. It follows the end of the head's
+  anticipation, not the write.
+
+Not covered: a head in manual mode or without a schedule; DP 119 written during a comfort slot;
+the per-device fallback of the confirmation; the other heads were not re-read one by one.
+
+**State left**: Head U as found (tunnel read after disarming: comfort 21, setback 14, current
+setpoint 21 in its comfort slot, source "schedule", mode 3, preheat on). Options as found.
+
+**Verdict: ✅ DP 118 + 16 and DP 119 proven on Tuya cloud MQTT for an isolated head following its
+schedule.**
 
 ## §3 — online vs update_time (autonomous spot-check)
 

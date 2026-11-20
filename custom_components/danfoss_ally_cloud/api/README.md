@@ -20,7 +20,7 @@ It provides:
   gateway localKey), topics, DP-publish payload, broker credential derivation.
 - `mqtt_client` — `CloudMqttLink`, the live link built on that codec (paho-mqtt, extra `mqtt`):
   inbound report decoding, DP publish, confirmation by the gateway's echo. One connection per Tuya
-  session; the write path is validated for DP 30 only (`writes.MQTT_WRITE_DPS`).
+  session; the write path carries the DPs proven on real hardware only (`writes.MQTT_WRITE_DPS`).
 
 Wire format and derivations: `docs/cloud-mqtt-publish.md` in the repository.
 
@@ -58,7 +58,8 @@ pip install -e '.[local,mqtt]'         # development install from the repository
   The isolated-head setpoints as candidates too: DP 118 (comfort) with its companion DP 16,
   DP 119 (setback). After their supervised writes on real hardware (2026-11-19), DP 116, 18, 27
   and 120 moved from `MQTT_CANDIDATE_DPS` to `MQTT_WRITE_DPS`: they pass `mqtt_write_value()`
-  without `supervised`; DP 118, 16 and 119 remain candidates. Preheat (DP 1) as a candidate, and
+  without `supervised`. DP 118, 16 and 119 followed after their own supervised writes
+  (2026-11-19/20). Preheat (DP 1) as a candidate, the only one left, and
   `writes.MQTT_TUNNEL_CONFIRMED_DPS`: the DPs whose write the gateway's echo and the cloud read
   cannot confirm (DP 1), to be confirmed by a local-tunnel read of the head.
 - **0.3.0** — `gw_id` on `async_write_setting` (the head's gateway; it defaulted to the head

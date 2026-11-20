@@ -50,6 +50,9 @@ the moment.
 setpoint, the backend rewrites the schedule (one day is enough, R2). Without it the current setpoint
 changes, but the transitions keep the old value and the head reverts to it at the next schedule
 change.
+This is a rule for **rooms**. An **isolated** head written over Tuya cloud MQTT (DP 118 + 16,
+DP 119) updates the transitions of its own schedule by itself, with no rewrite (established on real
+hardware on 2026-11-19/20, §4.2).
 
 **R4 — Manual mode erases the head's schedule.** The return to schedule consists of rewriting the
 room's schedule (that is what acts on the head), then publishing mode `at_home` (so the cloud no
@@ -432,7 +435,8 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   by the gateway's inbound protocol-4 `{cid,dps}` echo on `smart/mb/in/<gw>` (or a cloud re-read),
   with a timeout and a clear error — never optimistic. **Validated on real hardware 2026-11-19: DP 30
   (child lock) on an isolated test head, confirmed in the cloud, the app and on the head; then
-  DP 116, 18, 27 and 120, each by its own supervised write (table below).** When the
+  DP 116, 18, 27 and 120, then DP 118 + 16 and DP 119 (2026-11-19/20), each by its own supervised
+  write (table below).** When the
   echo does not come, the write is confirmed by one read of the head through the per-device route,
   else it fails. (Protocol details: docs/cloud-mqtt-publish.md.)
 
@@ -446,8 +450,8 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   | 27 | Lower setpoint bound | **Proven** (2026-11-19, tunnel and app), alone and in one frame with DP 120 | tenths of °C, 5–20 °C, 0.5 step; not above the upper bound; must not exclude the comfort or setback setpoint |
   | 120 | Pause setpoint | **Proven** (2026-11-19, read back in the app and the cloud only: no tunnel read exists) | tenths of °C, 5–35 °C, 0.5 step. Also sent with DP 27, in the same frame, when the new lower bound is above the pause setpoint |
 
-  | 118 + 16 | Comfort setpoint | **Candidate** (`MQTT_CANDIDATE_DPS`): closed unless listed in `cloud_mqtt_supervised_dps` for its supervised write | tenths of °C within the head's own bounds, 0.5 step. `{"118": v, "16": v}` in one frame; only DP 118's confirmation is required |
-  | 119 | Setback setpoint | **Candidate** | same check. `{"119": v}` alone (no DP 109) |
+  | 118 + 16 | Comfort setpoint | **Proven** (2026-11-19/20, read back through the local tunnel — current setpoint and weekly schedule — and in the app), on a head following its schedule | tenths of °C within the head's own bounds, 0.5 step; refused unless the head's mode is `at_home` or `leaving_home`. `{"118": v, "16": v}` in one frame; only DP 118's confirmation is required |
+  | 119 | Setback setpoint | **Proven** (2026-11-19, tunnel and app), on a head following its schedule | same check. `{"119": v}` alone (no DP 109) |
   | 1 | Preheat | **Candidate**, not observed on real hardware. Confirmed by the local tunnel only (attribute `0x0025`, bit 1): the gateway's echo and the cloud read are not accepted | boolean; the head must answer through the tunnel before anything is sent |
   | 120 | Pause setpoint | **Proven** (see above) | same check. `{"120": v}` |
 
@@ -465,16 +469,32 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   refused after a confirmed publish raises an error that says the head has the new value and the
   cloud store may not.
 
-  **Open for the trial** (not run on 2026-11-19): whether an isolated head's schedule takes a new
-  comfort or setback setpoint without a schedule rewrite (R3 is established for rooms only), and
-  what DP 16 does to the current setpoint outside a comfort slot. See
-  docs/first-write-procedure.md.
+  **What an isolated head does with these writes** (supervised trial of 2026-11-19/20, one head
+  following its weekly schedule, each point read through the local tunnel; detail in
+  docs/first-write-procedure.md):
+
+  - **No schedule rewrite is needed.** The head carries the new comfort or setback value into the
+    matching transitions of its own weekly schedule, about a minute after the write (not yet 15 s
+    after it). At the next comfort slot the head applied the new comfort value by itself. R3
+    (rewrite the schedule after a setpoint change) stays a rule for **rooms** only.
+  - **DP 16 sets the head's current setpoint at once**, with the setpoint source "external"; within
+    five minutes the head is back on its schedule (source "schedule"). Outside a comfort slot the
+    current setpoint therefore rises to the comfort value for a few minutes, with heat demand, then
+    falls back to the setback value. Inside a comfort slot it stays at the new comfort value.
+  - **DP 119 alone does not set the current setpoint at once** (unlike DP 109 for a room, above).
+    During a setback period the head aligns its current setpoint by itself one to five minutes
+    later, source "schedule".
+  - The real preheat (attribute `0x0025`) and the schedule mode did not change, although the
+    settings block carries DP 1.
+  - **Not established**: the same writes on a head in manual mode or without a schedule. DP 16 is
+    the head's effective setpoint; nothing observed says such a head would return to its previous
+    setpoint. The integration therefore **refuses the comfort write** (the one that carries DP 16) unless the
+    cloud reports the head in a schedule mode (`at_home` or `leaving_home`); the setback and
+    pause writes, which carry no DP 16, are not restricted.
 
   The setpoints are `number` entities of an **isolated** head ("comfort setpoint", "setback
-  setpoint", "pause setpoint"), present only while their DPs are open on this path for that head:
-  the pause setpoint for every isolated head as soon as `enable_cloud_mqtt` is on; comfort and
-  setback during a trial, on the designated trial head only. They are removed from the registry
-  when they close again, like the bounds below.
+  setpoint", "pause setpoint"), present for every isolated head on a verified model while `enable_cloud_mqtt` is on. They are
+  removed from the registry when their DPs close, like the bounds below.
 
   The bounds are `number` entities of an **isolated** head ("upper setpoint bound", "lower setpoint
   bound"), present for every isolated head on a verified model while `enable_cloud_mqtt` is on.

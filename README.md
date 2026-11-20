@@ -173,19 +173,22 @@ integration can do the same, **gated behind the `enable_cloud_mqtt` option (off 
 - **What it does**: when enabled, the integration opens one Tuya cloud MQTT connection from its own
   session (its own deviceId, so it coexists with the app and does not log it out) and lets an
   **isolated** head's **child-lock** switch write via MQTT instead of being unavailable, adds its
-  **setpoint bounds** and **pause setpoint** as numbers, and gives its **window-detection** switch
-  a fallback when the local tunnel is not available. A
+  **setpoint bounds** and its **comfort, setback and pause setpoints** as numbers, and gives its
+  **window-detection** switch a fallback when the local tunnel is not available. A
   diagnostic **"Cloud MQTT link"** sensor shows whether the connection is up. Each write is confirmed
   by the gateway's reply (or a cloud re-read) with a timeout and a clear error — it never shows a
   value it did not confirm.
 - **Scope**: child lock (DP 30), window detection (DP 116), upper and lower setpoint bounds (DP 18,
-  DP 27) and pause setpoint (DP 120), each validated on real hardware (2026-11-19). Window
+  DP 27), pause setpoint (DP 120), comfort setpoint (DP 118 + 16) and setback setpoint (DP 119),
+  each validated on real hardware (2026-11-19 and 2026-11-20). An isolated head carries a new
+  comfort or setback value into its own schedule; setting the comfort value outside a comfort
+  period makes the head heat towards it for a few minutes before it returns to its schedule; the
+  comfort write is refused for a head in manual, pause or holiday mode (not validated). Window
   detection keeps going through the local tunnel when it is available; cloud MQTT is its fallback.
   Other settings are added one at a time after their own supervised validation. Until then they
   are present in the code but **closed**: the options `cloud_mqtt_supervised_dps` (empty by
   default) and `cloud_mqtt_supervised_head` (none by default) open one, on that one test head
-  only, for a first write done in person. Leave both empty in normal use. The comfort and setback
-  setpoints of an isolated head (DP 118 + 16, DP 119) are in that state.
+  only, for a first write done in person. Leave both empty in normal use.
 - **Requirement**: the path uses `paho-mqtt` (declared in `manifest.json` as `>=1.6.1,<3`, the MQTT client Home Assistant's own MQTT integration already ships — HA pins the exact version); Home Assistant installs it automatically. No manual step.
 - **Unofficial and optional.** Nothing in the integration needs this channel: with the option off
   (the default) no connection to the Tuya broker is ever opened, and an isolated head's child lock

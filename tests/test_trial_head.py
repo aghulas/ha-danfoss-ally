@@ -34,6 +34,9 @@ from custom_components.danfoss_ally_cloud.switch import PATH_MQTT, DanfossSwitch
 from .common import ENTRY_DATA, FakeCloudClient, head
 from .test_mqtt_client import _FakePaho
 
+# The trial mechanics are exercised on the setback setpoint (DP 119), put back among the candidates.
+pytestmark = pytest.mark.usefixtures("setpoints_as_candidates")
+
 _GW = {"gw-1": GatewayKey("gw-1", "GW", "0123456789abcdef", ip="10.0.0.1")}
 _ROOM = [{"group_id": 77, "name": "Salle", "pid": "03wvrwpv", "head_count": 2}]
 
@@ -91,7 +94,8 @@ def _window_switch(hass, device_id):
 
 
 def _setback_number(hass, device_id):
-    """The head's setback-setpoint number (DP 119, a candidate), or None when it is not provided."""
+    """The head's setback-setpoint number (DP 119, a candidate in these tests), or None when it
+    is not provided."""
     return next(
         (
             e

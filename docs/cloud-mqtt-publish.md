@@ -117,10 +117,15 @@ above), but the 5-refusal limit has only been exercised with a faked client.
   confirmation source itself was not read from the debug log. No other setting of the head
   changed. The DP 116 "on" write ran on 1.2.0-rc1 and all the others on 1.2.0-rc2, whose
   cloud-MQTT write code is identical.
-- **Scope today**: the MQTT write path carries **DP 30, 116, 18, 27 and 120** as proven
-  (`api.writes.MQTT_WRITE_DPS`). DP 118 + 16 (comfort setpoint) and DP 119 (setback setpoint) are
-  implemented as **candidates** (`MQTT_CANDIDATE_DPS`), closed until their supervised write, which
-  has not been run. DP 1 (preheat) is a candidate too, with a rule of its own: its write is
+- **Supervised writes of 2026-11-19 (night) and 2026-11-20 (morning)**, on one isolated head
+  following its weekly schedule, written once and restored: DP 119 (setback setpoint) and
+  DP 118 + 16 (comfort setpoint), read back through the local tunnel (current setpoint and weekly
+  schedule) and in the app. The head carried each new value into its own schedule transitions
+  about a minute after the write; DP 16 set the current setpoint at once and the head returned to
+  its schedule within five minutes. Every call returned in under a second. Build 1.2.0-rc4.
+- **Scope today**: the MQTT write path carries **DP 30, 116, 18, 27, 120, 118, 16 and 119** as
+  proven (`api.writes.MQTT_WRITE_DPS`). DP 1 (preheat) is implemented as a **candidate**
+  (`MQTT_CANDIDATE_DPS`), closed until its supervised write, with a rule of its own: its write is
   confirmed by the local tunnel's read of attribute 0x0025 only, never by the echo or the cloud
   (docs/cloud-mqtt-preheat-proposal.md). Other DPs (133/101 mounting/orientation) are added one at
   a time, each as a candidate first (docs/first-write-procedure.md).

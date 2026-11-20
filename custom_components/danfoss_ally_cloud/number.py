@@ -13,9 +13,15 @@ Per ISOLATED head, ``number`` entities set the **upper bound** (DP 18) and the *
 (DP 27) of its setpoint, and its **comfort** (DP 118 + 16), **setback** (DP 119) and **pause**
 (DP 120) setpoints, over the Tuya cloud MQTT channel — the only path the app itself uses for them
 (contract §4.2). They exist only when the cloud-MQTT write option is on and their DPs are open on
-that channel: the bounds and the pause setpoint are proven (2026-11-19) and exist for every
-isolated head; comfort and setback are candidates, present only on the head designated for their
-supervised trial. With no proven path there is no entity rather than a lying one.
+that channel: all five are proven (bounds and pause on 2026-11-19, comfort and setback on
+2026-11-19/20) and exist for every isolated head. With no proven path there is no entity rather
+than a lying one.
+
+An isolated head carries the new comfort or setback value into its own weekly schedule (read back
+through the local tunnel about a minute after the write): no schedule rewrite is needed, unlike a
+room (R3). The comfort write also publishes DP 16, as the app does, which sets the head's current
+setpoint at once; the head goes back to its schedule's value by itself within five minutes, so
+outside a comfort slot a comfort write causes a few minutes of heat demand.
 """
 
 from __future__ import annotations
@@ -415,6 +421,13 @@ SETTINGS_BLOCK_DPS: tuple[int, ...] = (
 )
 
 
+# Modes (cloud DP 2) in which a head follows its weekly schedule. A write that carries DP 16
+# (``temp_set``, the head's effective setpoint) is proven in these only: the head goes back to its
+# schedule's value by itself. In manual, pause or holiday mode nothing observed says the current
+# setpoint would come back, so the write is refused (contract §4.2).
+SCHEDULE_MODES = frozenset({"at_home", "leaving_home"})
+
+
 @dataclass(frozen=True, kw_only=True)
 class HeadSetpointDescription(NumberEntityDescription):
     """A per-mode setpoint of a head: what is read, and what the app publishes to set it."""
@@ -427,6 +440,11 @@ class HeadSetpointDescription(NumberEntityDescription):
     @property
     def dps(self) -> tuple[int, ...]:
         return (self.dp, *self.companions)
+
+    @property
+    def sets_current_setpoint(self) -> bool:
+        """The write carries DP 16, which changes the head's current setpoint at once."""
+        return DP_TEMP_SET in self.companions
 
 
 HEAD_SETPOINTS: tuple[HeadSetpointDescription, ...] = (
@@ -481,7 +499,10 @@ class DanfossHeadSetpoint(_HeadMqttNumber):
        workflow in step with the head. That HTTP call alone never reaches an isolated head (W-3);
        it is not the write.
 
-    The value is checked against the head's own bounds before anything is sent.
+    The value is checked against the head's own bounds before anything is sent. A write that
+    carries DP 16 (comfort) is refused unless the head follows its schedule (``SCHEDULE_MODES``,
+    as the cloud reports its mode): elsewhere DP 16 would change the current setpoint with nothing
+    known to bring it back.
     """
 
     entity_description: HeadSetpointDescription
@@ -525,6 +546,12 @@ class DanfossHeadSetpoint(_HeadMqttNumber):
             )
         except CloudError as err:
             raise HomeAssistantError(f"setpoint refused: {err}") from err
+        if desc.sets_current_setpoint and dev.mode not in SCHEDULE_MODES:
+            raise HomeAssistantError(
+                f"setpoint refused: this write also sets the head's current setpoint (DP 16), "
+                f"which is validated only for a head following its schedule; current mode: "
+                f"{dev.mode!r}"
+            )
         # Build the HTTP block BEFORE publishing: if it cannot be built, nothing is sent at all.
         block = settings_block(dev, {desc.dp: raw}) if desc.in_settings_block else None
         await async_mqtt_write(
