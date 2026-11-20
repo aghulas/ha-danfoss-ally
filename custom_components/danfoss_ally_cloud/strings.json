@@ -688,5 +688,11 @@
     "at_home_no_saturday": {
       "message": "The \"at home\" option makes heads follow the Saturday schedule, but no targeted room has a Saturday slot. Add a Saturday slot, or use a fixed setpoint (away)."
     }
+  },
+  "device_automation": {
+    "action_type": {
+      "set_temperature": "Set target temperature on {entity_name}",
+      "restore_schedule": "Restore weekly schedule"
+    }
   }
 }

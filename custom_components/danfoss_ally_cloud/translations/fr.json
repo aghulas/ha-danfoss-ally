@@ -688,5 +688,11 @@
   "at_home_no_saturday": {
    "message": "L'option « à la maison » fait suivre le programme du samedi, or aucune pièce ciblée n'a de créneau le samedi. Ajoute un créneau samedi, ou utilise une consigne fixe (absence)."
   }
+ },
+ "device_automation": {
+  "action_type": {
+   "set_temperature": "Régler la consigne de {entity_name}",
+   "restore_schedule": "Rétablir le programme hebdomadaire"
+  }
  }
 }

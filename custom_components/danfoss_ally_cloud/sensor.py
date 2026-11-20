@@ -60,7 +60,6 @@ SENSORS: tuple[DanfossSensorDescription, ...] = (
         translation_key="valve_opening",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:radiator",
         value=lambda d: d.valve_opening,
     ),
     DanfossSensorDescription(
@@ -126,7 +125,6 @@ class DanfossHolidaySetpoint(DanfossHomeEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_translation_key = "holiday_setpoint"
-    _attr_icon = "mdi:bag-suitcase"
 
     def __init__(self, coordinator: DanfossCoordinator, gid: str, name: str | None) -> None:
         super().__init__(coordinator, gid, name)
@@ -151,7 +149,6 @@ class DanfossRelayRooms(DanfossEntity, SensorEntity):
     _require_online = False
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_translation_key = "relay_rooms"
-    _attr_icon = "mdi:home-thermometer"
 
     def __init__(self, coordinator: DanfossCoordinator, device_id: str) -> None:
         super().__init__(coordinator, device_id)

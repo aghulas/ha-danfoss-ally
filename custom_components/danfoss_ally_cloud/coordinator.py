@@ -34,6 +34,9 @@ _LOGGER = logging.getLogger(__name__)
 # after this interval (or on reload), to stay conservative on the quota.
 _TOPOLOGY_TTL = 3600  # seconds
 
+# Cap for exponential polling backoff on repeated transient CloudError failures.
+_MAX_BACKOFF_SECONDS = 900
+
 
 class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
     """Gathers the fleet state: heads (``data``) + aggregated rooms (``rooms``)."""
@@ -46,11 +49,13 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
         *,
         post_command_refresh: bool = False,
     ) -> None:
+        self._base_interval = timedelta(seconds=scan_interval)
+        self._consecutive_failures = 0
         super().__init__(
             hass,
             _LOGGER,
             name="danfoss_ally_cloud",
-            update_interval=timedelta(seconds=scan_interval),
+            update_interval=self._base_interval,
         )
         self.client = client
         # Post-command refresh (R-3): head_id -> (not_before, deadline), monotonic. Between the two
@@ -91,7 +96,17 @@ class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):
             # Credentials/secrets refused: triggers HA re-authentication.
             raise ConfigEntryAuthFailed(str(err)) from err
         except CloudError as err:
+            self._consecutive_failures += 1
+            base_s = max(int(self._base_interval.total_seconds()), 60)
+            backoff_s = min(
+                base_s * (2 ** min(self._consecutive_failures - 1, 3)),
+                _MAX_BACKOFF_SECONDS,
+            )
+            self.update_interval = timedelta(seconds=backoff_s)
             raise UpdateFailed(str(err)) from err
+        if self._consecutive_failures:
+            self._consecutive_failures = 0
+            self.update_interval = self._base_interval
         data = {dev.id: dev for dev in devices}
         homes = getattr(self.client, "device_home", None)
         if isinstance(homes, dict):
