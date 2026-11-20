@@ -170,6 +170,12 @@ cloud's value were back to the cloud's value by about 05:00, with no write from 
 
 ### Fixed
 
+- **Per-device cloud read returned nothing for every head.** `smartlife.m.device.get` v4.0 carries
+  the DPs under `dataPointInfo.dps`, not at the top level, so the read always came back empty. Two
+  consequences, both fixed: the post-command refresh (`post_command_refresh`) never overlaid
+  fresh values (what looked like freshness was the settle-delay refresh of the bulk list), and the
+  viewing-direction trial (DP 101) was refused on a real head for want of a confirmation source.
+  Found during the 1.3.0-rc3 validation.
 - Schedule editor: dragging a bar always moves that bar's own range (the wrong range could move
   after a keyboard time edit, next to a reversed range, or with two ranges of the same start).
 - Schedule editor: an interrupted drag (`pointercancel`) restores the range instead of keeping

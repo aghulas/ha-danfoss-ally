@@ -282,13 +282,38 @@ async def test_async_set_group_setpoint_without_pid_does_not_rewrite():
 # --- R-3 per-device fresh read (async_get_device_dps via smartlife.m.device.get v4.0) -----------
 
 
-async def test_get_device_dps_returns_fresh_dps():
-    fake = FakeHttp({"smartlife.m.device.get": {"name": "Salon", "dps": {"170": 82, "16": 210}}})
+async def test_get_device_dps_reads_data_point_info():
+    # The real v4.0 shape (2026-11-20): the DPs live under dataPointInfo.dps, with dpsTime beside
+    # them, and the top level has no "dps" at all.
+    fake = FakeHttp(
+        {
+            "smartlife.m.device.get": {
+                "name": "Salon",
+                "dataPointInfo": {
+                    "dps": {"170": 82, "101": False, "133": "Horizontal"},
+                    "dpsTime": {"170": 1, "101": 2, "133": 3},
+                    "dpName": {},
+                },
+            }
+        }
+    )
     with patch(_HTTP, return_value=fake):
         dps = await _client().async_get_device_dps("dev-1")
-    assert dps == {"170": 82, "16": 210}
+    assert dps == {"170": 82, "101": False, "133": "Horizontal"}
     api, version, body, _ = fake.calls[0]
     assert (api, version, body) == ("smartlife.m.device.get", "4.0", {"devId": "dev-1"})
+
+
+async def test_get_device_dps_falls_back_to_top_level_dps():
+    fake = FakeHttp({"smartlife.m.device.get": {"name": "Salon", "dps": {"170": 82, "16": 210}}})
+    with patch(_HTTP, return_value=fake):
+        assert await _client().async_get_device_dps("dev-1") == {"170": 82, "16": 210}
+
+
+async def test_get_device_dps_none_when_data_point_info_is_empty():
+    fake = FakeHttp({"smartlife.m.device.get": {"dataPointInfo": {"dps": {}, "dpsTime": {}}}})
+    with patch(_HTTP, return_value=fake):
+        assert await _client().async_get_device_dps("dev-1") is None
 
 
 async def test_get_device_dps_none_when_no_dps():
