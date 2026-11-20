@@ -668,3 +668,58 @@ async def test_options_form_offers_the_local_trial(hass: HomeAssistant):
     }
     settings_field = next(k for k in schema if str(k) == CONF_LOCAL_SUPERVISED_SETTINGS)
     assert set(schema[settings_field].options) == set(ALL)
+
+
+async def test_partial_read_back_is_not_confirmed_not_rejected(hass: HomeAssistant):
+    """The offset (0x404B) is in the second settings frame: a read-back where the head answered
+    the first frame only does not say what it holds for the offset. Unknown, not a rejection."""
+    local = _Local(read={"radiator_covered": False, "control_speed": 5})  # frame A only
+    with pytest.raises(LocalWriteNotConfirmed, match="setpoint_offset"):
+        await async_local_write_setting(hass, local, HEAD, "setpoint_offset", 0.5)
+    local.async_refresh_settings.return_value = {"setpoint_offset": None}
+    with pytest.raises(LocalWriteNotConfirmed):
+        await async_local_write_setting(hass, local, HEAD, "setpoint_offset", 0.5)
+    # A non-zero ZCL status stays a rejection, even with a partial read-back.
+    local = _Local(status=0x86, read={"radiator_covered": False})
+    with pytest.raises(LocalWriteRejected, match="0x86"):
+        await async_local_write_setting(hass, local, HEAD, "setpoint_offset", 0.5)
+
+
+def test_read_settings_without_frame_b_lacks_the_offset(fast_tunnel):
+    """What the manager's single-head read gives when the head answers frame A and not frame B."""
+
+    class _ALink(_HeadLink):
+        def send(self, dev_id, node_id, frame):
+            body = tunnel.decode_frame(frame)["payload"]
+            if int.from_bytes(body[:2], "little") == 0x404B:  # frame B: no answer
+                self.sent.append(frame)
+                return
+            super().send(dev_id, node_id, frame)
+
+    link = _ALink({0x4016: (0x10, 0), 0x4020: (0x20, 5), 0x404B: (0x28, 5)})
+    read = _manager(link).read_settings(HEAD)
+    assert read is not None and read["control_speed"] == 5 and "setpoint_offset" not in read
+
+
+async def test_entity_after_a_partial_read_back(hass: HomeAssistant):
+    class _FrameAOnly(_TrialManager):
+        def __init__(self):
+            super().__init__()
+            self.frame_a_only = False
+
+        def read_settings(self, head_):
+            read = super().read_settings(head_)
+            if self.frame_a_only:
+                for name in ("setpoint_offset", "window_state"):
+                    read.pop(name, None)
+            return read
+
+    manager = _FrameAOnly()
+    await _setup(hass, _ARMED, manager=manager)
+    offset = _one(hass, "number", "setpoint_offset_setting")
+    assert offset.available
+    manager.frame_a_only = True
+    with pytest.raises(LocalWriteNotConfirmed):
+        await offset.async_set_native_value(0.5)
+    assert offset.extra_state_attributes["trial_result"] == "not_confirmed"
+    assert not offset.available

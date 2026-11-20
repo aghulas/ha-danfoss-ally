@@ -148,6 +148,14 @@ def _check(
         raise LocalWriteRejected(
             f"the head rejected the write (ZCL status 0x{status:02x}); it reads {got}"
         )
+    missing = sorted(name for name, value in got.items() if value is None)
+    if missing:
+        # Partial read-back (e.g. the head answered the first settings frame, not the one that
+        # carries the setpoint offset): what it holds for these is unknown, not a rejection.
+        raise LocalWriteNotConfirmed(
+            f"the tunnel read-back did not give {', '.join(missing)}: what the head holds now "
+            "is unknown (the entity stays unavailable until the head is read again)"
+        )
     if got != expected:
         raise LocalWriteRejected(
             f"the tunnel read-back disagrees: written {expected}, the head reads {got}"
