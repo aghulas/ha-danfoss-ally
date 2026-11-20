@@ -355,6 +355,28 @@ def _relay_home_gid(
     return home_gids[0] if home_gids else None
 
 
+def _gateway_home_gid(coordinator: DanfossCoordinator, gateway, home_gids: list[str]) -> str | None:
+    """Home of a gateway: the home of the heads it carries (``mesh_id`` = the gateway).
+
+    Each head's home is exact (per-home device list); the heads vote, a tie going to the earlier
+    home. A gateway carrying no head of a known home falls back to its own entry in the per-home
+    device lists, then to the first home (kept visible rather than dropped).
+    """
+    order = {gid: i for i, gid in enumerate(home_gids)}
+    votes: dict[str, int] = {}
+    for dev in coordinator.data.values():
+        if dev.is_head and dev.mesh_id == gateway.id:
+            home = coordinator.head_home(dev.id)
+            if home in order:
+                votes[home] = votes.get(home, 0) + 1
+    if votes:
+        return min(votes, key=lambda gid: (-votes[gid], order[gid]))
+    own = coordinator.head_home(gateway.id)
+    if own in order:
+        return own
+    return home_gids[0] if home_gids else None
+
+
 def overview_payload(store: dict) -> dict:
     """Building / fleet overview (contract §3.6). Read-only, from the coordinator cache only.
 
@@ -366,8 +388,8 @@ def overview_payload(store: dict) -> dict:
     gateways = [d for d in coordinator.data.values() if d.category == "gateway"]
     relays = [d for d in coordinator.data.values() if d.is_relay]
 
-    primary = home_gids[0] if home_gids else None
     home_by_name = _home_by_room_name(coordinator)
+    gateway_home = {g.id: _gateway_home_gid(coordinator, g, home_gids) for g in gateways}
     singles = _single_head_rooms(coordinator, home_gids)
     homes: list[dict[str, Any]] = []
     for gid in home_gids:
@@ -390,13 +412,11 @@ def overview_payload(store: dict) -> dict:
             for d in relays
             if _relay_home_gid(coordinator, d, home_gids, home_by_name) == gid
         ]
-        # Gateways have no per-home link; attribute them to the primary home (exact for a
-        # single-home account, the common case), none to the others.
-        home_gateways = (
-            [{"device_id": g.id, "name": g.name, "online": g.online} for g in gateways]
-            if gid == primary
-            else []
-        )
+        home_gateways = [
+            {"device_id": g.id, "name": g.name, "online": g.online}
+            for g in gateways
+            if gateway_home[g.id] == gid
+        ]
         homes.append(
             {
                 "gid": gid,
@@ -1009,21 +1029,31 @@ async def disconnect_head(
 async def local_survey(hass: HomeAssistant, store: dict) -> dict:
     """Read-only multi-gateway survey through the local Zigbee tunnel (contract §4.4, C4).
 
-    Returns, per reachable head, the tunnel reading summarized (comfort slots, comfort/setback
-    setpoints, decoded attributes). Read-only: it never writes to a head. Raises
-    ``local_disabled`` if the local tunnel is not enabled on this entry.
+    Returns, per head, the tunnel reading summarized (comfort slots, comfort/setback setpoints,
+    decoded attributes). Read-only: it never writes to a head. Raises ``local_disabled`` if the
+    local tunnel is not enabled on this entry.
+
+    Every head of the account is accounted for: ``heads_total`` = ``attempted`` (addressable
+    through the tunnel, each one present in ``heads``) + the heads listed in ``not_addressable``
+    (head id -> ``no_node_id`` / ``no_gateway_key``). Among the attempted ones, ``reachable``
+    answered and ``not_read`` were not asked because the survey ran out of time (flagged
+    ``not_read`` in ``heads``); the others did not answer.
     """
     local = store.get(DATA_LOCAL)
     if local is None:
         raise OperationError("local_disabled", "local tunnel not enabled on this account")
     heads = local.heads()  # a method of DanfossLocalCoordinator, not an attribute
+    not_addressable = local.unaddressable()
     summaries = await hass.async_add_executor_job(local.manager.survey_heads, heads)
     reachable = sum(1 for s in summaries.values() if not s.get("unreachable"))
     return {
         "surveyed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "gateways": sorted(local.manager.gateway_ids),
+        "heads_total": len(summaries) + len(not_addressable),
         "attempted": len(summaries),
         "reachable": reachable,
+        "not_read": sum(1 for s in summaries.values() if s.get("not_read")),
+        "not_addressable": not_addressable,
         "heads": summaries,
     }
 

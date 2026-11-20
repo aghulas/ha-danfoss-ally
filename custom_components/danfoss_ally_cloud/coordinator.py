@@ -341,6 +341,20 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
             if d.is_head and d.node_id and d.mesh_id and d.mesh_id in gws
         ]
 
+    def unaddressable(self) -> dict[str, str]:
+        """Heads the tunnel cannot address (the complement of ``heads``): head id -> reason.
+
+        ``no_node_id``: the cloud gives no Zigbee node id for the head; ``no_gateway_key``: its
+        gateway is unknown or its local key was not fetched. Such a head is never surveyed and has
+        no preheat switch.
+        """
+        gws = self.manager.gateway_ids
+        return {
+            d.id: "no_node_id" if not d.node_id else "no_gateway_key"
+            for d in self._cloud.data.values()
+            if d.is_head and not (d.node_id and d.mesh_id and d.mesh_id in gws)
+        }
+
     async def async_refresh_head(self, head: Head) -> bool | None:
         """Re-read ONE head's preheat through the tunnel and update its entry in ``data``.
 

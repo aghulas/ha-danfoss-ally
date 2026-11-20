@@ -7,6 +7,8 @@ frames and surveys are fabricated.
 """
 
 import base64
+import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -433,3 +435,81 @@ def test_comparer_programme_et_reglages():
     )
     assert d["newly_unreachable"] == ["head-2"]
     assert d["unreachable"] == ["head-2"]
+
+
+def test_survey_out_of_time_reports_every_head(monkeypatch):
+    """Regression (real install, 2026-11-19: 91 heads returned for 99). The survey waited 60 s per
+    gateway thread whatever its head count, and the heads not read by then were simply absent from
+    the result. They are now reported ``not_read``, and a late worker changes nothing afterwards."""
+    gws = {"gw-A": GatewayKey("gw-A", "A", "k", ip="10.0.0.1")}
+    heads = [_Head(f"head-{i}", f"node-{i}", "gw-A") for i in (1, 2, 3)]
+    release = threading.Event()
+    done = threading.Event()
+    read: list[str] = []
+
+    def read_head(link, dev_id, node_id):
+        read.append(dev_id)
+        if dev_id != "head-1":
+            release.wait(5)  # a slow head: the survey runs out of time while it is being read
+            done.set()
+        return {"attributes": {"current_setpoint": 21.0}, "schedule": {}}
+
+    monkeypatch.setattr(tunnel, "read_head", read_head)
+    seen: list[str] = []
+    res = tunnel.survey(
+        gws,
+        heads,
+        open_link=lambda gw: _LienParc(),
+        progress=lambda dev_id, e: seen.append(dev_id),
+        timeout=0.3,
+    )
+    assert set(res) == {"head-1", "head-2", "head-3"}  # nobody dropped
+    assert not res["head-1"].get("unreachable")
+    for dev_id in ("head-2", "head-3"):
+        assert res[dev_id]["unreachable"] is True and res[dev_id]["not_read"] is True
+    assert tunnel.summarize_head(res["head-3"]) == {"unreachable": True, "not_read": True}
+    snapshot = {k: dict(v) for k, v in res.items()}
+    release.set()
+    assert done.wait(5)
+    assert res == snapshot  # the late read of head-2 is not written into the returned mapping
+    assert read == ["head-1", "head-2"]  # the worker gave up before head-3
+    assert seen == ["head-1"]
+
+
+def test_survey_default_timeout_scales_with_the_busiest_gateway(monkeypatch):
+    """The time allowed grows with the head count of the busiest gateway (it was a flat 60 s)."""
+    gws = {
+        "gw-A": GatewayKey("gw-A", "A", "k", ip="10.0.0.1"),
+        "gw-B": GatewayKey("gw-B", "B", "k", ip="10.0.0.2"),
+    }
+    heads = [_Head(f"a-{i}", f"na-{i}", "gw-A") for i in range(12)]
+    heads.append(_Head("b-0", "nb-0", "gw-B"))
+    clock = [1000.0]
+    deadlines: list[float] = []
+
+    class _Thread:
+        def __init__(self, target, args, daemon):
+            self._run = lambda: target(*args)
+
+        def start(self):
+            self._run()
+
+        def join(self, timeout=None):
+            deadlines.append(clock[0] + timeout)
+
+    # Stand-ins bound to the module under test only (never the global threading / time).
+    monkeypatch.setattr(
+        tunnel,
+        "threading",
+        SimpleNamespace(Thread=_Thread, Lock=threading.Lock, Event=threading.Event),
+    )
+    monkeypatch.setattr(tunnel, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(tunnel, "read_head", lambda *a: {"attributes": {"x": 1}, "schedule": {}})
+    res = tunnel.survey(gws, heads, open_link=lambda gw: _LienParc())
+    assert len(res) == 13 and not any(e.get("unreachable") for e in res.values())
+    expected = 1000.0 + tunnel.SURVEY_BASE_TIMEOUT + 12 * tunnel.SURVEY_HEAD_TIMEOUT
+    assert deadlines == [expected, expected]
+
+
+def test_summarize_head_unreachable_is_not_flagged_not_read():
+    assert tunnel.summarize_head({"attributes": {}, "unreachable": True}) == {"unreachable": True}

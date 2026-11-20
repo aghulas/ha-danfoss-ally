@@ -63,6 +63,8 @@ async def test_heads_filtre_sur_passerelle(hass: HomeAssistant):
     )
     local = DanfossLocalCoordinator(hass, FakeManager(), cloud, 900)
     assert [h.dev_id for h in local.heads()] == ["dev-1"]
+    # The heads left out are named with their reason (get_local_survey accounts for every head).
+    assert local.unaddressable() == {"dev-2": "no_gateway_key", "dev-3": "no_node_id"}
 
 
 async def test_survey_returns_the_values(hass: HomeAssistant):
