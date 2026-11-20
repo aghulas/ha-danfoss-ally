@@ -137,6 +137,57 @@ preheat switch of another isolated head `write_path: local`. One write, `switch.
   is known not to write the head, but the pair was never tried from the integration. Other
   possibilities: other DPs in the same frame, an ordering or timing condition.
 
+## Why the app's toggle works and the bare publish does not (2026-11-20, later)
+
+Desk review, then one read-only observation on the same head.
+
+**Desk review.**
+
+- The integration's DP 1 frame has the same format, addressing and protocol as the frames of the
+  proven DPs (30, 116, 18, 27, 120, 118 + 16, 119), which the head applies; only the payload
+  differs. In stage B the gateway did take it (the cloud's DP 1 changed). The wire format is not
+  the suspect.
+- The raw record behind "the app toggles preheat with `publishDps({"1": bool})`" (contract §4.2)
+  could not be found again. The HTTP capture of the same day is at hand: for the isolated head it
+  holds five `settings.change` calls, **all with `"1": true`** — setpoint changes, no preheat
+  toggle. What the app sends for preheat on an isolated head is therefore not backed by evidence
+  that can be re-read today.
+
+**Observation**: cloud-MQTT listen on the gateway's inbound topic (the MCP connector's own
+session; counts and last value per DP, no frame list), while the owner toggled preheat in the
+app, ON then OFF. The head was read through the tunnel during the ON phase and **not at all**
+during the OFF phase, so that tunnel traffic seen then could not be this side's.
+
+| Phase | Reported by the gateway for the head | Head (`0x0025`, tunnel) |
+|---|---|---|
+| ON (51 s of listening) | DP 1 = true within 2 s; DP 172 = 3; DP 111 ×3; DP 199 ×32 (this side's two tunnel reads are among them) | 1, then 3 about 40 s after the toggle |
+| OFF (59 s, no tunnel read from this side) | DP 1 = false; DP 172 = 1; **DP 199 ×12** | 1 (read after the listen) |
+
+The DP 199 frames of the OFF phase (the Zigbee tunnel's answers), as far as the tool shows them
+(the last value at three instants): first a Poll Control check-in (cluster 0x0020, command 0),
+then ZCL **Default Responses with status success to cluster-specific command 0x01 of the
+thermostat cluster**, with consecutive sequence numbers (0x0f … 0x13 seen). Command 0x01 of that
+cluster, client to server, is Set Weekly Schedule.
+
+Reading:
+
+- After the app's toggle, **something sends the head a run of Set Weekly Schedule commands
+  through the Zigbee tunnel**, and the head then reports DP 172 with the new preheat bit. The
+  integration does not write schedules on its own and this side sent nothing: the sender is the
+  cloud (or the app through it). Who exactly, and on which call of the app, was **not** observed.
+- That is the difference with stage B: a bare DP 1 publish changes the cloud's DP 1 and triggers
+  no reprogramming of the head. It also matches what is established for rooms (R3: a setting is
+  only carried into the head by a schedule rewrite).
+- Still unknown: the app's outbound MQTT frames and its HTTP calls for this toggle (first
+  suspect: `settings.change` with the whole block, which the app posts for the settings of that
+  block, and/or a save of the weekly schedule); the complete list of tunnel frames (whether one of
+  them writes `0x0025`); whether the same happens on another head or firmware.
+- Next trial, **coded, not run**: publish DP 1 **and** post the settings block with DP 1
+  changed, as the integration already does for the setpoints of that block, under the same
+  tunnel-only confirmation (`mqtt_write.async_mqtt_write_preheat`; confirmation window raised
+  from 60 to 120 s). If that is not enough, a capture of the app (emulator) is the way to see
+  what it really sends.
+
 ## Implementation (shipped closed; used only if the observation is positive)
 
 - DP 1 is a candidate (`MQTT_CANDIDATE_DPS`), boolean, and the one member of
@@ -149,11 +200,13 @@ preheat switch of another isolated head `write_path: local`. One write, `switch.
   and with the link down the call fails, so a result cannot be credited to the wrong channel. The
   switch shows `write_path: cloud_mqtt` and `write_trial: true` in that state, `write_path: local`
   otherwise.
-- Confirmation (`mqtt_write.async_mqtt_write_preheat`, not `async_mqtt_write`, which refuses
-  DP 1): the head is read through the tunnel **before** the publish (no answer: nothing is sent;
-  already at the value: nothing is sent); after the publish it is read every 10 s until bit 1 of
-  `0x0025` shows the value, for 60 s at most, then a clear error. The gateway's echo is not even
-  listened to, the cloud is not read.
+- Write and confirmation (`mqtt_write.async_mqtt_write_preheat`, not `async_mqtt_write`, which
+  refuses DP 1): the settings block is built first (a value unknown: nothing is sent); the head is
+  read through the tunnel **before** anything goes out (no answer: nothing is sent; already at the
+  value: nothing is sent); then the publish, then the block over HTTP (since the second trial
+  design of 2026-11-20; stage B ran with the publish alone); then the head is read every 10 s
+  until bit 1 of `0x0025` shows the value, for 120 s at most, then a clear error. The gateway's
+  echo is not even listened to, the cloud is not read.
 - After a "not confirmed", the frame has been sent: the head may apply it late, and the cloud's
   DP 1 may differ from the head. The integration has no way to put that cache back (asking for the
   head's own value publishes nothing, since the tunnel could not confirm it); the sheet does it

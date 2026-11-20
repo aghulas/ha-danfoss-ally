@@ -338,7 +338,8 @@ class DanfossPreheat(CoordinatorEntity[DanfossLocalCoordinator], SwitchEntity):
 
     Supervised trial of DP 1 over cloud MQTT (candidate, closed by default): on the one designated
     isolated head, with DP 1 listed and the cloud-MQTT option on, the write is published over cloud
-    MQTT instead and confirmed by the tunnel read alone (``async_mqtt_write_preheat``). While the
+    MQTT instead, followed by the settings block over HTTP as the app does, and confirmed by the
+    tunnel read alone (``async_mqtt_write_preheat``). While the
     trial is armed the tunnel never writes this head's preheat, so a result cannot be attributed
     to the wrong channel: with the link down the write fails. The state source does not change.
     """
@@ -427,7 +428,12 @@ class DanfossPreheat(CoordinatorEntity[DanfossLocalCoordinator], SwitchEntity):
                     "cloud-MQTT link cannot publish: nothing was written"
                 )
             await async_mqtt_write_preheat(
-                self.coordinator, self._mqtt, dev, active, supervised=self._supervised_dps
+                self.coordinator,
+                self._cloud,
+                self._mqtt,
+                dev,
+                active,
+                supervised=self._supervised_dps,
             )
             return
         head = Head(dev.id, dev.node_id, dev.mesh_id)
