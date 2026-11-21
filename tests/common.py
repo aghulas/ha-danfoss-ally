@@ -80,6 +80,8 @@ class FakeCloudClient:
         relay_rooms=None,
         saturday_groups=None,
         device_get_dps=None,
+        messages=None,
+        messages_exc=None,
         **kwargs,
     ) -> None:
         self._devices = [head()] if devices is None else devices
@@ -99,11 +101,23 @@ class FakeCloudClient:
         self._saturday_groups = set(saturday_groups or ())
         self.closed = False
         self.writes: list = []
+        # Message center: raw ``msg.list`` elements (synthetic), parsed like the real client does.
+        self.messages_raw: list = list(messages or [])
+        self.messages_exc = messages_exc
+        self.messages_calls = 0
 
     async def async_validate(self):
         if self._validate_exc is not None:
             raise self._validate_exc
         return [{"gid": 1, "name": "Maison"}]
+
+    async def async_list_messages(self):
+        from custom_components.danfoss_ally_cloud.api.messages import parse_messages
+
+        self.messages_calls += 1
+        if self.messages_exc is not None:
+            raise self.messages_exc
+        return parse_messages(self.messages_raw)
 
     async def async_list_devices(self):
         if self._list_exc is not None:

@@ -14,9 +14,10 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
+from .api.messages import CATEGORIES
 from .api.mqtt_client import CloudMqttLink
-from .const import DATA_COORDINATOR, DATA_MQTT_COVERAGE, DATA_MQTT_LINK, DOMAIN
-from .coordinator import DanfossCoordinator
+from .const import DATA_COORDINATOR, DATA_MESSAGES, DATA_MQTT_COVERAGE, DATA_MQTT_LINK, DOMAIN
+from .coordinator import DanfossCoordinator, DanfossMessageCoordinator
 from .mqtt_coverage import CoverageStats
 
 # Entry keys to redact (account, session and installation secrets).
@@ -69,4 +70,16 @@ async def async_get_config_entry_diagnostics(
         diag["cloud_mqtt_coverage"] = coverage.summary(
             coordinator.data.values(), coordinator.grouped_ids
         )
+    # Message center (docs/message-center.md): counts and codes only. Neither the text (it names
+    # rooms and phones) nor any identifier (message id, source devId, account uid).
+    messages: DanfossMessageCoordinator | None = data.get(DATA_MESSAGES)
+    if messages is not None:
+        listed = messages.data or []
+        diag["message_center"] = {
+            "last_update_success": messages.last_update_success,
+            "message_count": len(listed),
+            "by_category": {c: sum(1 for m in listed if m.category == c) for c in CATEGORIES},
+            "codes": sorted({m.code for m in listed if m.code}),
+            "newest_time": listed[0].timestamp.isoformat() if listed else None,
+        }
     return diag

@@ -16,6 +16,9 @@
       "holiday_setpoint": {
         "default": "mdi:beach"
       },
+      "last_alert": {
+        "default": "mdi:message-alert"
+      },
       "relay_rooms": {
         "default": "mdi:radiator"
       },

@@ -32,7 +32,7 @@ def _is_our_room(device: Any) -> bool:
     )
 
 
-def _find(registry: dr.DeviceRegistry, entry_id: str, ident: str) -> Any:
+def find_device(registry: dr.DeviceRegistry, entry_id: str, ident: str) -> Any:
     """Our device with this identifier. HA 2026 scopes identifiers per config entry and
     deprecates ``async_get_device(identifiers=...)`` (removed 2027.8) for
     ``async_get_device_by_identifier``; older HA only has the former."""
@@ -52,12 +52,14 @@ def async_link_heads_to_rooms(
     for head_id, dev in (coordinator.data or {}).items():
         if not dev.is_head:
             continue
-        child = _find(registry, entry_id, head_id)
+        child = find_device(registry, entry_id, head_id)
         if child is None:
             continue
         group_id = coordinator.group_of(head_id)
         parent = (
-            _find(registry, entry_id, f"{ROOM_PREFIX}{group_id}") if group_id is not None else None
+            find_device(registry, entry_id, f"{ROOM_PREFIX}{group_id}")
+            if group_id is not None
+            else None
         )
         if group_id is not None and parent is None:
             continue  # room device not created yet: link on a later update, never unlink

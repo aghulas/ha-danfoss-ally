@@ -34,6 +34,7 @@ from .decode import (
     holiday_temperature,
 )
 from .keys import GatewayKey, async_fetch_gateway_keys
+from .messages import DanfossMessage, parse_messages
 from .schedule import Schedule, count_transitions, validate_days
 from .writes import (
     MQTT_CANDIDATE_DPS,
@@ -54,6 +55,7 @@ __all__ = [
     "CloudError",
     "CloudWriteError",
     "DanfossDevice",
+    "DanfossMessage",
     "GatewayKey",
     "Schedule",
     "ScheduleValidationError",
@@ -73,6 +75,7 @@ __all__ = [
     "encode_setpoint",
     "mqtt_dp_open",
     "mqtt_write_value",
+    "parse_messages",
     "head_state",
     "holiday_running",
     "holiday_temperature",

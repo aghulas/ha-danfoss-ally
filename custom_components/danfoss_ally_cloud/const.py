@@ -62,6 +62,16 @@ DATA_LOCAL_SUPERVISED_SETTINGS = "local_supervised_settings"
 # str | None: device id of the ONE head that local-tunnel trial is restricted to.
 DATA_LOCAL_SUPERVISED_HEAD = "local_supervised_head"
 DATA_MQTT_COVERAGE = "cloud_mqtt_coverage"  # CoverageStats | None: only with cloud_mqtt_probe on
+DATA_MESSAGES = "messages_coordinator"  # DanfossMessageCoordinator: the app's message center
+
+# Message center of the app (docs/message-center.md): its own, slow poll, independent from the
+# device poll. Messages are rare (a few a week on a 60-head account) and one read returns the
+# whole list, so every 30 min costs 48 light calls a day.
+MESSAGES_SCAN_INTERVAL = 1800  # seconds
+# Device alerts kept in the sensor's attributes (newest first); the full list stays in memory only.
+MESSAGES_RECENT = 10
+# HA event fired once per NEW device alert (not for the backlog seen at the first start).
+EVENT_MESSAGE = "danfoss_ally_cloud_message"
 
 # LOCAL survey (Zigbee tunnel) interval: slow, ~8 s per head. Distinct from the cloud polling.
 DEFAULT_LOCAL_SCAN_INTERVAL = 900  # seconds

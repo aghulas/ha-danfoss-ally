@@ -85,6 +85,9 @@
       "holiday_setpoint": {
         "name": "Holiday setpoint"
       },
+      "last_alert": {
+        "name": "Last device alert"
+      },
       "relay_rooms": {
         "name": "Rooms calling for heat"
       },

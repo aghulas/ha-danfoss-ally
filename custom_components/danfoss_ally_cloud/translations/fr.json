@@ -85,6 +85,9 @@
    "holiday_setpoint": {
     "name": "Consigne vacances"
    },
+   "last_alert": {
+    "name": "Dernière alerte appareil"
+   },
    "relay_rooms": {
     "name": "Pièces demandant de la chauffe"
    },

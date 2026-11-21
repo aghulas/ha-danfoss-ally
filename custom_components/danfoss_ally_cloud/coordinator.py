@@ -17,15 +17,28 @@ from typing import Any
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import CloudAuthError, CloudClient, CloudError, DanfossDevice, apply_dps_overlay
+from .api import (
+    CloudAuthError,
+    CloudClient,
+    CloudError,
+    DanfossDevice,
+    DanfossMessage,
+    apply_dps_overlay,
+)
 from .api.local.manager import Head, LocalTunnelManager
+from .api.messages import MessageMark
 from .api.rooms import Room, RoomState, aggregate_room
 from .const import (
+    DOMAIN,
+    EVENT_MESSAGE,
     LOCAL_SETTINGS_INTERVAL,
+    MESSAGES_SCAN_INTERVAL,
     POST_COMMAND_REFRESH_MAX_HEADS,
     POST_COMMAND_REFRESH_TTL,
     POST_COMMAND_SETTLE,
@@ -576,3 +589,100 @@ class DanfossLocalCoordinator(DataUpdateCoordinator[dict[str, bool | None]]):
             stop_settings.set()
             self._surveying = False
         return {**res, **self._read_back}
+
+
+class DanfossMessageCoordinator(DataUpdateCoordinator[list[DanfossMessage]]):
+    """The app's message center (docs/message-center.md), read on its own slow cadence.
+
+    Kept apart from ``DanfossCoordinator`` so that the device poll keeps its cost and cadence, and
+    so that a message-center failure never makes a head unavailable. Read only.
+
+    New messages: a high-water mark (``MessageMark``: newest ``time`` + digests of the ids at that
+    second; ``idStr`` kept as a string, never an int) is persisted per entry in ``.storage``, so it
+    survives restarts and reloads. ``readStatus`` is never used (always 0, no read notion: we never
+    call ``read.*``). With no stored mark (first start) the current list only seeds it: the backlog
+    fires nothing.
+
+    Event: ``EVENT_MESSAGE`` fires for each new **device alert** only (``category == "alert"``:
+    ``bigMsgType == 1`` or ``msgType > 0``; low battery, offline…), oldest first. New logins
+    (msgType 0, including this integration's own re-logins) and home messages (msgType -1: device
+    added/removed, firmware update) would be noise in HA and fire nothing; they still advance the
+    mark. The payload carries the raw ``msg_type`` / ``big_msg_type`` and the HA ``device_id`` of
+    the head when known, never a Danfoss identifier.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: CloudClient,
+        entry_id: str,
+        scan_interval: int = MESSAGES_SCAN_INTERVAL,
+    ) -> None:
+        super().__init__(
+            hass,
+            _LOGGER,
+            name="danfoss_ally_cloud_messages",
+            update_interval=timedelta(seconds=scan_interval),
+        )
+        self.client = client
+        self.entry_id = entry_id
+        self._store: Store[dict[str, Any]] = Store(hass, 1, f"{DOMAIN}.{entry_id}.messages")
+        self._mark: MessageMark | None = None
+        self._mark_loaded = False
+
+    def device_entry(self, source_id: str | None) -> dr.DeviceEntry | None:
+        """HA device of a message's source devId (None: no source, or a removed device)."""
+        if not source_id:
+            return None
+        # Local import: device_links imports this module (cycle at import time otherwise).
+        from .device_links import find_device
+
+        device: dr.DeviceEntry | None = find_device(
+            dr.async_get(self.hass), self.entry_id, source_id
+        )
+        return device
+
+    def device_name(self, source_id: str | None) -> str | None:
+        device = self.device_entry(source_id)
+        if device is None:
+            return None
+        return device.name_by_user or device.name
+
+    async def _async_update_data(self) -> list[DanfossMessage]:
+        try:
+            messages = await self.client.async_list_messages()
+        except CloudError as err:
+            # Auth errors included: the device coordinator owns re-authentication (it raises
+            # ConfigEntryAuthFailed); here a failed read only makes the message sensor unavailable.
+            raise UpdateFailed(str(err)) from err
+        if not self._mark_loaded:
+            self._mark = MessageMark.from_dict(await self._store.async_load())
+            self._mark_loaded = True
+        mark = self._mark
+        if mark is None:
+            # First start: seed the mark from the backlog, fire nothing.
+            new_mark = MessageMark.of(messages)
+        else:
+            for msg in sorted(messages, key=lambda m: m.time):
+                if msg.is_alert and mark.is_new(msg):
+                    self._fire(msg)
+            new_mark = mark.advance(messages)
+        if new_mark is not None and new_mark != mark:
+            self._mark = new_mark
+            await self._store.async_save(new_mark.as_dict())
+        return messages
+
+    async def async_remove_store(self) -> None:
+        """Forget the persisted mark (entry removed)."""
+        await self._store.async_remove()
+
+    @callback
+    def _fire(self, msg: DanfossMessage) -> None:
+        device = self.device_entry(msg.source_id)
+        name = (device.name_by_user or device.name) if device is not None else None
+        data = {
+            "config_entry_id": self.entry_id,
+            "device_id": device.id if device is not None else None,
+            **msg.public_dict(name),
+        }
+        self.hass.bus.async_fire(EVENT_MESSAGE, data)
