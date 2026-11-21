@@ -18,7 +18,7 @@ to the user's own broker.
 | Source | What it gives |
 |---|---|
 | `api/mqtt_publish.py`, `api/mqtt_client.py` | Codec, credentials, link — the reference for everything marked *implemented* |
-| Capture of 2026-11-21 (below) | Everything marked *observed* |
+| Captures of 2026-11-21 (below) | Everything marked *observed* |
 | The maintainer's private research notes (app decompilation) | Everything marked *static analysis*: read in the app's code, never seen on the wire by this project |
 | The official product schema of the head (76 DPs) | DP names, access and scales |
 
@@ -38,9 +38,13 @@ themselves (no `seq`, `origin`, `t`, size or arrival time). Figures:
 | Frames carrying more than one DP | 35: `{24, 169}` (28), `{140, 141}` (6), `{25, 173}` (1) |
 | Distinct DPs seen | 11 on heads (24, 25, 34, 107, 108, 111, 140, 141, 169, 173, 199), 2 on the room sensor (1, 2) |
 
+**Second capture (targeted).** Same install, 2026-11-21 evening, a five-minute listen during which
+the owner changed a setpoint, a mode and the child lock of one head in the app (§6.1). It supplies
+the command and settings DPs the quiet first window could not, on that one head.
+
 Everything below is anonymised: `<gateway-id>` is a gateway's devId, `<node-id>` a sub-device's
-Zigbee node id, `<account>` anything derived from the account or the session. Example payloads
-carry measurements only.
+Zigbee node id, `<head>` the one head of the second capture, `<account>` anything derived from the
+account or the session. Example payloads carry measurements only.
 
 ## 2. Broker and session
 
@@ -155,8 +159,30 @@ and was not pushed at the same instant; that it is the same sensor is likely, no
 heating action (3), setpoints (16, 118, 119, 120, 121, 171), bounds (18, 27), child lock (30),
 window detection (116), faults (45, 184), mounting (149), heat request (162), valve opening
 (170), operation mode (172). The window had no schedule transition, no heat demand change worth
-a report and no user action, so this says nothing about whether they are pushed: it is the main
-gap of this capture (§10).
+a report and no user action, so this said nothing about whether they are pushed: it was the main
+gap of this capture. A second, targeted capture closed most of it (§6.1).
+
+### 6.1 DPs pushed by a targeted change in the app (one head)
+
+A second, five-minute capture settled the main gap above. With a listen running, the owner changed
+three things **in the app** on one head (`<head>`, grouped, not isolated): its setpoint, its mode
+and its child lock. That head then pushed its command DPs and a near-complete state snapshot (120
+frames in ~3 minutes, against 1–8 for a quiet head). What each change carried:
+
+| Change in the app | DP(s) | Value seen | Note |
+|---|---|---|---|
+| Setpoint | **171** `OccupiedSetpoint` | 550 → 1400 | Hundredths of °C (5.5 → 14.0 °C), the same scale as the tunnel's DP 171 (R3). Room-level setpoints came with it: DP 109 / 112 / 119 = 140, DP 110 / 114 / 120 = 55 (scale not asserted here) |
+| Mode | **2** `mode` | `manual` → `leaving_home` | DP 111 `SetpointChangeSource` flipped `Schedule` → `Externally` at the same time. Confirms the mode travels as DP 2 on this channel; R4/R5 are unchanged — nothing is written to DP 2 here |
+| Child lock | **30** `child_lock` | `true` | A boolean, as the isolated-head write already uses (§8) |
+
+The same snapshot also carried, for that head, settings the first capture never saw: DP 101
+`viewing_direction` (`false`), DP 133 `thermostat_orientation` (`Horizontal`), DP 116 window
+detection (`true`), DP 18 / 27 bounds (215 / 50 = 21.5 / 5.0 °C), DP 172 operation mode (3) and
+DP 173. So the channel does carry a head's full settings state; the first capture was quiet only
+because nothing had changed. The per-DP summary used here does not tag direction: a command is a
+protocol-5 publish out and its echo a protocol-4 report in (§5), both on the head's DP, and the
+120 frames mix the two. The tested head was grouped, so whether the echo of a setting differs on
+an **isolated** head is still open (§10).
 
 ## 7. DP 199: the head's Zigbee traffic is pushed too
 
@@ -219,8 +245,9 @@ How it fits the routing rules of `docs/architecture.md`:
 - It does **not** make cloud DP 1 a preheat lever: the 2026-11-20 write changed the cloud's value
   and not the head. The capture adds a way to see the real bit without the tunnel being the one
   that reads it: attribute `0x0025` travels in DP 199 whenever anyone reads it (§7).
-- DP 2 labels (R5) and the manual switch (R4) are untouched by anything here: no DP 2 was pushed
-  in the window, and none is written through this channel.
+- DP 2 labels (R5) and the manual switch (R4) are untouched by anything **written** here: a mode
+  change made in the app did push DP 2 (`manual` → `leaving_home`, §6.1), but this channel writes
+  no DP 2 of its own.
 - `online` is still only in the HTTP device list: nothing about a head or a gateway going offline
   was pushed.
 
@@ -256,8 +283,8 @@ Findings to weigh, none implemented here.
 
 | Unknown | What would settle it |
 |---|---|
-| Are mode, setpoints, valve opening, heat request and operation mode pushed (DP 2, 3, 16, 171, 170, 162, 172)? | A capture across a schedule transition (a weekday around 08:30 or 17:30), or the owner changing a room's setpoint in the app during a listen |
-| Is a setting changed **in the app** pushed (DP 30, 116, 18, 27, 118, 119)? Does the echo differ between an isolated head and a room? | The owner toggling child lock on an isolated head, then on a room, during a listen |
+| Are mode and setpoints pushed (DP 2, 171, 109/112/119)? | **Observed (§6.1)**: a setpoint and a mode change in the app push DP 171 and DP 2, with a near-complete state snapshot. Still open for DP 3, 170, 162 (no heat-demand change in the window) |
+| Is a setting changed **in the app** pushed (DP 30, 116, 18, 27, 101, 133)? Does the echo differ between an isolated head and a room? | **Observed (§6.1)** on a grouped head: DP 30 (child lock), 101, 133, 116, 18, 27 all travel. The isolated-vs-room difference is still open — the tested head was grouped |
 | Is a window event pushed promptly (DP 25, 173)? | The owner opening a window near a head during a listen |
 | Does anything announce a head or a gateway going offline or coming back? | A head with its batteries removed for the time of a listen; a gateway unplugged is more intrusive and not asked for |
 | What travels on the user topic `<partnerIdentity>/mb/<uid>`? | A listen-only subscription to it. Needs a change to the connector's listener, which subscribes to gateway topics only |
