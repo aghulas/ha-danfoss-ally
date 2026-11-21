@@ -192,6 +192,12 @@
    },
    "radiator_covered_setting": {
     "name": "Réglage radiateur couvert"
+   },
+   "window_open_external_setting": {
+    "name": "Fenêtre ouverte externe (réglage)"
+   },
+   "load_balancing_setting": {
+    "name": "Équilibrage de charge (réglage)"
    }
   },
   "number": {
@@ -215,6 +221,9 @@
    },
    "regulation_speed_setting": {
     "name": "Réglage vitesse de régulation"
+   },
+   "external_room_sensor_setting": {
+    "name": "Sonde de pièce externe (réglage)"
    }
   },
   "select": {

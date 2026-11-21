@@ -101,6 +101,10 @@ _LOCAL_TRIAL_LABELS = {
     "setpoint_offset": "Setpoint offset, -2.5 to 2.5 °C (attribute 0x404B; scale not confirmed)",
     "regulation_speed": "Regulation speed, 1 to 10 (attribute 0x4020)",
     "valve_exercise": "Valve exercise day and time (attributes 0x4010 / 0x4011)",
+    "external_room_sensor": "External measured room sensor, °C (attribute 0x4015; "
+    "-80 °C disables it; must be refreshed periodically)",
+    "window_open_external": "External window open (attribute 0x4003)",
+    "load_balancing": "Load balancing (attribute 0x4032; managed by the room on an Ally gateway)",
 }
 
 

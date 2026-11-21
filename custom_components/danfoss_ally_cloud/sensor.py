@@ -74,6 +74,33 @@ SENSORS: tuple[DanfossSensorDescription, ...] = (
     ),
 )
 
+# Danfoss Ally room sensor (014G2480, Tuya category ``wsdcg``): temperature, humidity, battery,
+# all read only (cloud device list, DP 1 / 2 / 4). A device of its own, not a head.
+ROOM_SENSORS: tuple[DanfossSensorDescription, ...] = (
+    DanfossSensorDescription(
+        key="temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value=lambda d: d.temperature,
+    ),
+    DanfossSensorDescription(
+        key="humidity",
+        device_class=SensorDeviceClass.HUMIDITY,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        value=lambda d: d.humidity,
+    ),
+    DanfossSensorDescription(
+        key="battery",
+        device_class=SensorDeviceClass.BATTERY,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        native_unit_of_measurement=PERCENTAGE,
+        value=lambda d: d.battery,
+    ),
+)
+
 
 @dataclass(frozen=True, kw_only=True)
 class DanfossLocalSensorDescription(SensorEntityDescription):
@@ -174,6 +201,13 @@ async def async_setup_entry(
         if dev.is_head
         for desc in SENSORS
     ]
+    # Danfoss Ally room sensor (category ``wsdcg``): temperature / humidity / battery, read only.
+    entities.extend(
+        DanfossSensor(coordinator, dev.id, desc)
+        for dev in coordinator.data.values()
+        if dev.is_sensor
+        for desc in ROOM_SENSORS
+    )
     # Holiday setpoint (read only, contract §4.5): one per home.
     entities.extend(
         DanfossHolidaySetpoint(coordinator, gid, holiday.get("name"))

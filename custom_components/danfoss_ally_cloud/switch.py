@@ -178,30 +178,72 @@ async def async_setup_entry(
                     coordinator, dev.id, mqtt_link, supervised_for(data, dev.id)
                 )
             )
-    # Radiator covered (tunnel 0x4016): only while its local-tunnel trial is armed for this head.
-    armed, closed_local = local_trial_split(
-        data, coordinator.data.values(), local, "radiator_covered", RADIATOR_COVERED_UID
-    )
-    if local is not None:
-        entities += [DanfossRadiatorCoveredSetting(local, coordinator, dev_id) for dev_id in armed]
+    # Boolean head settings written through the local tunnel, each only while its own trial is
+    # armed for this head (radiator covered 0x4016, external window open 0x4003, load balancing
+    # 0x4032). Not proven on real hardware; closed by default.
+    closed_local: list[str] = []
+    for tdesc in LOCAL_TRIAL_SWITCHES:
+        armed, closed_setting = local_trial_split(
+            data, coordinator.data.values(), local, tdesc.setting, tdesc.key
+        )
+        closed_local += closed_setting
+        if local is not None:
+            entities += [
+                DanfossLocalSettingSwitch(local, coordinator, dev_id, tdesc) for dev_id in armed
+            ]
     remove_registry_entries(hass, entry, "switch", [*closed, *closed_local])
     async_add_entities(entities)
 
 
+@dataclass(frozen=True, kw_only=True)
+class LocalTrialSwitchDescription(SwitchEntityDescription):
+    """A boolean head setting written through the local tunnel under supervised trial."""
+
+    setting: str  # key of ``local_write.LOCAL_TRIAL_SETTINGS``
+    attribute: str  # name given by ``tunnel.name_attributes``
+
+
+LOCAL_TRIAL_SWITCHES: tuple[LocalTrialSwitchDescription, ...] = (
+    LocalTrialSwitchDescription(
+        key="radiator_covered_setting",
+        translation_key="radiator_covered_setting",
+        setting="radiator_covered",
+        attribute="radiator_covered",
+    ),
+    LocalTrialSwitchDescription(
+        key="window_open_external_setting",
+        translation_key="window_open_external_setting",
+        setting="window_open_external",
+        attribute="window_open_external",
+    ),
+    LocalTrialSwitchDescription(
+        key="load_balancing_setting",
+        translation_key="load_balancing_setting",
+        setting="load_balancing",
+        attribute="load_balancing",
+    ),
+)
+# Kept for backwards reference (the radiator-covered unique id is unchanged).
 RADIATOR_COVERED_UID = "radiator_covered_setting"
 
 
-class DanfossRadiatorCoveredSetting(DanfossLocalTrialEntity, SwitchEntity):
-    """Radiator covered (Danfoss attribute 0x4016), written through the local tunnel under
-    supervised trial (``local_write``). State: the head's own value read through the tunnel."""
+class DanfossLocalSettingSwitch(DanfossLocalTrialEntity, SwitchEntity):
+    """A boolean Danfoss setting (radiator covered 0x4016, external window open 0x4003, load
+    balancing 0x4032), written through the local tunnel under supervised trial (``local_write``).
+    State: the head's own value read through the tunnel."""
 
-    _attr_translation_key = "radiator_covered_setting"
-    _attribute = "radiator_covered"
+    entity_description: LocalTrialSwitchDescription
 
     def __init__(
-        self, local: DanfossLocalCoordinator, cloud: DanfossCoordinator, device_id: str
+        self,
+        local: DanfossLocalCoordinator,
+        cloud: DanfossCoordinator,
+        device_id: str,
+        description: LocalTrialSwitchDescription,
     ) -> None:
-        super().__init__(local, cloud, device_id, RADIATOR_COVERED_UID)
+        super().__init__(local, cloud, device_id, description.key)
+        self.entity_description = description
+        self._attribute = description.attribute
 
     @property
     def is_on(self) -> bool | None:
@@ -211,9 +253,13 @@ class DanfossRadiatorCoveredSetting(DanfossLocalTrialEntity, SwitchEntity):
     async def _async_write(self, state: bool) -> None:
         head = self._head
         if head is None:
-            raise HomeAssistantError("radiator covered: the local tunnel cannot reach this head")
+            raise HomeAssistantError(
+                f"{self.entity_description.setting}: the local tunnel cannot reach this head"
+            )
         await self._async_run_trial(
-            async_local_write_setting(self.hass, self.coordinator, head, "radiator_covered", state)
+            async_local_write_setting(
+                self.hass, self.coordinator, head, self.entity_description.setting, state
+            )
         )
 
     async def async_turn_on(self, **kwargs: Any) -> None:

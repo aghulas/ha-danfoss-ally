@@ -137,7 +137,40 @@ def test_categorie_mapping():
     assert decode.category_of("wk") == "head"
     assert decode.category_of("kg") == "relay"
     assert decode.category_of("wg2") == "gateway"
+    assert decode.category_of("wsdcg") == "sensor"
     assert decode.category_of("inconnu") == "other"
+
+
+def _room_sensor(dps, online=True):
+    return {
+        "devId": "dev-sensor-1",
+        "name": "Escalier",
+        "category": "wsdcg",
+        "productId": "mxzo5rhf",
+        "nodeId": "node-sensor",
+        "meshId": "gw-synth",
+        "moduleMap": {"zigbee": {"isOnline": online}},
+        "dps": dps,
+    }
+
+
+def test_decode_room_sensor():
+    # Danfoss Ally room sensor: DP 1 temp (tenths °C), DP 2 humidity (tenths %), DP 4 battery (%).
+    d = decode.decode_device(_room_sensor({"1": 175, "2": 561, "4": 79}))
+    assert d.is_sensor and d.category == "sensor"
+    assert not d.is_head and not d.is_relay
+    assert d.temperature == 17.5
+    assert d.humidity == 56.1
+    assert d.battery == 79
+    # None of the head fields are invented from the sensor's DPs.
+    assert d.setpoint is None and d.mode is None and d.valve_opening is None
+
+
+def test_decode_room_sensor_partial_and_offline():
+    d = decode.decode_device(_room_sensor({"1": 220}, online=False))
+    assert d.is_sensor and d.online is False
+    assert d.temperature == 22.0
+    assert d.humidity is None and d.battery is None
 
 
 def test_dp_inconnu_reste_dans_dps():

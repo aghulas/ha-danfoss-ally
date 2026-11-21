@@ -149,7 +149,8 @@ CONF_CLOUD_MQTT_SUPERVISED_DPS = "cloud_mqtt_supervised_dps"
 CONF_CLOUD_MQTT_SUPERVISED_HEAD = "cloud_mqtt_supervised_head"
 # Danfoss head settings whose LOCAL-TUNNEL write is opened for a SUPERVISED TRIAL (a list of setting
 # keys, ``local_write.LOCAL_TRIAL_SETTINGS``; EMPTY by default): radiator covered (0x4016),
-# setpoint offset (0x404B), regulation speed (0x4020), valve exercise day / time (0x4010 / 0x4011).
+# setpoint offset (0x404B), regulation speed (0x4020), valve exercise day / time (0x4010 / 0x4011),
+# external measured room sensor (0x4015), external window open (0x4003), load balancing (0x4032).
 # None is proven on real hardware: each write entity exists only while its setting is listed here,
 # ``enable_local`` is on, and only for the ONE head chosen below (docs/tunnel-settings-trial.md).
 CONF_LOCAL_SUPERVISED_SETTINGS = "local_supervised_settings"

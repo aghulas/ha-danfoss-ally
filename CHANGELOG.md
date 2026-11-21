@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased — Danfoss room sensor; external sensor, external window and load balancing writes
+
+**Not validated on real hardware.** The three new tunnel writes are closed by default and open
+only for a supervised trial, like the batch C2 settings (`docs/tunnel-settings-trial.md`).
+
+**Added**
+
+- **Danfoss Ally™ Room Sensor** (014G2480, Tuya category `wsdcg`, product `mxzo5rhf`): the cloud
+  device list is now decoded into a device of its own with three read-only sensors — temperature
+  (DP 1, tenths of °C), humidity (DP 2, tenths of %) and battery (DP 4, %). Observed on the real
+  install's device list; no write. Closes §4 of `docs/zigbee2mqtt-alignment.md`.
+- Three head settings written through the **local tunnel** as Zigbee2MQTT writes the same Danfoss
+  manufacturer attributes (`src/devices/danfoss.ts`), each **closed by default** and opened only on
+  the one designated trial head (`local_supervised_settings` / `local_supervised_head`), read back
+  through the tunnel after every write:
+  - **External measured room sensor** (`external_measured_room_sensor`, attribute `0x4015`, int16,
+    hundredths of °C): a config `number` in °C (−80 to 35; **−80 °C disables it**, raw −8000). The
+    head resets it to disabled after 30 min to 3 h without an update, so a live feed must be
+    refreshed periodically — the integration exposes the setting only, with a ready-made Home
+    Assistant **blueprint** to feed it from any temperature sensor on a timer
+    (`blueprints/automation/danfoss_ally_cloud/external_room_sensor_feed.yaml`; import and configure
+    it, see `docs/tunnel-settings-trial.md`).
+  - **External window open** (`window_open_external`, attribute `0x4003`, boolean): a config
+    `switch`.
+  - **Load balancing** (`load_balancing_enable`, attribute `0x4032`, boolean): a config `switch`.
+    On an Ally gateway this is driven by the room, so it stays closed by default; exposed for
+    completeness only. The attribute was already read as `load_balancing`.
+
+Closes the remaining §2 / §6 gaps of `docs/zigbee2mqtt-alignment.md` (external room sensor,
+external window contact, load balancing, and the room sensor).
+
 ## 1.3.1 — Room sensor in the room card by area
 
 Patch release: frontend only (room card by area), no change to the integration's entities,

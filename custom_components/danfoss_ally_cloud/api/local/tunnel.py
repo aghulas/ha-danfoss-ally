@@ -59,6 +59,8 @@ ATTRS_STD = [
     (0x0030, "setpoint_source"),
 ]
 # Danfoss attributes (manufacturer code 0x1246), split into two surveys like the MCP connector.
+# ``read_attributes`` gates on the FIRST id being present in the head's answer, so ``descale_day``
+# (always answered) stays first; the new attributes are appended.
 ATTRS_DANFOSS_A = [
     (0x4010, "descale_day"),
     (0x4011, "descale_time"),
@@ -68,6 +70,8 @@ ATTRS_DANFOSS_A = [
     (0x4030, "heat_available"),
     (0x4031, "heat_request"),
     (0x4032, "load_balancing"),
+    (0x4003, "window_open_external"),
+    (0x4015, "external_room_sensor"),
 ]
 ATTRS_DANFOSS_B = [
     (0x404B, "setpoint_offset"),
@@ -97,6 +101,7 @@ _BOOLEANS = {
     "load_balancing",
     "preheat_active",
     "window_detection",
+    "window_open_external",
     "orientation",
 }
 _LENGTH = {
@@ -310,16 +315,27 @@ def descale_records(day: str, hour: str) -> list[tuple[int, int, int]]:
 
 # Danfoss settings written through the tunnel, one attribute each, UNDER SUPERVISED TRIAL ONLY
 # (not proven on real hardware): name (as ``name_attributes`` reads it) -> (attribute, ZCL type).
-# Types as Zigbee2MQTT writes them: boolean (0x10), uint8 (0x20), int8 (0x28, signed).
+# Types as Zigbee2MQTT writes them (zigbee-herdsman-converters, src/devices/danfoss.ts): boolean
+# (0x10), uint8 (0x20), int8 (0x28, signed), int16 (0x29, signed).
 TUNNEL_SETTINGS: dict[str, tuple[int, int]] = {
     "radiator_covered": (0x4016, 0x10),
     "control_speed": (0x4020, 0x20),  # Zigbee2MQTT ``algorithm_scale_factor``
     "setpoint_offset": (0x404B, 0x28),  # Zigbee2MQTT ``regulation_setpoint_offset``
+    "window_open_external": (0x4003, 0x10),  # Zigbee2MQTT ``window_open_external``
+    "load_balancing": (0x4032, 0x10),  # Zigbee2MQTT ``load_balancing_enable``
+    "external_room_sensor": (0x4015, 0x29),  # Zigbee2MQTT ``external_measured_room_sensor``
 }
 # Ranges of Zigbee2MQTT. The offset is carried in TENTHS of °C (raw -25..25): Zigbee2MQTT's scale,
 # NOT confirmed on real hardware here.
 CONTROL_SPEED_MIN, CONTROL_SPEED_MAX = 1, 10
 SETPOINT_OFFSET_MIN, SETPOINT_OFFSET_MAX = -2.5, 2.5
+# External measured room sensor (0x4015, int16): HUNDREDTHS of °C, raw -8000..3500 (Zigbee2MQTT
+# ``external_measured_room_sensor``). The sentinel raw -8000 (= -80 °C) DISABLES the external
+# sensor: the head then regulates on its own internal measurement. The head also resets the value
+# to -8000 by itself after 30 min to 3 h without an update (radiator_covered mode dependent), so a
+# live feed must be refreshed periodically (docs/tunnel-settings-trial.md).
+EXTERNAL_ROOM_SENSOR_DISABLED = -8000  # raw hundredths, -80.0 °C
+EXTERNAL_ROOM_SENSOR_MIN, EXTERNAL_ROOM_SENSOR_MAX = -80.0, 35.0  # °C (raw -8000..3500)
 
 
 def setting_raw(setting: str, value: Any) -> int:
@@ -329,9 +345,9 @@ def setting_raw(setting: str, value: Any) -> int:
     -2.5 to 2.5 by 0.1, written in tenths (raw -25..25). Raises LocalError otherwise: nothing is
     sent for a value that does not pass.
     """
-    if setting == "radiator_covered":
+    if setting in ("radiator_covered", "window_open_external", "load_balancing"):
         if not isinstance(value, bool):
-            raise LocalError(f"radiator_covered expects a boolean, got {value!r}")
+            raise LocalError(f"{setting} expects a boolean, got {value!r}")
         return int(value)
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise LocalError(f"{setting} expects a number, got {value!r}")
@@ -350,6 +366,17 @@ def setting_raw(setting: str, value: Any) -> int:
             raise LocalError(
                 f"setpoint offset out of range: {value} "
                 f"({SETPOINT_OFFSET_MIN} to {SETPOINT_OFFSET_MAX} °C by 0.1)"
+            )
+        return int(raw)
+    if setting == "external_room_sensor":
+        raw = round(float(value) * 100)
+        if abs(raw - float(value) * 100) > 1e-6 or not (
+            EXTERNAL_ROOM_SENSOR_DISABLED <= raw <= round(EXTERNAL_ROOM_SENSOR_MAX * 100)
+        ):
+            raise LocalError(
+                f"external room sensor out of range: {value} "
+                f"({EXTERNAL_ROOM_SENSOR_MIN} to {EXTERNAL_ROOM_SENSOR_MAX} °C; "
+                f"{EXTERNAL_ROOM_SENSOR_MIN} °C disables it)"
             )
         return int(raw)
     raise LocalError(f"unknown tunnel setting: {setting} (known: {', '.join(TUNNEL_SETTINGS)})")
@@ -804,6 +831,7 @@ TRACKED_SETTINGS = (
     "adaptation_done",
     "radiator_covered",
     "load_balancing",
+    "window_open_external",
 )
 
 

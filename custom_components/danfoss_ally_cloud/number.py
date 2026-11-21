@@ -628,6 +628,19 @@ LOCAL_TRIAL_NUMBERS: tuple[LocalTrialNumberDescription, ...] = (
         native_step=1,
         mode=NumberMode.BOX,
     ),
+    LocalTrialNumberDescription(
+        key="external_room_sensor_setting",
+        translation_key="external_room_sensor_setting",
+        setting="external_room_sensor",
+        attribute="external_room_sensor",
+        scale=0.01,  # the head carries it in hundredths of °C (Zigbee2MQTT scale)
+        # -80 °C (raw -8000) is Danfoss' DISABLE sentinel; the head regulates on its own sensor.
+        native_min_value=tunnel.EXTERNAL_ROOM_SENSOR_MIN,
+        native_max_value=tunnel.EXTERNAL_ROOM_SENSOR_MAX,
+        native_step=0.1,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        mode=NumberMode.BOX,
+    ),
 )
 
 

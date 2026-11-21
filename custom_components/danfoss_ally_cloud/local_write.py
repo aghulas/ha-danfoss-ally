@@ -59,6 +59,9 @@ LOCAL_TRIAL_SETTINGS: dict[str, LocalTrialSetting] = {
         LocalTrialSetting("setpoint_offset", ("setpoint_offset",)),
         LocalTrialSetting("regulation_speed", ("control_speed",)),
         LocalTrialSetting("valve_exercise", ("descale_day", "descale_time")),
+        LocalTrialSetting("external_room_sensor", ("external_room_sensor",)),
+        LocalTrialSetting("window_open_external", ("window_open_external",)),
+        LocalTrialSetting("load_balancing", ("load_balancing",)),
     )
 }
 
@@ -182,7 +185,8 @@ async def async_local_write_setting(
     value: Any,
 ) -> dict[str, Any]:
     """Write ONE tunnel setting (``radiator_covered``, ``setpoint_offset`` in °C,
-    ``regulation_speed``), read the head back and return what it holds now.
+    ``regulation_speed``, ``external_room_sensor`` in °C, ``window_open_external``,
+    ``load_balancing``), read the head back and return what it holds now.
 
     Raises ``LocalWriteRefused`` (nothing sent), ``LocalWriteNotConfirmed`` (no read-back) or
     ``LocalWriteRejected`` (the head said no, or holds another value)."""
@@ -191,7 +195,9 @@ async def async_local_write_setting(
         raw = tunnel.setting_raw(attribute, value)
     except tunnel.LocalError as err:
         raise LocalWriteRefused(f"value refused, nothing was sent: {err}") from err
-    expected = {attribute: bool(raw) if attribute == "radiator_covered" else raw}
+    # The read-back is compared to what ``tunnel.name_attributes`` returns: booleans come back as
+    # bool, everything else as the raw integer written (the external sensor stays raw hundredths).
+    expected = {attribute: bool(raw) if attribute in tunnel._BOOLEANS else raw}
     status = await _run(hass, local.manager.write_setting, head, attribute, value)
     return _check(await local.async_refresh_settings(head), expected, status)
 

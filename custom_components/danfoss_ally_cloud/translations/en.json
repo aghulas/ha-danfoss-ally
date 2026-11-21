@@ -192,6 +192,12 @@
       },
       "radiator_covered_setting": {
         "name": "Radiator covered setting"
+      },
+      "window_open_external_setting": {
+        "name": "External window open setting"
+      },
+      "load_balancing_setting": {
+        "name": "Load balancing setting"
       }
     },
     "number": {
@@ -215,6 +221,9 @@
       },
       "regulation_speed_setting": {
         "name": "Regulation speed setting"
+      },
+      "external_room_sensor_setting": {
+        "name": "External room sensor setting"
       }
     },
     "select": {

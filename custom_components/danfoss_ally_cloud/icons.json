@@ -112,6 +112,15 @@
         "state": {
           "on": "mdi:radiator-disabled"
         }
+      },
+      "window_open_external_setting": {
+        "default": "mdi:window-open",
+        "state": {
+          "on": "mdi:window-open-variant"
+        }
+      },
+      "load_balancing_setting": {
+        "default": "mdi:scale-balance"
       }
     },
     "number": {
@@ -135,6 +144,9 @@
       },
       "regulation_speed_setting": {
         "default": "mdi:speedometer"
+      },
+      "external_room_sensor_setting": {
+        "default": "mdi:home-thermometer-outline"
       }
     },
     "select": {
