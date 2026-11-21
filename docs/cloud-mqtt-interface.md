@@ -295,3 +295,52 @@ Findings to weigh, none implemented here.
 | Does the gateway forward to the cloud the answer to **every** tunnel read, including the weekly schedule? | A listen during a `get_local_survey` with schedules; the schedule answer would be a cluster command `0x00` of `0x0201` in DP 199 |
 | Protocols 22, 31, 63, 51, 200: does a DP query (31) return a full state? | Not to be tried without a supervised-write procedure of its own: a query is a publish on the outbound topic |
 | Is a wildcard subscription accepted? | Low value; not worth a trial on a real account |
+
+## 11. Comparison with Tuya's published MQTT protocol (TuyaLink)
+
+Tuya documents one MQTT protocol publicly: **TuyaLink**, the "Tuya MQTT Standard Protocol" of the
+developer platform (pages read on 2026-11-21: the protocol overview, the topic list, properties /
+actions / events, sub-device online / offline). It is **not the channel mapped above**. TuyaLink is
+the **device ↔ cloud** side — what a gateway says to the cloud. This document maps the **app ↔
+cloud** side, which Tuya does not publish. The two share the brokers and little else.
+
+| | TuyaLink (published) | The app's channel (this document) |
+|---|---|---|
+| Broker | `m1.tuya<region>.com`, port 8883, TLS | the same hosts and port (§2) |
+| MQTT | 3.1.1, QoS 0 / 1, keep-alive 60 s | the same (§2) |
+| Topics | `tylink/<deviceId>/thing/…`, `…/device/…`, `…/ota/…`, `…/ext/…`, `…/channel/raw/…` | `smart/mb/in|out/<gateway-id>` (§3) |
+| Payload | plain JSON: `msgId`, `time`, `data` | encrypted frame: `protocol`, `t`, `data` (§4) |
+| Data model | named properties (`code`), actions, events | numbered DPs (`dps`) |
+| Identity | the device's own certificate (`DeviceID` + `DeviceSecret`, HMAC-SHA256) | the app's HTTP session (§2) |
+| Sub-device | `subDevices[].deviceId` in the gateway's report | `cid` in the payload (§3) |
+
+What the published protocol **confirms** about ours:
+
+- **One connection per identity.** A second connection under the same certificate forces the first
+  one offline. This is the behaviour §2 describes for sessions, and the reason each client holds
+  its own deviceId.
+- **Offline is declared after 1.5 × the keep-alive** without a message.
+- **The gateway is the proxy.** Sub-devices have no topic of their own; their data and their
+  online state travel under the gateway's identity.
+
+What it **suggests** for the unknowns of §10 — hypotheses, none observed on our channel:
+
+- **Online / offline exists as an MQTT event on the device side.** The gateway publishes
+  `device/sub/login` and `device/sub/logout` with the list of sub-devices. So the cloud learns a
+  head's connectivity in real time; whether it relays that to the app's clients is the open
+  question, and the user topic is the likely place.
+- **A raw channel exists** (`channel/raw/up` / `raw/down`), the conceptual counterpart of DP 198 /
+  199 carrying the head's Zigbee frames (§7).
+- **Topology is queried and notified on the device side** (`device/topo/get`, `topo/change`).
+  Nothing says it is exposed to the app's clients; fleet discovery stays on cloud HTTP.
+- **The model is spontaneous report plus set**: no cloud → device "read the state now" appears in
+  the pages read. That is consistent with the channel being event-driven (§8).
+
+What it does **not** give us:
+
+- **No listening path.** Subscribing to `tylink/` topics needs the gateway's device secret, and a
+  connection under the gateway's identity would **force the real gateway offline**. Never to be
+  tried.
+- Whether the Ally gateway speaks TuyaLink or the older device protocol on its own side is not
+  established; the comparison is about the protocol family, not a capture.
+- Nothing about the app-side protocol numbers (§5), the frame (§4) or the user topic.
