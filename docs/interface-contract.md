@@ -578,6 +578,9 @@ designated head only (§5.1, `docs/tunnel-settings-trial.md`).
 | `0x4020` | regulation speed (Zigbee2MQTT `algorithm_scale_factor`) | uint8 (`0x20`) | 1 to 10 |
 | `0x404B` | setpoint offset | int8 (`0x28`) | **tenths of °C**, −25 to 25 (−2.5 to 2.5 °C) — Zigbee2MQTT's scale, **not confirmed on real hardware** |
 | `0x4010` / `0x4011` | valve exercise day / time | enum8 (`0x30`) / uint16 (`0x21`) | 0 Sunday … 6 Saturday (7 undefined) / minutes after midnight; written together (the `set_descaling` service's frame) |
+| `0x4015` | external measured room sensor (Zigbee2MQTT `external_measured_room_sensor`) | int16 (`0x29`) | **hundredths of °C**, −8000 to 3500 (−80 to 35 °C); −8000 disables it; must be refreshed periodically on a real head |
+| `0x4003` | external window open (Zigbee2MQTT `window_open_external`) | boolean (`0x10`) | 0 / 1 |
+| `0x4032` | load balancing (Zigbee2MQTT `load_balancing_enable`) | boolean (`0x10`) | 0 / 1; gateway/room-managed on an Ally gateway |
 
 **Multi-gateway survey (`get_local_survey` service, `danfoss_ally_cloud/local_survey` WebSocket
 command).** Read-only, one thread per gateway, the heads of a gateway read one after the other
@@ -768,6 +771,14 @@ by the MCP connector (`smartlife.m.*` family; the APK also exposes the `thing.m.
   `write_path: local`, `write_scope: head`, `write_trial: true`, `raw`, `read_at`, and the last
   attempt's `trial_result`, `trial_at`, `trial_error`. Removed from the registry when the trial
   is disarmed. Procedure: docs/tunnel-settings-trial.md.
+  Three further settings share this gate (batch C3, same channel, not proven): `number` "external
+  room sensor setting" (−80 to 35 °C by 0.1, `0x4015`, hundredths of °C; **−80 °C disables it**;
+  must be refreshed periodically on a real head), `switch` "external window open setting"
+  (`0x4003`) and `switch` "load balancing setting" (`0x4032`, gateway/room-managed on an Ally
+  gateway, exposed for completeness).
+- **Danfoss Ally™ Room Sensor** (014G2480, Tuya category `wsdcg`): its own device, three read-only
+  sensors from the cloud device list — `temperature` (DP 1), `humidity` (DP 2) and `battery` (DP 4,
+  diagnostic). No write. Unavailable while offline. (`docs/zigbee2mqtt-alignment.md` §4.)
 - **Thermostat (`climate`)**: no `comfort` / `setback` / `holiday` preset tied to DP 2 (R5).
   **Durable setpoint write at the room level**: in modes `comfort` (`at_home`) and `setback`
   (`leaving_home`), changing the temperature publishes the setpoint on the group then rewrites one

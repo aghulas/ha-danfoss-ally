@@ -45,9 +45,9 @@ Access: `R` = published and readable, `RW` = also settable.
 | Viewing direction | `viewing_direction` | RW, config | `switch` | `switch` `viewing_direction`, config, **trial head only** (batch C) | cloud MQTT DP 101, candidate, confirmed by the per-device route | Closed until its supervised trial passes |
 | Orientation (vertical / horizontal) | `thermostat_orientation` | RW, config | `switch` | `select` `orientation_setting` (`horizontal` / `vertical`), config, **trial head only** (batch C); `sensor` `orientation` read only | cloud MQTT DP 133, candidate, confirmed by the tunnel flag `0x4014` | Closed until its supervised trial passes; ours is a `select`, the two values being names, not on/off |
 | Radiator covered | `radiator_covered` | RW | `switch` | `binary_sensor` `radiator_covered` read only; `switch` `radiator_covered_setting`, config, **trial head only** (batch C2) | tunnel `0x4016` read; write implemented, not tried | Closed until its supervised trial passes |
-| External room sensor | `external_measured_room_sensor` | RW | `number` | not exposed, not read | none | **Open**: no channel known (§6) |
-| External window contact | `window_open_external` | RW | `switch` | not exposed, not read | none | **Open**: no channel known (§6) |
-| Load balancing | `load_balancing_enable` | RW | `switch` | not exposed; read by the tunnel as `load_balancing` | tunnel `0x4032` read | Missing. On the Ally gateway this is driven by the room; exposing a write needs care |
+| External room sensor | `external_measured_room_sensor` | RW, int16, −8000…3500 (0.01 °C) | `number` | `number` `external_room_sensor_setting` in °C (−80…35; −80 = disabled), config, **trial head only** (batch C3) | tunnel `0x4015` read + write, closed, not tried | Closed until its supervised trial passes; must be refreshed periodically on a real head (§6) |
+| External window contact | `window_open_external` | RW, boolean | `switch` | `switch` `window_open_external_setting`, config, **trial head only** (batch C3) | tunnel `0x4003` read + write, closed, not tried | Closed until its supervised trial passes |
+| Load balancing | `load_balancing_enable` | RW, boolean | `switch` | `switch` `load_balancing_setting`, config, **trial head only** (batch C3); read by the tunnel as `load_balancing` | tunnel `0x4032` read + write, closed, not tried | Closed until its supervised trial passes. On the Ally gateway this is driven by the room, so it stays closed |
 | Room load mean / estimate | `load_room_mean` RW, `load_estimate` R | — | `number` / `sensor` | not exposed, not read | none | Missing; gateway-managed, low value |
 | Regulation speed | `algorithm_scale_factor`, 1–10 | RW | `number` | `sensor` `regulation_speed` read only; `number` `regulation_speed_setting` 1–10, config, **trial head only** (batch C2) | tunnel `0x4020` read; write implemented, not tried | Closed until its supervised trial passes |
 | Setpoint offset | `regulation_setpoint_offset`, −2.5…2.5, 0.1 | RW, config | `number` | `sensor` `setpoint_offset` read only; `number` `setpoint_offset_setting` −2.5…2.5 by 0.1, config, **trial head only** (batch C2) | tunnel `0x404B` read; write implemented, not tried | Closed until its supervised trial passes; tenths-of-°C scale not confirmed |
@@ -77,13 +77,16 @@ Access: `R` = published and readable, `RW` = also settable.
 
 | Concept | Z2M property | Integration today |
 |---|---|---|
-| Temperature | `temperature` | No handling found in the code (device categories are `head` and `relay`) |
-| Humidity | `humidity` | Same |
-| Battery | `battery`, `voltage` (diagnostic) | Same |
-| Link | `linkquality` (diagnostic) | Same |
+| Temperature | `temperature` | `sensor` `temperature` (DP 1, tenths of °C), from the cloud device list |
+| Humidity | `humidity` | `sensor` `humidity` (DP 2, tenths of %) |
+| Battery | `battery`, `voltage` (diagnostic) | `sensor` `battery` (DP 4, %), diagnostic. No `voltage` DP on the cloud side |
+| Link | `linkquality` (diagnostic) | No LQI on the cloud side (as for heads) |
 
-To check first: whether the cloud device list returns a room sensor paired to an Ally gateway, and
-with which DPs.
+**Settled (batch A2).** The cloud device list returns the Danfoss Ally™ Room Sensor (014G2480,
+Tuya category `wsdcg`, product `mxzo5rhf`) with DP 1 `temp_current` (tenths of °C), DP 2
+`humidity_value` (tenths of %) and DP 4 `battery_percentage` (%). `api/decode.py` now gives it the
+`sensor` category and `sensor.py` three read-only sensors (temperature, humidity, battery). Seen on
+the real install's device list (2026-11-21); no write.
 
 ## 5. What exists on one side only
 
@@ -167,9 +170,29 @@ source (`docs/architecture.md`, rules for adding a route).
 - **Open question: the scale of the setpoint offset.** Tenths of °C (raw −25…25) is Zigbee2MQTT's
   reading; the read-only sensor of B2 and the C2 write both assume it. The trial writes the
   smallest step first and needs a source that shows the offset in °C to settle it.
-- **Open: external room sensor and external window contact.** Zigbee2MQTT writes them
-  (`external_measured_room_sensor`, `window_open_external`); no channel is known on our side (no
-  attribute read or written through the tunnel, no DP captured from the app). Not started.
+- **C3, implemented, not tried on real hardware.** External measured room sensor (`0x4015`,
+  int16, hundredths of °C), external window open (`0x4003`, boolean) and load balancing (`0x4032`,
+  boolean) through the local tunnel, as Zigbee2MQTT writes the same Danfoss manufacturer attributes
+  (`zigbee-herdsman-converters`, `src/devices/danfoss.ts`: `danfossExternalMeasuredRoomSensor`
+  0x4015, `danfossWindowOpenExternal` 0x4003, `danfossLoadBalancingEnable` 0x4032). Closed by
+  default; the same options (`local_supervised_settings` / `local_supervised_head`) open them on
+  one head, with config entities on that head only, read back through the tunnel after each write.
+  Entities: a `number` "External room sensor setting" (°C, −80 to 35; **−80 °C disables it**, raw
+  −8000), a `switch` "External window open setting", a `switch` "Load balancing setting".
+  Procedure: `docs/tunnel-settings-trial.md`.
+  - **External room sensor must be refreshed periodically.** Zigbee2MQTT's own documentation: the
+    head resets the value to −8000 (disabled) after 30 min (room-sensor mode, `radiator_covered`
+    true) to 3 h (auto-offset mode, `radiator_covered` false) without an update, and the value
+    should be sent at most every 5–30 min or every 0.1 °C change. The integration exposes the
+    setting only; feeding it live from a Home Assistant sensor is an automation on the user's side
+    (a ready-made example is in `docs/tunnel-settings-trial.md`). A HA blueprint is left as future
+    work, kept out of scope for a closed-by-default trial.
+  - **Load balancing is gateway/room business on an Ally gateway.** It stays closed by default and
+    is exposed for completeness; its real effect needs `load_room_mean` updates the gateway owns.
 
-**Not proposed**: any write to `programming_operation_mode` (R4), load balancing and heat
-available (managed by the gateway and the relay link), LQI (not available).
+- **A2, done.** Danfoss Ally™ Room Sensor (014G2480, `wsdcg`) decoded from the cloud device list:
+  temperature / humidity / battery read-only sensors (§4). No write.
+
+**Not proposed**: any write to `programming_operation_mode` (R4), `load_room_mean` /
+`load_estimate` and heat available (managed by the gateway and the relay link), LQI (not
+available).

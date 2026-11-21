@@ -4,7 +4,10 @@ Batch C2 of `docs/zigbee2mqtt-alignment.md`: four head settings that Zigbee2MQTT
 Danfoss manufacturer attributes of the thermostat cluster (`0x0201`, manufacturer code `0x1246`),
 written here the same way through the local Zigbee tunnel of the Ally gateway. **None has been
 written on real hardware by the integration.** All are closed by default: nothing exists and
-nothing can be sent until the trial is armed for one head. This sheet completes the generic
+nothing can be sent until the trial is armed for one head. Three more settings were added in the same frame (batch C3): the **external measured room sensor**
+(`0x4015`, int16, hundredths of °C), the **external window open** flag (`0x4003`, boolean) and
+**load balancing** (`0x4032`, boolean). Same gate, same read-back; none written on real hardware.
+This sheet completes the generic
 procedure of `docs/first-write-procedure.md`; its preconditions and stop rules apply unchanged.
 **Rémi present, on site, for every write.**
 
@@ -16,6 +19,9 @@ procedure of `docs/first-write-procedure.md`; its preconditions and stop rules a
 | `setpoint_offset` | `number` "Setpoint offset setting", °C | `0x404B`, int8 | −2.5 to 2.5 by 0.1, sent in tenths (raw −25 to 25) |
 | `regulation_speed` | `number` "Regulation speed setting" | `0x4020`, uint8 | integer 1 to 10 |
 | `valve_exercise` | `select` "Valve exercise day setting" and `time` "Valve exercise time setting" | `0x4010` enum8 / `0x4011` uint16 (minutes) | a weekday; a time HH:MM |
+| `external_room_sensor` | `number` "External room sensor setting", °C | `0x4015`, int16 | −80 to 35 °C by 0.1, sent in hundredths (raw −8000 to 3500); **−80 °C (raw −8000) disables it** |
+| `window_open_external` | `switch` "External window open setting" | `0x4003`, boolean | on / off |
+| `load_balancing` | `switch` "Load balancing setting" | `0x4032`, boolean | on / off |
 
 - **Exists when**: `enable_local` on, the key ticked in `local_supervised_settings`, the head chosen
   in `local_supervised_head`, a verified model, and the tunnel can address the head (node id,
@@ -88,6 +94,49 @@ restore `V0` from the same entity and read it back the same way.
    unchanged; then change the time the same way. Optional independent check: put the exercise a
    few minutes ahead on today's weekday and watch or listen to the head at that time (the valve
    should run its exercise stroke) — not observed here so far. Restore day and time `V0`.
+5. **External window open.** Flip it on, then off. Expected: `confirmed_by_tunnel`, the switch
+   showing the new value. The head should treat the room as window-open while on (the internal
+   window state and heat demand change); check the app/head if it shows one. Restore `V0` (off).
+6. **Load balancing.** Only if you mean to: on an Ally gateway the room drives this, so a lone
+   write may be ignored or re-driven by the gateway. If you try it, flip it, read the outcome,
+   check nothing changed on another head of the room, and restore `V0` at once.
+7. **External room sensor.** Write a plausible room temperature (e.g. `V0`'s room temp, or 20.0),
+   and **check the app/head at once**: the head should regulate on the external value (its reading
+   follows it; with `radiator_covered` false it applies an auto-offset). Then write **−80.0 °C**
+   and confirm it reads back as −80.0 (disabled): the head returns to its own internal sensor.
+   Note that a real live feed must be refreshed periodically — the head resets the value to −8000
+   by itself after 30 min to 3 h (see below). Restore `V0` (−80.0 disables it if there was none).
+
+### Feeding the external sensor live (user-side automation)
+
+The integration exposes the setting only; it does not push a sensor's value on a timer. On a real
+head the value must be refreshed every few minutes or the head disables it (Zigbee2MQTT docs: reset
+to −8000 after 30 min in room-sensor mode, 3 h in auto-offset mode). Feed it from a Home Assistant
+temperature sensor with a small automation, writing the `number` entity periodically, for example:
+
+```yaml
+alias: Room X — feed the external room sensor to the head
+mode: single
+triggers:
+  - trigger: time_pattern
+    minutes: "/5"
+  - trigger: state
+    entity_id: sensor.room_x_temperature
+conditions:
+  - condition: template
+    value_template: "{{ states('sensor.room_x_temperature') | float(default=none) is not none }}"
+  - condition: template  # do not feed a stale reading
+    value_template: "{{ (now() - states.sensor.room_x_temperature.last_reported).total_seconds() < 1200 }}"
+actions:
+  - action: number.set_value
+    target:
+      entity_id: number.room_x_external_room_sensor_setting  # the trial head's entity
+    data:
+      value: "{{ states('sensor.room_x_temperature') | float }}"  # °C; the integration sends hundredths
+```
+
+To stop feeding it, set the `number` to −80 (disabled) or disarm the trial. A packaged HA blueprint
+is future work (kept out of scope while the write is closed-by-default and unproven).
 
 Stop and restore at once if: a write raises `rejected` with a value nobody wrote; the app shows a
 change on another head or another setting; the head reports a fault; or anything changes on

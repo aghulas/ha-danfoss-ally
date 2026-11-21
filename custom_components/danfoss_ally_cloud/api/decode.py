@@ -180,7 +180,8 @@ class DanfossDevice:
     node_id: str | None = None  # Zigbee cid (link with the local bridge)
     mesh_id: str | None = None  # gateway
     online: bool = False
-    temperature: float | None = None  # °C (DP 24)
+    temperature: float | None = None  # °C (DP 24; room sensor: DP 1)
+    humidity: float | None = None  # % relative (room sensor DP 2); None on a head
     setpoint: float | None = None  # °C ACTIVE setpoint (DP 171, else mode setting, else DP 16)
     setpoints: dict[str, float] = field(default_factory=dict)
     mode: str | None = None  # DP 2
@@ -209,6 +210,11 @@ class DanfossDevice:
     @property
     def is_relay(self) -> bool:
         return self.category == "relay"
+
+    @property
+    def is_sensor(self) -> bool:
+        """A Danfoss Ally room sensor (category ``wsdcg``): temperature + humidity, read only."""
+        return self.category == "sensor"
 
     @property
     def inconsistent(self) -> bool:
@@ -294,6 +300,15 @@ def _apply_dps(d: DanfossDevice, dps: dict[str, Any]) -> None:
     Split out of ``decode_device`` so the same decoding is reused to re-derive the fast-changing
     state when fresher DPs are overlaid onto an already-known device (``apply_dps_overlay``).
     """
+    if d.category == "sensor":
+        # Danfoss Ally room sensor (014G2480, Tuya category ``wsdcg``, product ``mxzo5rhf``):
+        # DP 1 ``temp_current`` (tenths of °C), DP 2 ``humidity_value`` (tenths of %), DP 4
+        # ``battery_percentage`` (whole %). Read only; it has none of the head DPs. Observed on the
+        # real install's device list (temp 17.5 °C, humidity 56.1 %, battery 79 %), 2026-11-21.
+        d.temperature = _num(dps.get("1"), 10)
+        d.humidity = _num(dps.get("2"), 10)
+        d.battery = _num(dps.get("4"))
+        return
     d.temperature = _num(dps.get("24"), 10)
     for dp, key in _SETPOINT_DPS.items():
         x = _num(dps.get(dp), 10)

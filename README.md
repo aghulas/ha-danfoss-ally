@@ -159,9 +159,10 @@ cloud MQTT channel below). Read-only: no command topic.
 
 - **Boiler relays** are published in `discovery` mode only: the `zigbee2mqtt` device list describes
   thermostats to a z2m consumer, and a relay does not fit that description.
-- **Room sensors are not published, on purpose for now**: the integration does not decode that
-  category at all (it creates no Home Assistant entity for them either), because their data points
-  have not been verified on real hardware. Publishing them needs that verification first.
+- **Room sensors** (Danfoss Ally™ Room Sensor, 014G2480) now get Home Assistant entities —
+  temperature, humidity and battery, read from the cloud device list — but are **not published**
+  over this MQTT-publishing bridge yet: the `zigbee2mqtt` device list describes thermostats, and a
+  standalone sensor's publishing shape is not settled. The entities are available regardless.
 - Topics: `<base>/<device id>` (state, JSON) and `<base>/<device id>/availability` in `discovery`
   mode; `<base>/<name>` and `<base>/<name>/availability` in `zigbee2mqtt` mode.
 

@@ -44,14 +44,22 @@ from custom_components.danfoss_ally_cloud.local_write import (
 )
 from custom_components.danfoss_ally_cloud.number import DanfossLocalSettingNumber
 from custom_components.danfoss_ally_cloud.select import DanfossValveExerciseDay
-from custom_components.danfoss_ally_cloud.switch import DanfossRadiatorCoveredSetting
+from custom_components.danfoss_ally_cloud.switch import DanfossLocalSettingSwitch
 from custom_components.danfoss_ally_cloud.time import DanfossValveExerciseTime
 
 from .common import ENTRY_DATA, FakeCloudClient, head
 from .test_coordinator_local import FakeManager
 
 HEAD = Head("trial-head-id", "n1", "gw-1")
-ALL = ["radiator_covered", "setpoint_offset", "regulation_speed", "valve_exercise"]
+ALL = [
+    "radiator_covered",
+    "setpoint_offset",
+    "regulation_speed",
+    "valve_exercise",
+    "external_room_sensor",
+    "window_open_external",
+    "load_balancing",
+]
 
 # --- pure layer: validation and frames ----------------------------------------------------------
 
@@ -68,6 +76,15 @@ ALL = ["radiator_covered", "setpoint_offset", "regulation_speed", "valve_exercis
         ("setpoint_offset", 0.1 + 0.2, 3),  # float noise is not a step error
         ("setpoint_offset", 2.5, 25),
         ("setpoint_offset", 0, 0),
+        ("window_open_external", True, 1),
+        ("window_open_external", False, 0),
+        ("load_balancing", True, 1),
+        ("load_balancing", False, 0),
+        ("external_room_sensor", 21, 2100),
+        ("external_room_sensor", 21.5, 2150),
+        ("external_room_sensor", 0, 0),
+        ("external_room_sensor", 35, 3500),  # max
+        ("external_room_sensor", -80, -8000),  # the disable sentinel
     ],
 )
 def test_setting_raw_accepts(setting, value, raw):
@@ -88,7 +105,13 @@ def test_setting_raw_accepts(setting, value, raw):
         ("setpoint_offset", 0.15),
         ("setpoint_offset", math.nan),
         ("setpoint_offset", "1"),
-        ("load_balancing", True),  # out of scope: gateway-managed
+        ("window_open_external", 1),  # not a bool
+        ("window_open_external", "on"),
+        ("load_balancing", 1),  # not a bool
+        ("external_room_sensor", 35.1),  # above max
+        ("external_room_sensor", -80.1),  # below the disable sentinel
+        ("external_room_sensor", True),  # not a number
+        ("external_room_sensor", "21"),
         ("orientation", True),  # out of scope: other channel
     ],
 )
@@ -101,6 +124,12 @@ def test_records_and_frame_types():
     assert tunnel.setting_records("radiator_covered", True) == [(0x4016, 0x10, 1)]
     assert tunnel.setting_records("control_speed", 5) == [(0x4020, 0x20, 5)]
     assert tunnel.setting_records("setpoint_offset", -1.2) == [(0x404B, 0x28, -12)]
+    assert tunnel.setting_records("window_open_external", True) == [(0x4003, 0x10, 1)]
+    assert tunnel.setting_records("load_balancing", False) == [(0x4032, 0x10, 0)]
+    assert tunnel.setting_records("external_room_sensor", 21) == [(0x4015, 0x29, 2100)]
+    # int16, signed: the -8000 disable sentinel round-trips through the frame as two LE bytes.
+    frame = tunnel.frame_write_attributes(tunnel.setting_records("external_room_sensor", -80), True)
+    assert frame[13:] == bytes([0x15, 0x40, 0x29]) + (-8000).to_bytes(2, "little", signed=True)
     frame = tunnel.frame_write_attributes(tunnel.setting_records("setpoint_offset", -1.2), True)
     # manufacturer-specific write (cmd 0x02) carrying attribute 0x404B, int8, signed -12
     assert frame[8:13] == bytes([0x04, 0x46, 0x12, 0x40, 0x02])
@@ -343,7 +372,7 @@ def test_options_are_parsed_and_unknown_keys_dropped(caplog):
     entry = MagicMock()
     entry.options = {
         CONF_ENABLE_LOCAL: True,
-        CONF_LOCAL_SUPERVISED_SETTINGS: ["radiator_covered", "load_balancing"],
+        CONF_LOCAL_SUPERVISED_SETTINGS: ["radiator_covered", "no_such_setting"],
         CONF_LOCAL_SUPERVISED_HEAD: "trial-head-id",
     }
     trial = integration._local_trial(entry)
@@ -386,9 +415,7 @@ class _TrialManager(FakeManager):
         self.writes.append((head_.dev_id, setting, value))
         raw = tunnel.setting_raw(setting, value)
         if self.apply:
-            self.settings[head_.dev_id][setting] = (
-                bool(raw) if setting == "radiator_covered" else raw
-            )
+            self.settings[head_.dev_id][setting] = bool(raw) if setting in tunnel._BOOLEANS else raw
         return 0
 
     def write_valve_exercise(self, head_, day=None, hour=None):
@@ -435,7 +462,7 @@ _ARMED = {
     CONF_LOCAL_SUPERVISED_HEAD: "trial-head-id",
 }
 _CLASSES = {
-    "switch": DanfossRadiatorCoveredSetting,
+    "switch": DanfossLocalSettingSwitch,
     "number": DanfossLocalSettingNumber,
     "select": DanfossValveExerciseDay,
     "time": DanfossValveExerciseTime,
@@ -456,7 +483,9 @@ def _one(hass, domain, key=None):
 
 async def test_entities_only_on_the_armed_head(hass: HomeAssistant):
     await _setup(hass, _ARMED)
-    for domain, count in (("switch", 1), ("number", 2), ("select", 1), ("time", 1)):
+    # switch: radiator covered, external window open, load balancing (3). number: setpoint offset,
+    # regulation speed, external room sensor (3). select / time: the valve exercise pair (1 each).
+    for domain, count in (("switch", 3), ("number", 3), ("select", 1), ("time", 1)):
         ents = _entities(hass, domain)
         assert len(ents) == count
         assert {e._device_id for e in ents} == {"trial-head-id"}
@@ -509,7 +538,7 @@ async def test_disarming_removes_the_registry_entries(hass: HomeAssistant):
 
 async def test_states_come_from_the_head(hass: HomeAssistant):
     await _setup(hass, _ARMED)
-    switch = _one(hass, "switch")
+    switch = _one(hass, "switch", "radiator_covered_setting")
     assert switch.available and switch.is_on is False
     offset = _one(hass, "number", "setpoint_offset_setting")
     assert offset.native_value == -0.3
@@ -525,7 +554,7 @@ async def test_states_come_from_the_head(hass: HomeAssistant):
 async def test_writes_show_the_read_back(hass: HomeAssistant):
     manager = _TrialManager()
     await _setup(hass, _ARMED, manager=manager)
-    await _one(hass, "switch").async_turn_on()
+    await _one(hass, "switch", "radiator_covered_setting").async_turn_on()
     await _one(hass, "number", "setpoint_offset_setting").async_set_native_value(1.2)
     await _one(hass, "number", "regulation_speed_setting").async_set_native_value(7.0)
     await _one(hass, "select").async_select_option("friday")
@@ -537,7 +566,7 @@ async def test_writes_show_the_read_back(hass: HomeAssistant):
         ("trial-head-id", "valve_exercise", "friday", None),
         ("trial-head-id", "valve_exercise", None, "06:45"),
     ]
-    switch = _one(hass, "switch")
+    switch = _one(hass, "switch", "radiator_covered_setting")
     assert switch.is_on is True
     assert switch.extra_state_attributes["trial_result"] == "confirmed_by_tunnel"
     assert _one(hass, "number", "setpoint_offset_setting").native_value == 1.2
@@ -551,7 +580,7 @@ async def test_a_write_the_head_does_not_apply_shows_the_head(hass: HomeAssistan
     manager = _TrialManager()
     await _setup(hass, _ARMED, manager=manager)
     manager.apply = False
-    switch = _one(hass, "switch")
+    switch = _one(hass, "switch", "radiator_covered_setting")
     with pytest.raises(HomeAssistantError, match="disagrees"):
         await switch.async_turn_on()
     assert switch.is_on is False  # what the head says, not what was written
@@ -599,7 +628,7 @@ async def test_unreachable_head_is_unavailable_and_not_written(hass: HomeAssista
         for ent in _entities(hass, domain):
             assert not ent.available
     with pytest.raises(HomeAssistantError, match="cannot reach"):
-        await _one(hass, "switch").async_turn_on()
+        await _one(hass, "switch", "radiator_covered_setting").async_turn_on()
     with pytest.raises(HomeAssistantError, match="cannot reach"):
         await _one(hass, "number", "regulation_speed_setting").async_set_native_value(3)
     with pytest.raises(HomeAssistantError, match="cannot reach"):
@@ -647,10 +676,38 @@ async def test_switch_turn_off_writes_false(hass: HomeAssistant):
     manager = _TrialManager()
     manager.settings["trial-head-id"]["radiator_covered"] = True
     await _setup(hass, _ARMED, manager=manager)
-    switch = _one(hass, "switch")
+    switch = _one(hass, "switch", "radiator_covered_setting")
     await switch.async_turn_off()
     assert manager.writes == [("trial-head-id", "radiator_covered", False)]
     assert switch.is_on is False
+
+
+async def test_external_window_and_load_balancing_switches(hass: HomeAssistant):
+    manager = _TrialManager()
+    await _setup(hass, _ARMED, manager=manager)
+    window = _one(hass, "switch", "window_open_external_setting")
+    load = _one(hass, "switch", "load_balancing_setting")
+    await window.async_turn_on()
+    await load.async_turn_off()
+    assert manager.writes == [
+        ("trial-head-id", "window_open_external", True),
+        ("trial-head-id", "load_balancing", False),
+    ]
+    assert window.is_on is True and load.is_on is False
+
+
+async def test_external_room_sensor_number_writes_and_disables(hass: HomeAssistant):
+    manager = _TrialManager()
+    await _setup(hass, _ARMED, manager=manager)
+    number = _one(hass, "number", "external_room_sensor_setting")
+    assert number.native_min_value == -80 and number.native_max_value == 35
+    await number.async_set_native_value(19.5)
+    assert manager.writes == [("trial-head-id", "external_room_sensor", 19.5)]
+    assert number.native_value == 19.5  # read back in °C from raw 1950 hundredths
+    # -80 °C (raw -8000) is the Danfoss disable sentinel, and must be accepted.
+    await number.async_set_native_value(-80.0)
+    assert manager.settings["trial-head-id"]["external_room_sensor"] == -8000
+    assert number.native_value == -80
 
 
 async def test_options_form_offers_the_local_trial(hass: HomeAssistant):
