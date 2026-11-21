@@ -86,6 +86,12 @@
       },
       "radiator_covered": {
         "default": "mdi:radiator"
+      },
+      "heat_available": {
+        "default": "mdi:radiator-off",
+        "state": {
+          "on": "mdi:radiator"
+        }
       }
     },
     "switch": {
@@ -121,6 +127,9 @@
       },
       "load_balancing_setting": {
         "default": "mdi:scale-balance"
+      },
+      "adaptation_run_settings_setting": {
+        "default": "mdi:tune-variant"
       }
     },
     "number": {

@@ -222,6 +222,15 @@ LOCAL_TRIAL_SWITCHES: tuple[LocalTrialSwitchDescription, ...] = (
         setting="load_balancing",
         attribute="load_balancing",
     ),
+    # 0x404E ``adaptation_run_settings``: enable/disable the automatic (nightly) adaptation run. A
+    # boolean (Zigbee2MQTT ``m.binary``), hence a switch rather than a select. NOT the separate
+    # command attribute 0x404C ``adaptation_run_control`` (enum: launch/cancel a run), out of scope.
+    LocalTrialSwitchDescription(
+        key="adaptation_run_settings_setting",
+        translation_key="adaptation_run_settings_setting",
+        setting="adaptation_run_settings",
+        attribute="adaptation_setting",
+    ),
 )
 # Kept for backwards reference (the radiator-covered unique id is unchanged).
 RADIATOR_COVERED_UID = "radiator_covered_setting"
@@ -229,8 +238,8 @@ RADIATOR_COVERED_UID = "radiator_covered_setting"
 
 class DanfossLocalSettingSwitch(DanfossLocalTrialEntity, SwitchEntity):
     """A boolean Danfoss setting (radiator covered 0x4016, external window open 0x4003, load
-    balancing 0x4032), written through the local tunnel under supervised trial (``local_write``).
-    State: the head's own value read through the tunnel."""
+    balancing 0x4032, automatic adaptation run 0x404E), written through the local tunnel under
+    supervised trial (``local_write``). State: the head's own value read through the tunnel."""
 
     entity_description: LocalTrialSwitchDescription
 

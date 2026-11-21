@@ -175,6 +175,9 @@
       },
       "radiator_covered": {
         "name": "Radiator covered"
+      },
+      "heat_available": {
+        "name": "Heat available"
       }
     },
     "switch": {
@@ -198,6 +201,9 @@
       },
       "load_balancing_setting": {
         "name": "Load balancing setting"
+      },
+      "adaptation_run_settings_setting": {
+        "name": "Automatic adaptation run"
       }
     },
     "number": {

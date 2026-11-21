@@ -52,8 +52,9 @@ Access: `R` = published and readable, `RW` = also settable.
 | Regulation speed | `algorithm_scale_factor`, 1–10 | RW | `number` | `sensor` `regulation_speed` read only; `number` `regulation_speed_setting` 1–10, config, **trial head only** (batch C2) | tunnel `0x4020` read; write implemented, not tried | Closed until its supervised trial passes |
 | Setpoint offset | `regulation_setpoint_offset`, −2.5…2.5, 0.1 | RW, config | `number` | `sensor` `setpoint_offset` read only; `number` `setpoint_offset_setting` −2.5…2.5 by 0.1, config, **trial head only** (batch C2) | tunnel `0x404B` read; write implemented, not tried | Closed until its supervised trial passes; tenths-of-°C scale not confirmed |
 | Valve exercise day / time | `day_of_week`, `trigger_time` | RW, config | `select` / `text` | `sensor` `descale_day` / `descale_time` read only; `select` `valve_exercise_day` and `time` `valve_exercise_time`, config, **trial head only** (batch C2) | tunnel `0x4010` / `0x4011` read; write = the `set_descaling` service's frame, not tried through these entities | Closed until its supervised trial passes; ours is a `time`, Z2M's a `text` |
-| Adaptation run | `adaptation_run_control`, `adaptation_run_settings` | RW | `select` / `switch` | not exposed; `adaptation_setting` read by the tunnel | tunnel `0x404E` read | Missing |
-| Heat available | `heat_available` | RW, config | `switch` | not exposed; read by the tunnel | tunnel `0x4030` read | Missing; gateway-managed (boiler relay link) |
+| Adaptation run settings | `adaptation_run_settings` | RW (binary, on/off) | `switch` | `switch` `adaptation_run_settings_setting`, config, **trial head only** (batch C4) | tunnel `0x404E` read + write, closed, not tried | Closed until its supervised trial passes (§6) |
+| Adaptation run control | `adaptation_run_control` | RW (enum: launch/cancel) | `select` | not exposed | tunnel `0x404C` (not read) | Missing; separate command attribute, not read back by `0x404E` — out of scope |
+| Heat available | `heat_available` | RW, config | `switch` | `binary_sensor` `heat_available`, diagnostic, read only (batch B3) | tunnel `0x4030` read | Read exposed; no write (gateway-managed, boiler relay link) |
 | Heating system mode | `heating_system_mode` | RW, config | `select` | not exposed, not read | none | Missing |
 | Mounting mode control | `mounted_mode_control` | RW, config | `switch` | not exposed | none proven | Missing |
 
@@ -143,6 +144,12 @@ done (entities `heat_required` and `mounting_mode`); item 4 was settled by keepi
   scale of the setpoint offset. Zigbee2MQTT's `lost_in_progress` adaptation value is not mapped
   (its raw value is not known here): it reads unknown, with the raw value as an attribute.
 
+- **B3, implemented, no extra traffic.** `binary_sensor` "heat available" (`0x4030`), read only and
+  diagnostic, for the heads the tunnel can address, fed by the B2 settings pass that already reads
+  the attribute. Same notion as Zigbee2MQTT's `heat_available`. Read only here: on an Ally gateway
+  it is gateway-managed (the boiler-relay link), so no write entity (like `load_balancing`), even
+  though Zigbee2MQTT exposes it writable.
+
 **C — new writes**, one at a time, each with a supervised write read back from an independent
 source (`docs/architecture.md`, rules for adding a route).
 
@@ -190,6 +197,19 @@ source (`docs/architecture.md`, rules for adding a route).
     it, see `docs/tunnel-settings-trial.md`), and a raw example is in that doc too.
   - **Load balancing is gateway/room business on an Ally gateway.** It stays closed by default and
     is exposed for completeness; its real effect needs `load_room_mean` updates the gateway owns.
+
+- **C4, implemented, not tried on real hardware.** Automatic adaptation run on/off (`0x404E`
+  `adaptation_run_settings`) through the local tunnel, as Zigbee2MQTT writes the same Danfoss
+  manufacturer attribute (`zigbee-herdsman-converters`, `src/devices/danfoss.ts`:
+  `danfossAdaptionRunSettings` 0x404E, exposed via `m.binary`, valueOn `[true, 1]` / valueOff
+  `[false, 0]` — "automatic adaptation run enabled"). It is a **boolean**, hence a `switch`
+  "Automatic adaptation run", not a `select`. Closed by default; the same options
+  (`local_supervised_settings` / `local_supervised_head`) open it on one head, read back through
+  the tunnel after each write. Procedure: `docs/tunnel-settings-trial.md`.
+  - **Not the run launch/cancel command.** The multi-value enum that triggers or cancels an
+    adaptation run is a **separate** attribute, `0x404C` `adaptation_run_control`
+    (`idle` / `initiate_adaptation` / `cancel_adaptation`). It is not read back by `0x404E`, so it
+    is **not** implemented here; only the enable/disable setting `0x404E` is.
 
 - **A2, done.** Danfoss Ally™ Room Sensor (014G2480, `wsdcg`) decoded from the cloud device list:
   temperature / humidity / battery read-only sensors (§4). No write.

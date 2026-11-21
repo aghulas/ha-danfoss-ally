@@ -451,6 +451,7 @@ _SETTINGS = {
     "window_state": 3,
     "adaptation_state": 2,
     "radiator_covered": True,
+    "heat_available": False,
     "orientation": False,
     "control_speed": 5,
     "setpoint_offset": -15,
@@ -469,6 +470,7 @@ async def test_settings_entities_follow_the_daily_pass(hass: HomeAssistant, mqtt
     assert window.attributes["read_at"] is not None
     assert hass.states.get("sensor.salon_adaptation_run").state == "found"
     assert hass.states.get("binary_sensor.salon_radiator_covered").state == "on"
+    assert hass.states.get("binary_sensor.salon_heat_available").state == "off"
     # The static settings are disabled by default: registered, without a state.
     registry = er.async_get(hass)
     for name in ("orientation", "regulation_speed", "setpoint_offset"):
