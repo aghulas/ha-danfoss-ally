@@ -16,7 +16,15 @@ services or writes.
   labelled as such underneath. Ally rooms of this integration are unchanged; no new write, no new
   WebSocket command.
 
-**Validation**: vitest with synthetic data only; not checked in a real Home Assistant.
+**Validation on real hardware** (`1.3.1-rc1`, 2026-11-21): on a real install, the card on a Home
+Assistant area holding four Danfoss heads paired to Zigbee2MQTT and a Danfoss room sensor showed
+the room temperature and humidity under the title, and each head's external-sensor regulation with
+its own reading underneath, matching the entities. The Lovelace resource was updated in place to
+`?v=1.3.1-<hash>` (one entry). Read only: no control of the card was used.
+
+**Also observed on the same install (1.3.0 features, 2026-11-20/21)**: the setpoint offset trial
+setting raises the head's regulation target (direction confirmed, scale not proven); a valve
+exercise day written through the local tunnel alone held overnight on one head.
 
 ## 1.3.0 — Isolated-head thermostat, runtime topology, embedded schedule editor, safer schedule writes
 
