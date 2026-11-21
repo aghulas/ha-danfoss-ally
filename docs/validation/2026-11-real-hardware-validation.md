@@ -1,6 +1,6 @@
 # Real-hardware validation — results
 
-**Dates:** 2026-11-18 / 2026-11-19 / 2026-11-20.
+**Dates:** 2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-21.
 Real-hardware validation on a large real install (~99 heads, two homes). Anonymised: room names,
 identifiers and site details replaced by neutral labels.
 Plan: [`../real-validation-plan.md`](../real-validation-plan.md). Preheat curve reading (§3):
@@ -975,3 +975,22 @@ valve…); read only by default, "Cooler / Warmer" with `allow_foreign_writes`. 
 heads regulate on the room sensor (`external_measured_room_sensor` ≈ 17.4 °C) and heat at full valve
 while their own measurement reads 20–24 °C; the card did not show the room sensor → #128. On an
 area with two Tuya thermostats the card works the same way.
+
+## Overnight hold read-out and `1.3.1-rc1`, 2026-11-21 ~09:56–10:06
+
+**Hold of a tunnel-only setting: ✅ held.** Tunnel read of Head V at ~09:56 (Danfoss MCP connector):
+valve exercise **Sunday 10:00**, written the day before at 16:25, everything else on the head
+unchanged. The setting outlived the time (~05:00) at which a tunnel-only preheat write had been
+re-imposed by the cloud. One setting, one head, one night: it does not establish the other tunnel
+settings. Restored: armed 10:01, Saturday written 10:05:01 (confirmed_by_tunnel), trial closed
+10:05:18; connector read-back Saturday 10:00.
+
+**`1.3.1-rc1` (`409d9ee`, #128 room sensor in the card by area).** Files copied the day before at
+17:32 (a first copy gave up without writing anything after 5 min: the host's write lock was held by
+another session installing an add-on); core restarted at 09:56, no write from another session since
+the evening before. The Lovelace resource was updated in place to `danfoss-ally-cloud.js?v=1.3.1-<hash>`,
+the hash matching the copied bundle (one entry). Card on Area X, mounted in memory (nothing saved):
+"14 °C · 69 % — Room sensor" under the title (sensor 14.01 °C / 69.19 %); each head reads "Regulates on
+an external room sensor (14 °C)", its own reading 15.2 / 16.4 °C underneath, setpoint 14 °C;
+`external_measured_room_sensor` = 1403 on the heads. Read only. Released as `1.3.1` the same morning
+(same component code).
