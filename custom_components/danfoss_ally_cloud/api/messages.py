@@ -11,6 +11,7 @@ diagnostics (see ``public_dict``). The account uid, home id, scene id and URLs a
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -43,8 +44,12 @@ class DanfossMessage:
     title: str | None
     content: str | None
     source_id: str | None  # devId of the device concerned (never exposed)
-    read_status: int | None  # raw ``readStatus``; meaning unconfirmed (always 0 so far)
-    alarm: bool  # ``bigMsgType == 1``
+    read_status: int | None  # raw ``readStatus``: always 0 so far, NOT a read flag (unused)
+    big_msg_type: int | None  # raw ``bigMsgType``: 1 on device alarms
+
+    @property
+    def alarm(self) -> bool:
+        return self.big_msg_type == 1
 
     @property
     def category(self) -> str:
@@ -52,6 +57,8 @@ class DanfossMessage:
 
         Tuya alarms carry a positive ``msgType`` (4 = low battery) and ``bigMsgType == 1``; either
         is enough, so an alarm template not seen yet (offline, fault) still counts as an alert.
+        New logins (``msgType`` 0, which include this integration's own) and home messages (-1)
+        are never alerts.
         """
         if self.alarm or (self.msg_type is not None and self.msg_type > 0):
             return CATEGORY_ALERT
@@ -70,16 +77,21 @@ class DanfossMessage:
         return datetime.fromtimestamp(self.time, tz=UTC)
 
     def public_dict(self, device_name: str | None = None) -> dict[str, Any]:
-        """The message without any identifier, for attributes / events / diagnostics."""
+        """The message without any identifier, for attributes / events.
+
+        ``msg_type`` / ``big_msg_type`` are the raw cloud values, so a user can filter on a type
+        this module does not name yet. No read flag: ``readStatus`` does not mean "read".
+        """
         return {
             "time": self.timestamp.isoformat(),
             "category": self.category,
+            "msg_type": self.msg_type,
+            "big_msg_type": self.big_msg_type,
             "type": self.type_label,
             "code": self.code,
             "title": self.title or self.type_label,
             "message": self.content,
             "device": device_name,
-            "read_status": self.read_status,
         }
 
 
@@ -126,7 +138,7 @@ def parse_message(raw: Any) -> DanfossMessage | None:
         content=_str(raw.get("msgContent")),
         source_id=_str(raw.get("msgSrcId")),
         read_status=_int(raw.get("readStatus")),
-        alarm=_int(raw.get("bigMsgType")) == 1,
+        big_msg_type=_int(raw.get("bigMsgType")),
     )
 
 
@@ -149,3 +161,55 @@ def parse_messages(raw: Any) -> list[DanfossMessage]:
         out.append(msg)
     out.sort(key=lambda m: m.time, reverse=True)
     return out
+
+
+def id_digest(message_id: str) -> str:
+    """Stable digest of a message id, so the stored mark holds no cloud identifier."""
+    return hashlib.sha256(message_id.encode()).hexdigest()[:16]
+
+
+@dataclass(frozen=True, slots=True)
+class MessageMark:
+    """High-water mark of the message center: newest ``time`` seen and the (digested) ids at that
+    exact second (several messages can share one, e.g. three heads removed together).
+
+    New = strictly newer than ``time``, or at ``time`` with an id not in ``ids``. ``readStatus``
+    is never used: it is 0 on every message and we never call ``read.*``.
+    """
+
+    time: int
+    ids: frozenset[str]
+
+    @classmethod
+    def of(cls, messages: list[DanfossMessage]) -> MessageMark | None:
+        if not messages:
+            return None
+        newest = max(m.time for m in messages)
+        return cls(newest, frozenset(id_digest(m.message_id) for m in messages if m.time == newest))
+
+    def is_new(self, msg: DanfossMessage) -> bool:
+        return msg.time > self.time or (
+            msg.time == self.time and id_digest(msg.message_id) not in self.ids
+        )
+
+    def advance(self, messages: list[DanfossMessage]) -> MessageMark:
+        """The mark after ``messages`` were read (never moves backwards)."""
+        newer = MessageMark.of([m for m in messages if m.time >= self.time])
+        if newer is None or newer.time < self.time:
+            return self
+        if newer.time == self.time:
+            return MessageMark(self.time, self.ids | newer.ids)
+        return newer
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"time": self.time, "ids": sorted(self.ids)}
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> MessageMark | None:
+        if not isinstance(raw, dict):
+            return None
+        when = _int(raw.get("time"))
+        ids = raw.get("ids")
+        if when is None or not isinstance(ids, list):
+            return None
+        return cls(when, frozenset(str(i) for i in ids))

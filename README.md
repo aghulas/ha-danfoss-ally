@@ -172,11 +172,13 @@ The messages the Danfoss Ally app shows in its message center (low battery, devi
 removed, firmware update, new login on the account) are read every 30 minutes, read only:
 
 - `sensor.danfoss_ally_account_last_device_alert` — time of the latest **device alert** (low
-  battery, offline…); attributes `last_alert`, `alert_count` and the 10 most recent `messages`
-  (any category), with no identifier: the head is named by its Home Assistant name.
-- Event `danfoss_ally_cloud_message`, fired once per **new** message (not for the backlog found at
-  start-up), with `device_id` (the HA device, when known), `category` (`alert`, `home`, `system`,
-  `other`), `title`, `message`, `time`. Build notifications from it; the integration creates none.
+  battery, offline…); attributes `last_alert`, `alert_count` and the 10 most recent `alerts`, with
+  no identifier: the head is named by its Home Assistant name. Login and home messages (device
+  added/removed, firmware update) are left out.
+- Event `danfoss_ally_cloud_message`, fired once per **new device alert** (not for the backlog
+  found at the very first start; alerts arriving while HA is down fire at the next start), with
+  `device_id` (the HA device, when known), `msg_type`, `big_msg_type`, `title`, `message`, `time`.
+  Build notifications from it; the integration creates none.
 
 Format and route: `docs/message-center.md`.
 

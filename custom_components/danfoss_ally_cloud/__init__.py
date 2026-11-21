@@ -738,5 +738,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     when no entry remains.
     """
     await _homes_store(hass, entry).async_remove()
+    # Message-center high-water mark (coordinator.DanfossMessageCoordinator).
+    await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.messages").async_remove()
     if not hass.config_entries.async_entries(DOMAIN):
         await async_unregister_frontend(hass)

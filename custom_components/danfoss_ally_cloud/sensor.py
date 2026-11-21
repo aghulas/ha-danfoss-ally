@@ -356,8 +356,9 @@ class DanfossMessagesSensor(CoordinatorEntity[DanfossMessageCoordinator], Sensor
     timestamp sensor, so "a new alert arrived" is a state change an automation can trigger on and
     the history shows when alerts happened. An unread count was considered and rejected: the
     cloud's ``readStatus`` is 0 on every message and does not follow what the app shows as new, so
-    a count would lie. Home messages (device added/removed, firmware update) and system ones (new
-    login) are information, not alerts: they do not move the state but are listed in ``messages``.
+    a count would lie. Only device alerts count (``bigMsgType == 1`` or ``msgType > 0``): new
+    logins (msgType 0, which include this integration's own) and home messages (msgType -1: device
+    added/removed, firmware update) are noise for HA and appear nowhere in this sensor.
 
     Attributes, newest first, with NO identifier (message id, devId, account uid, home id): the
     head is named by its HA device name. Each new message also fires ``danfoss_ally_cloud_message``
@@ -393,13 +394,11 @@ class DanfossMessagesSensor(CoordinatorEntity[DanfossMessageCoordinator], Sensor
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        messages = self.coordinator.data or []
-        alerts = [m for m in messages if m.is_alert]
+        alerts = [m for m in self.coordinator.data or [] if m.is_alert]
         name = self.coordinator.device_name
         last = alerts[0] if alerts else None
         return {
             "alert_count": len(alerts),
-            "message_count": len(messages),
             "last_alert": last.public_dict(name(last.source_id)) if last is not None else None,
-            "messages": [m.public_dict(name(m.source_id)) for m in messages[:MESSAGES_RECENT]],
+            "alerts": [m.public_dict(name(m.source_id)) for m in alerts[:MESSAGES_RECENT]],
         }

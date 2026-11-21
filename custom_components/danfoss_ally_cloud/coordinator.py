@@ -19,6 +19,7 @@ from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -31,8 +32,10 @@ from .api import (
     apply_dps_overlay,
 )
 from .api.local.manager import Head, LocalTunnelManager
+from .api.messages import MessageMark
 from .api.rooms import Room, RoomState, aggregate_room
 from .const import (
+    DOMAIN,
     EVENT_MESSAGE,
     LOCAL_SETTINGS_INTERVAL,
     MESSAGES_SCAN_INTERVAL,
@@ -594,10 +597,18 @@ class DanfossMessageCoordinator(DataUpdateCoordinator[list[DanfossMessage]]):
     Kept apart from ``DanfossCoordinator`` so that the device poll keeps its cost and cadence, and
     so that a message-center failure never makes a head unavailable. Read only.
 
-    New messages: the ids seen are remembered; from the second successful read on, each message
-    not seen before fires ``EVENT_MESSAGE`` (oldest first). The backlog present at the first read
-    fires nothing, so a restart or a reload never replays old alerts. The event carries the HA
-    ``device_id`` of the device concerned when it is known, never a Danfoss identifier.
+    New messages: a high-water mark (``MessageMark``: newest ``time`` + digests of the ids at that
+    second; ``idStr`` kept as a string, never an int) is persisted per entry in ``.storage``, so it
+    survives restarts and reloads. ``readStatus`` is never used (always 0, no read notion: we never
+    call ``read.*``). With no stored mark (first start) the current list only seeds it: the backlog
+    fires nothing.
+
+    Event: ``EVENT_MESSAGE`` fires for each new **device alert** only (``category == "alert"``:
+    ``bigMsgType == 1`` or ``msgType > 0``; low battery, offline…), oldest first. New logins
+    (msgType 0, including this integration's own re-logins) and home messages (msgType -1: device
+    added/removed, firmware update) would be noise in HA and fire nothing; they still advance the
+    mark. The payload carries the raw ``msg_type`` / ``big_msg_type`` and the HA ``device_id`` of
+    the head when known, never a Danfoss identifier.
     """
 
     def __init__(
@@ -615,7 +626,9 @@ class DanfossMessageCoordinator(DataUpdateCoordinator[list[DanfossMessage]]):
         )
         self.client = client
         self.entry_id = entry_id
-        self._seen: set[str] | None = None  # None until the first successful read
+        self._store: Store[dict[str, Any]] = Store(hass, 1, f"{DOMAIN}.{entry_id}.messages")
+        self._mark: MessageMark | None = None
+        self._mark_loaded = False
 
     def device_entry(self, source_id: str | None) -> dr.DeviceEntry | None:
         """HA device of a message's source devId (None: no source, or a removed device)."""
@@ -642,16 +655,26 @@ class DanfossMessageCoordinator(DataUpdateCoordinator[list[DanfossMessage]]):
             # Auth errors included: the device coordinator owns re-authentication (it raises
             # ConfigEntryAuthFailed); here a failed read only makes the message sensor unavailable.
             raise UpdateFailed(str(err)) from err
-        ids = {m.message_id for m in messages}
-        if self._seen is None:
-            self._seen = ids
-            return messages
-        new = [m for m in messages if m.message_id not in self._seen]
-        # Remember the ids still listed plus the new ones; ids dropped by the cloud are forgotten.
-        self._seen = ids
-        for msg in sorted(new, key=lambda m: m.time):
-            self._fire(msg)
+        if not self._mark_loaded:
+            self._mark = MessageMark.from_dict(await self._store.async_load())
+            self._mark_loaded = True
+        mark = self._mark
+        if mark is None:
+            # First start: seed the mark from the backlog, fire nothing.
+            new_mark = MessageMark.of(messages)
+        else:
+            for msg in sorted(messages, key=lambda m: m.time):
+                if msg.is_alert and mark.is_new(msg):
+                    self._fire(msg)
+            new_mark = mark.advance(messages)
+        if new_mark is not None and new_mark != mark:
+            self._mark = new_mark
+            await self._store.async_save(new_mark.as_dict())
         return messages
+
+    async def async_remove_store(self) -> None:
+        """Forget the persisted mark (entry removed)."""
+        await self._store.async_remove()
 
     @callback
     def _fire(self, msg: DanfossMessage) -> None:

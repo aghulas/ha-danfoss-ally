@@ -96,13 +96,26 @@ an alarm like the low-battery one (`msgType > 0`, `SMART_MSG_*`). The integratio
 
 ## What the integration does with it
 
-See `coordinator.MessageCoordinator` and `sensor.py` (`DanfossMessagesSensor`):
+See `coordinator.DanfossMessageCoordinator` and `sensor.py` (`DanfossMessagesSensor`):
 
 - a dedicated, slow poll (`MESSAGES_SCAN_INTERVAL`, 30 min) of `smartlife.m.msg.list` v2.0,
-  independent from the device poll; a failed poll keeps the last list;
-- one account-level sensor: state = time of the latest device alert, attributes = the recent
-  messages without any identifier (`id`, `uid`, `msgSrcId`, `homeId`, URLs are dropped; the head
-  is given by its HA name);
-- an HA event `danfoss_ally_cloud_message` per **new** message (not for the backlog present at
-  the first poll), with the HA `device_id` of the head when known, for automations;
+  independent from the device poll; a failed read makes only the message sensor unavailable;
+- **only device alerts count**: `bigMsgType == 1` or `msgType > 0` (low battery today; offline
+  and faults are expected to share the shape). New logins (`msgType` 0, which include the
+  connector's and this integration's own re-logins) and home messages (`msgType` -1: device
+  added/removed, firmware update) are noise for HA: they appear neither in the sensor nor in the
+  event;
+- one account-level sensor: state = time of the latest device alert, attributes `alert_count`,
+  `last_alert` and the 10 most recent `alerts`, without any identifier (`idStr`, `uid`,
+  `msgSrcId`, `homeId`, URLs are dropped; the head is given by its HA name);
+- an HA event `danfoss_ally_cloud_message` per **new device alert**, with the HA `device_id` of
+  the head when known and the raw `msg_type` / `big_msg_type` (to filter on a type not named
+  yet). Filtering is done by the integration rather than left to the user, because a login
+  message is fired at every re-login of the integration itself;
+- "new" is decided by a **high-water mark**, never by `readStatus` (no read notion: `read.*` is
+  never called): the newest `time` seen plus SHA-256 digests of the `idStr` at that second
+  (`idStr` kept as a string, never an int). It is persisted per entry in `.storage`, so an alert
+  arriving while HA is down fires at the next start; with no stored mark (first start) the
+  backlog only seeds it. It never moves backwards;
+- diagnostics: counts per category, codes and newest time only (no text, no id);
 - no persistent notification.

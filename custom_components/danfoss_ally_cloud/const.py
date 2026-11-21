@@ -68,9 +68,9 @@ DATA_MESSAGES = "messages_coordinator"  # DanfossMessageCoordinator: the app's m
 # device poll. Messages are rare (a few a week on a 60-head account) and one read returns the
 # whole list, so every 30 min costs 48 light calls a day.
 MESSAGES_SCAN_INTERVAL = 1800  # seconds
-# Messages kept in the sensor's attributes (newest first); the full list stays in memory only.
+# Device alerts kept in the sensor's attributes (newest first); the full list stays in memory only.
 MESSAGES_RECENT = 10
-# HA event fired once per NEW message (not for the backlog seen at the first read).
+# HA event fired once per NEW device alert (not for the backlog seen at the first start).
 EVENT_MESSAGE = "danfoss_ally_cloud_message"
 
 # LOCAL survey (Zigbee tunnel) interval: slow, ~8 s per head. Distinct from the cloud polling.
