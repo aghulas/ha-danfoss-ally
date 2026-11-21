@@ -65,6 +65,7 @@ frames, so neither channel asks anything more of the user.
 | A head just commanded | Cloud HTTP, per-device route, overlaid on the bulk state | Option `post_command_refresh`, bounded (see `docs/roadmap.md`, R-3). |
 | Real weekly schedule, preheat state | Local tunnel survey | Unavailable per head when that head does not answer. The preheat survey runs in the background (never awaited by setup), one at a time, and publishes each head as it is read: a preheat switch is unavailable until its head has been read. |
 | Connectivity | `online` | Never `update_time`. |
+| App message center (low battery, device added/removed, firmware, logins) | Cloud HTTP, `smartlife.m.msg.list` v2.0 | Own 30-min poll (`DanfossMessageCoordinator`), read only, never marks read. See `docs/message-center.md`. |
 
 ### Writes
 

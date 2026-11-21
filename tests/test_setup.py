@@ -148,15 +148,15 @@ async def test_setup_links_grouped_heads_to_their_room_device(hass: HomeAssistan
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    from custom_components.danfoss_ally_cloud.device_links import _find
+    from custom_components.danfoss_ally_cloud.device_links import find_device
 
     reg = dr.async_get(hass)
-    room = _find(reg, entry.entry_id, "group_77")
+    room = find_device(reg, entry.entry_id, "group_77")
     assert room is not None
     for head_id in ("a", "b"):
-        dev = _find(reg, entry.entry_id, head_id)
+        dev = find_device(reg, entry.entry_id, head_id)
         assert dev is not None and dev.via_device_id == room.id
-    isolated = _find(reg, entry.entry_id, "c")
+    isolated = find_device(reg, entry.entry_id, "c")
     assert isolated is not None and isolated.via_device_id is None
 
     assert await hass.config_entries.async_unload(entry.entry_id)

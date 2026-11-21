@@ -58,6 +58,7 @@ from .const import (
     DATA_LOCAL,
     DATA_LOCAL_SUPERVISED_HEAD,
     DATA_LOCAL_SUPERVISED_SETTINGS,
+    DATA_MESSAGES,
     DATA_MQTT,
     DATA_MQTT_COVERAGE,
     DATA_MQTT_LINK,
@@ -79,7 +80,7 @@ from .const import (
     DOMAIN,
     PLATFORMS,
 )
-from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
+from .coordinator import DanfossCoordinator, DanfossLocalCoordinator, DanfossMessageCoordinator
 from .device_links import async_link_heads_to_rooms
 from .frontend import async_register_frontend, async_unregister_frontend
 from .local_write import LOCAL_TRIAL_SETTINGS
@@ -111,6 +112,7 @@ class DanfossRuntimeData:
     mqtt_supervised_head: str | None = None
     local_supervised_settings: frozenset[str] = field(default_factory=frozenset)
     local_supervised_head: str | None = None
+    messages: DanfossMessageCoordinator | None = None
 
 
 DanfossConfigEntry = ConfigEntry[DanfossRuntimeData]
@@ -157,6 +159,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await coordinator.async_config_entry_first_refresh()
 
+    # Message center of the app (read only, docs/message-center.md): own slow poll, same client and
+    # session. Best-effort: a failed first read leaves the message sensor unavailable, it never
+    # prevents the entry from starting.
+    messages = DanfossMessageCoordinator(hass, client, entry.entry_id)
+    await messages.async_refresh()
+
     # Local fallback (optional): best-effort, must never prevent the cloud from starting.
     local_coordinator, gateways = await _async_setup_local_and_keys(hass, entry, coordinator)
 
@@ -196,6 +204,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         mqtt_supervised_head=trial[DATA_MQTT_SUPERVISED_HEAD],  # type: ignore[arg-type]
         local_supervised_settings=local_trial[DATA_LOCAL_SUPERVISED_SETTINGS],  # type: ignore[arg-type]
         local_supervised_head=local_trial[DATA_LOCAL_SUPERVISED_HEAD],  # type: ignore[arg-type]
+        messages=messages,
     )
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
@@ -214,6 +223,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         **trial,
         **local_trial,
         DATA_MQTT_COVERAGE: mqtt_coverage,
+        DATA_MESSAGES: messages,
     }
     await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
     _cleanup_orphaned_head_climates(hass, entry, coordinator)
@@ -494,6 +504,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             publisher: MqttPublisher | None = data.get(DATA_MQTT)
             if publisher is not None:
                 await publisher.async_stop()
+            messages: DanfossMessageCoordinator | None = data.get(DATA_MESSAGES)
+            if messages is not None:
+                await messages.async_shutdown()
             coordinator: DanfossCoordinator = data[DATA_COORDINATOR]
             await coordinator.client.async_close()
     return unloaded

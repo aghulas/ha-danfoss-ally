@@ -7,6 +7,13 @@ only for a supervised trial, like the batch C2 settings (`docs/tunnel-settings-t
 
 **Added**
 
+- **App message center** (read only): the Danfoss Ally app's messages (low battery, device
+  added/removed, firmware update, new login) are read from `smartlife.m.msg.list` v2.0 on a
+  dedicated 30-minute poll. One account sensor (`last_device_alert`: time of the latest device
+  alert, recent messages as attributes, no identifier) and an HA event
+  `danfoss_ally_cloud_message` per new message, with the head's HA `device_id`. Diagnostics carry
+  counts and codes only. Route found in the app's dex and read on the real account (format in
+  `docs/message-center.md`); never marks a message read or deletes one.
 - **Danfoss Ally™ Room Sensor** (014G2480, Tuya category `wsdcg`, product `mxzo5rhf`): the cloud
   device list is now decoded into a device of its own with three read-only sensors — temperature
   (DP 1, tenths of °C), humidity (DP 2, tenths of %) and battery (DP 4, %). Observed on the real

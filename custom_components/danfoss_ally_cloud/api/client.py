@@ -23,6 +23,7 @@ from . import schedule
 from ._tuya.http import ENDPOINTS, TuyaApiError, TuyaHttpClient, login
 from .const import RES_TYPE_DEVICE, RES_TYPE_GROUP
 from .decode import DanfossDevice, decode_device, holiday_running
+from .messages import MSG_LIST_API, MSG_LIST_VERSION, DanfossMessage, parse_messages
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -230,6 +231,16 @@ class CloudClient:
             if gid is not None:
                 out.append({"gid": gid, "name": h.get("name")})
         return out
+
+    async def async_list_messages(self) -> list[DanfossMessage]:
+        """Messages of the app's message center, newest first (read only).
+
+        ``smartlife.m.msg.list`` v2.0 (docs/message-center.md): the whole list, no body (the
+        version ignores msgType/offset/limit). Never marks a message read, never deletes one.
+        Session errors re-login and replay like every other ``m.*`` read.
+        """
+        r = await self._request(MSG_LIST_API, MSG_LIST_VERSION, None)
+        return parse_messages(r)
 
     async def async_list_devices(self) -> list[DanfossDevice]:
         """All heads (and other sub-devices) of the account's homes, decoded.

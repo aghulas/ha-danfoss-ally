@@ -2,12 +2,16 @@
 through the local tunnel (programming mode, setpoint change source, and the daily settings).
 
 The `fault` code is a bit field (SW error code) decoded by api.decode.decode_fault.
+
+The app's message center (low battery, device added/removed, firmware update, new login) is one
+account-level sensor, ``DanfossMessagesSensor``; see its docstring for the representation chosen.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -19,12 +23,14 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import DanfossDevice, holiday_temperature
 from .api.local.tunnel import DESCALE_DAYS
-from .const import DATA_COORDINATOR, DATA_LOCAL, DOMAIN
-from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
+from .const import DATA_COORDINATOR, DATA_LOCAL, DATA_MESSAGES, DOMAIN, MESSAGES_RECENT
+from .coordinator import DanfossCoordinator, DanfossLocalCoordinator, DanfossMessageCoordinator
 from .entity import DanfossEntity, DanfossHomeEntity, DanfossLocalEntity
 
 
@@ -226,6 +232,10 @@ async def async_setup_entry(
             if dev.is_head and dev.node_id and dev.mesh_id in gws
             for desc in LOCAL_SENSORS
         )
+    # The app's message center: one sensor for the account.
+    messages: DanfossMessageCoordinator | None = data.get(DATA_MESSAGES)
+    if messages is not None:
+        entities.append(DanfossMessagesSensor(messages))
     async_add_entities(entities)
 
 
@@ -337,3 +347,59 @@ class DanfossRelayRooms(DanfossEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         return {"rooms": [r.get("name") for r in self._linked()]}
+
+
+class DanfossMessagesSensor(CoordinatorEntity[DanfossMessageCoordinator], SensorEntity):
+    """The app's message center, for the account (read only, docs/message-center.md).
+
+    Representation: the state is the TIME of the latest device alert (low battery, offline…), a
+    timestamp sensor, so "a new alert arrived" is a state change an automation can trigger on and
+    the history shows when alerts happened. An unread count was considered and rejected: the
+    cloud's ``readStatus`` is 0 on every message and does not follow what the app shows as new, so
+    a count would lie. Home messages (device added/removed, firmware update) and system ones (new
+    login) are information, not alerts: they do not move the state but are listed in ``messages``.
+
+    Attributes, newest first, with NO identifier (message id, devId, account uid, home id): the
+    head is named by its HA device name. Each new message also fires ``danfoss_ally_cloud_message``
+    (``DanfossMessageCoordinator``). No persistent notification is created: the user decides what
+    deserves one, from the event or this sensor.
+
+    One device of its own ("Danfoss Ally account"), the message center being account-wide.
+    Unavailable when the last read failed, rather than showing a list that may be stale.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_translation_key = "last_alert"
+
+    def __init__(self, coordinator: DanfossMessageCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.entry_id}_last_alert"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"account_{self.coordinator.entry_id}")},
+            name="Danfoss Ally account",
+            manufacturer="Danfoss",
+        )
+
+    @property
+    def native_value(self) -> datetime | None:
+        for msg in self.coordinator.data or []:
+            if msg.is_alert:
+                return msg.timestamp
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        messages = self.coordinator.data or []
+        alerts = [m for m in messages if m.is_alert]
+        name = self.coordinator.device_name
+        last = alerts[0] if alerts else None
+        return {
+            "alert_count": len(alerts),
+            "message_count": len(messages),
+            "last_alert": last.public_dict(name(last.source_id)) if last is not None else None,
+            "messages": [m.public_dict(name(m.source_id)) for m in messages[:MESSAGES_RECENT]],
+        }
