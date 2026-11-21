@@ -184,9 +184,10 @@ source (`docs/architecture.md`, rules for adding a route).
     head resets the value to −8000 (disabled) after 30 min (room-sensor mode, `radiator_covered`
     true) to 3 h (auto-offset mode, `radiator_covered` false) without an update, and the value
     should be sent at most every 5–30 min or every 0.1 °C change. The integration exposes the
-    setting only; feeding it live from a Home Assistant sensor is an automation on the user's side
-    (a ready-made example is in `docs/tunnel-settings-trial.md`). A HA blueprint is left as future
-    work, kept out of scope for a closed-by-default trial.
+    setting only; feeding it live from a Home Assistant sensor is an automation on the user's side.
+    A ready-made **blueprint** ships it with a UI
+    (`blueprints/automation/danfoss_ally_cloud/external_room_sensor_feed.yaml`; import and configure
+    it, see `docs/tunnel-settings-trial.md`), and a raw example is in that doc too.
   - **Load balancing is gateway/room business on an Ally gateway.** It stays closed by default and
     is exposed for completeness; its real effect needs `load_room_mean` updates the gateway owns.
 

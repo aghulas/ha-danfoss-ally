@@ -18,8 +18,10 @@ only for a supervised trial, like the batch C2 settings (`docs/tunnel-settings-t
   - **External measured room sensor** (`external_measured_room_sensor`, attribute `0x4015`, int16,
     hundredths of °C): a config `number` in °C (−80 to 35; **−80 °C disables it**, raw −8000). The
     head resets it to disabled after 30 min to 3 h without an update, so a live feed must be
-    refreshed periodically — the integration exposes the setting only (see the trial doc for a
-    ready-made periodic automation); a HA blueprint is left as future work.
+    refreshed periodically — the integration exposes the setting only, with a ready-made Home
+    Assistant **blueprint** to feed it from any temperature sensor on a timer
+    (`blueprints/automation/danfoss_ally_cloud/external_room_sensor_feed.yaml`; import and configure
+    it, see `docs/tunnel-settings-trial.md`).
   - **External window open** (`window_open_external`, attribute `0x4003`, boolean): a config
     `switch`.
   - **Load balancing** (`load_balancing_enable`, attribute `0x4032`, boolean): a config `switch`.

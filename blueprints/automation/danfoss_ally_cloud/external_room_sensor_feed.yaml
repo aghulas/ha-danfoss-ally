@@ -1,0 +1,130 @@
+blueprint:
+  name: Danfoss Ally — feed the external room sensor
+  description: >-
+    Periodically push a Home Assistant temperature sensor's value to a Danfoss Ally
+    head's "External room sensor setting" number (local-tunnel supervised trial,
+    Danfoss attribute 0x4015). The head then regulates on the external measurement
+    instead of its own built-in sensor.
+
+
+    IMPORTANT — this must run on a timer. The head disables the external sensor by
+    itself if it stops receiving updates: after ~30 min in room-sensor mode
+    (Radiator covered = on) or ~3 h in auto-offset mode (Radiator covered = off).
+    Keep the update interval below that window (the default 5 minutes is safe for
+    both modes). To stop feeding it, disable this automation and set the number to
+    -80 °C (its "disabled" value), or disarm the local-tunnel trial in the
+    integration options.
+
+
+    Prerequisite: the "External room sensor setting" number exists only while the
+    integration's supervised trial is armed for that head
+    (local_supervised_settings / local_supervised_head). The write is NOT validated
+    on real hardware — see docs/tunnel-settings-trial.md.
+  domain: automation
+  author: ha-danfoss-ally
+  input:
+    source_sensor:
+      name: Source temperature sensor
+      description: The room temperature the head should regulate on.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: temperature
+    target_number:
+      name: External room sensor number (the trial head)
+      description: >-
+        The head's "External room sensor setting" number entity (danfoss_ally_cloud).
+      selector:
+        entity:
+          filter:
+            - integration: danfoss_ally_cloud
+              domain: number
+    update_pattern:
+      name: Update interval
+      description: >-
+        How often to resend the value, as a time_pattern minutes expression. "/5" =
+        every 5 minutes. Keep it below the head's reset window (≈5 min in
+        room-sensor mode, ≈3 h in auto-offset mode).
+      default: "/5"
+      selector:
+        text:
+    max_age_minutes:
+      name: Maximum sensor age (minutes)
+      description: >-
+        Do not forward a reading older than this. A stale or dead sensor is skipped
+        so the head keeps its last value (and eventually disables the external
+        sensor on its own) rather than being fed an old number.
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 180
+          step: 1
+          unit_of_measurement: minutes
+          mode: box
+    min_temperature:
+      name: Minimum plausible temperature (°C)
+      description: >-
+        Readings below this are treated as faulty and skipped. Stays above the
+        number's -80 °C "disabled" value on purpose, so a glitch never disables the
+        external sensor.
+      default: 0
+      selector:
+        number:
+          min: -20
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: box
+    max_temperature:
+      name: Maximum plausible temperature (°C)
+      description: Readings above this are treated as faulty and skipped.
+      default: 35
+      selector:
+        number:
+          min: 0
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: box
+
+mode: single
+max_exceeded: silent
+
+# Bind the inputs used inside templates to variables (required to reference an
+# !input from a Jinja template).
+variables:
+  source_sensor: !input source_sensor
+  max_age_minutes: !input max_age_minutes
+  min_temperature: !input min_temperature
+  max_temperature: !input max_temperature
+  temperature: "{{ states(source_sensor) | float(-1000) }}"
+
+triggers:
+  # Resend on a timer so the head never times the external sensor out...
+  - trigger: time_pattern
+    minutes: !input update_pattern
+  # ...and immediately when the sensor reports a new value.
+  - trigger: state
+    entity_id: !input source_sensor
+
+conditions:
+  # A usable numeric reading.
+  - condition: template
+    value_template: "{{ temperature >= min_temperature and temperature <= max_temperature }}"
+  # Fresh enough: skip a stale or dead sensor rather than feeding an old value.
+  - condition: template
+    value_template: >-
+      {% set s = states[source_sensor] %}
+      {{ s is not none and s.last_reported is not none
+         and (now() - s.last_reported).total_seconds() < (max_age_minutes | int) * 60 }}
+
+actions:
+  - action: number.set_value
+    target:
+      entity_id: !input target_number
+    # The number entity takes °C and sends hundredths over the tunnel; it also
+    # validates the value and rejects anything out of its -80..35 °C range.
+    data:
+      value: "{{ temperature }}"

@@ -135,8 +135,16 @@ actions:
       value: "{{ states('sensor.room_x_temperature') | float }}"  # °C; the integration sends hundredths
 ```
 
-To stop feeding it, set the `number` to −80 (disabled) or disarm the trial. A packaged HA blueprint
-is future work (kept out of scope while the write is closed-by-default and unproven).
+To stop feeding it, set the `number` to −80 (disabled) or disarm the trial.
+
+A packaged blueprint ships the same automation with a UI:
+`blueprints/automation/danfoss_ally_cloud/external_room_sensor_feed.yaml`. Import it in Home
+Assistant (Settings → Automations → Blueprints → Import, or **My Home Assistant** import of the raw
+file URL), then create an automation from it, choosing the source temperature sensor and the trial
+head's "External room sensor setting" number. It resends on a timer (default every 5 min, below the
+head's reset window) and on each new reading, skips stale or implausible values, and never writes
+the −80 °C disable value by accident. It remains closed-by-default in spirit: it does nothing until
+the trial number exists (the trial is armed) and you create an automation from it.
 
 Stop and restore at once if: a write raises `rejected` with a value nobody wrote; the app shows a
 change on another head or another setting; the head reports a fault; or anything changes on
