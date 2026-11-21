@@ -7,6 +7,10 @@ written on real hardware by the integration.** All are closed by default: nothin
 nothing can be sent until the trial is armed for one head. Three more settings were added in the same frame (batch C3): the **external measured room sensor**
 (`0x4015`, int16, hundredths of °C), the **external window open** flag (`0x4003`, boolean) and
 **load balancing** (`0x4032`, boolean). Same gate, same read-back; none written on real hardware.
+One more setting was added in the same frame (batch C4): the **automatic adaptation run** on/off
+(`0x404E` `adaptation_run_settings`, boolean). This is the enable/disable of the nightly adaptation
+run, **not** the separate launch/cancel command `0x404C` `adaptation_run_control`, which is not
+implemented. Same gate, same read-back; not written on real hardware.
 This sheet completes the generic
 procedure of `docs/first-write-procedure.md`; its preconditions and stop rules apply unchanged.
 **Rémi present, on site, for every write.**
@@ -22,6 +26,7 @@ procedure of `docs/first-write-procedure.md`; its preconditions and stop rules a
 | `external_room_sensor` | `number` "External room sensor setting", °C | `0x4015`, int16 | −80 to 35 °C by 0.1, sent in hundredths (raw −8000 to 3500); **−80 °C (raw −8000) disables it** |
 | `window_open_external` | `switch` "External window open setting" | `0x4003`, boolean | on / off |
 | `load_balancing` | `switch` "Load balancing setting" | `0x4032`, boolean | on / off |
+| `adaptation_run_settings` | `switch` "Automatic adaptation run" | `0x404E`, bitmap8 | on / off |
 
 - **Exists when**: `enable_local` on, the key ticked in `local_supervised_settings`, the head chosen
   in `local_supervised_head`, a verified model, and the tunnel can address the head (node id,
@@ -106,6 +111,11 @@ restore `V0` from the same entity and read it back the same way.
    and confirm it reads back as −80.0 (disabled): the head returns to its own internal sensor.
    Note that a real live feed must be refreshed periodically — the head resets the value to −8000
    by itself after 30 min to 3 h (see below). Restore `V0` (−80.0 disables it if there was none).
+8. **Automatic adaptation run.** Flip the "Automatic adaptation run" switch and read the outcome:
+   `confirmed_by_tunnel`, the switch showing the new value. This only enables or disables the
+   nightly adaptation (`0x404E`); it does **not** launch a run now — that is a separate command
+   (`0x404C`, not implemented). No immediate visible effect is expected; the "adaptation run"
+   status sensor (`0x404D`) will only change when a run actually occurs. Restore `V0`.
 
 ### Feeding the external sensor live (user-side automation)
 

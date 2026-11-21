@@ -59,6 +59,7 @@ ALL = [
     "external_room_sensor",
     "window_open_external",
     "load_balancing",
+    "adaptation_run_settings",
 ]
 
 # --- pure layer: validation and frames ----------------------------------------------------------
@@ -85,6 +86,8 @@ ALL = [
         ("external_room_sensor", 0, 0),
         ("external_room_sensor", 35, 3500),  # max
         ("external_room_sensor", -80, -8000),  # the disable sentinel
+        ("adaptation_setting", True, 1),
+        ("adaptation_setting", False, 0),
     ],
 )
 def test_setting_raw_accepts(setting, value, raw):
@@ -112,6 +115,8 @@ def test_setting_raw_accepts(setting, value, raw):
         ("external_room_sensor", -80.1),  # below the disable sentinel
         ("external_room_sensor", True),  # not a number
         ("external_room_sensor", "21"),
+        ("adaptation_setting", 1),  # not a bool
+        ("adaptation_setting", "on"),
         ("orientation", True),  # out of scope: other channel
     ],
 )
@@ -127,6 +132,8 @@ def test_records_and_frame_types():
     assert tunnel.setting_records("window_open_external", True) == [(0x4003, 0x10, 1)]
     assert tunnel.setting_records("load_balancing", False) == [(0x4032, 0x10, 0)]
     assert tunnel.setting_records("external_room_sensor", 21) == [(0x4015, 0x29, 2100)]
+    assert tunnel.setting_records("adaptation_setting", True) == [(0x404E, 0x18, 1)]
+    assert tunnel.setting_records("adaptation_setting", False) == [(0x404E, 0x18, 0)]
     # int16, signed: the -8000 disable sentinel round-trips through the frame as two LE bytes.
     frame = tunnel.frame_write_attributes(tunnel.setting_records("external_room_sensor", -80), True)
     assert frame[13:] == bytes([0x15, 0x40, 0x29]) + (-8000).to_bytes(2, "little", signed=True)
@@ -393,6 +400,7 @@ _SETTINGS = {
     "setpoint_offset": -3,
     "descale_day": "wednesday",
     "descale_time": "13:00",
+    "adaptation_setting": False,
 }
 
 
@@ -483,9 +491,10 @@ def _one(hass, domain, key=None):
 
 async def test_entities_only_on_the_armed_head(hass: HomeAssistant):
     await _setup(hass, _ARMED)
-    # switch: radiator covered, external window open, load balancing (3). number: setpoint offset,
-    # regulation speed, external room sensor (3). select / time: the valve exercise pair (1 each).
-    for domain, count in (("switch", 3), ("number", 3), ("select", 1), ("time", 1)):
+    # switch: radiator covered, external window open, load balancing, automatic adaptation run (4).
+    # number: setpoint offset, regulation speed, external room sensor (3). select / time: the valve
+    # exercise pair (1 each).
+    for domain, count in (("switch", 4), ("number", 3), ("select", 1), ("time", 1)):
         ents = _entities(hass, domain)
         assert len(ents) == count
         assert {e._device_id for e in ents} == {"trial-head-id"}
@@ -694,6 +703,27 @@ async def test_external_window_and_load_balancing_switches(hass: HomeAssistant):
         ("trial-head-id", "load_balancing", False),
     ]
     assert window.is_on is True and load.is_on is False
+
+
+async def test_adaptation_run_settings_switch(hass: HomeAssistant):
+    """0x404E ``adaptation_run_settings`` is a boolean (on/off), exposed as a switch and written
+    through the local tunnel; the state shown is the head's own read-back."""
+    manager = _TrialManager()
+    await _setup(hass, _ARMED, manager=manager)
+    switch = _one(hass, "switch", "adaptation_run_settings_setting")
+    assert switch.available and switch.is_on is False
+    await switch.async_turn_on()
+    # the manager is called with the tunnel attribute name (``adaptation_setting``), not the trial
+    # key, just as ``regulation_speed`` is written as ``control_speed``.
+    assert manager.writes == [("trial-head-id", "adaptation_setting", True)]
+    # written as attribute 0x404E, read back as a bool from the tunnel
+    assert manager.settings["trial-head-id"]["adaptation_setting"] is True
+    assert switch.is_on is True
+    assert switch.extra_state_attributes["trial_result"] == "confirmed_by_tunnel"
+    await switch.async_turn_off()
+    assert manager.writes[-1] == ("trial-head-id", "adaptation_setting", False)
+    assert switch.is_on is False
+    assert manager.settings["other-head-id"] == _SETTINGS  # nothing else touched
 
 
 async def test_external_room_sensor_number_writes_and_disables(hass: HomeAssistant):

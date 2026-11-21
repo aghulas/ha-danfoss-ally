@@ -175,6 +175,9 @@
    },
    "radiator_covered": {
     "name": "Radiateur couvert"
+   },
+   "heat_available": {
+    "name": "Chaleur disponible"
    }
   },
   "switch": {
@@ -198,6 +201,9 @@
    },
    "load_balancing_setting": {
     "name": "Équilibrage de charge (réglage)"
+   },
+   "adaptation_run_settings_setting": {
+    "name": "Adaptation automatique (réglage)"
    }
   },
   "number": {

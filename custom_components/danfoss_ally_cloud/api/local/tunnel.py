@@ -103,6 +103,9 @@ _BOOLEANS = {
     "window_detection",
     "window_open_external",
     "orientation",
+    # 0x404E ``adaptation_run_settings``: Zigbee2MQTT exposes it as a binary (valueOn [true, 1],
+    # valueOff [false, 0]) - "automatic adaptation run enabled". So we decode it to a bool too.
+    "adaptation_setting",
 }
 _LENGTH = {
     0x10: 1,
@@ -324,6 +327,12 @@ TUNNEL_SETTINGS: dict[str, tuple[int, int]] = {
     "window_open_external": (0x4003, 0x10),  # Zigbee2MQTT ``window_open_external``
     "load_balancing": (0x4032, 0x10),  # Zigbee2MQTT ``load_balancing_enable``
     "external_room_sensor": (0x4015, 0x29),  # Zigbee2MQTT ``external_measured_room_sensor``
+    # 0x404E ``adaptation_run_settings``: enable/disable the automatic (nightly) adaptation run, a
+    # boolean (Zigbee2MQTT ``m.binary``, valueOn [true, 1] / valueOff [false, 0]). It is bitmap8,
+    # written with ZCL type 0x18 (confirmed by the reference MCP connector, which reads 0x404E typed
+    # 0x18). NOT the separate command attribute 0x404C ``adaptation_run_control`` (enum8:
+    # idle / initiate / cancel), which the tunnel does not read back and which is out of scope here.
+    "adaptation_setting": (0x404E, 0x18),
 }
 # Ranges of Zigbee2MQTT. The offset is carried in TENTHS of °C (raw -25..25): Zigbee2MQTT's scale,
 # NOT confirmed on real hardware here.
@@ -345,7 +354,12 @@ def setting_raw(setting: str, value: Any) -> int:
     -2.5 to 2.5 by 0.1, written in tenths (raw -25..25). Raises LocalError otherwise: nothing is
     sent for a value that does not pass.
     """
-    if setting in ("radiator_covered", "window_open_external", "load_balancing"):
+    if setting in (
+        "radiator_covered",
+        "window_open_external",
+        "load_balancing",
+        "adaptation_setting",
+    ):
         if not isinstance(value, bool):
             raise LocalError(f"{setting} expects a boolean, got {value!r}")
         return int(value)
@@ -832,6 +846,7 @@ TRACKED_SETTINGS = (
     "radiator_covered",
     "load_balancing",
     "window_open_external",
+    "adaptation_setting",
 )
 
 

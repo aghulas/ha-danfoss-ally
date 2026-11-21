@@ -47,11 +47,13 @@ async def async_setup_entry(
     local: DanfossLocalCoordinator | None = data.get(DATA_LOCAL)
     if local is not None:
         gws = local.manager.gateway_ids
-        entities.extend(
-            DanfossRadiatorCovered(local, coordinator, dev.id)
+        local_heads = [
+            dev
             for dev in coordinator.data.values()
             if dev.is_head and dev.node_id and dev.mesh_id in gws
-        )
+        ]
+        entities.extend(DanfossRadiatorCovered(local, coordinator, dev.id) for dev in local_heads)
+        entities.extend(DanfossHeatAvailable(local, coordinator, dev.id) for dev in local_heads)
     link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
     if link is not None:
         entities.append(DanfossCloudMqttConnectivity(entry.entry_id, link))
@@ -170,6 +172,31 @@ class DanfossRadiatorCovered(DanfossLocalEntity, BinarySensorEntity):
     ) -> None:
         super().__init__(local, cloud, device_id)
         self._attr_unique_id = f"{device_id}_radiator_covered"
+
+    @property
+    def is_on(self) -> bool | None:
+        raw = self._raw
+        return raw if isinstance(raw, bool) else None
+
+
+class DanfossHeatAvailable(DanfossLocalEntity, BinarySensorEntity):
+    """Heat is available to the head from its heat source (Danfoss attribute 0x4030, read only).
+
+    Same notion as Zigbee2MQTT's ``heat_available``. Read by the local tunnel's daily settings pass;
+    see ``DanfossLocalEntity`` for availability and freshness. Read only here: on an Ally gateway
+    this is driven by the gateway (the boiler-relay link), not a per-head lever, so no write entity
+    (like ``load_balancing``); Zigbee2MQTT exposes it writable, we do not.
+    """
+
+    _daily = True
+    _attribute = "heat_available"
+    _attr_translation_key = "heat_available"
+
+    def __init__(
+        self, local: DanfossLocalCoordinator, cloud: DanfossCoordinator, device_id: str
+    ) -> None:
+        super().__init__(local, cloud, device_id)
+        self._attr_unique_id = f"{device_id}_heat_available"
 
     @property
     def is_on(self) -> bool | None:

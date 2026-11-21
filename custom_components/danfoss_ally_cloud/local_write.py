@@ -62,6 +62,9 @@ LOCAL_TRIAL_SETTINGS: dict[str, LocalTrialSetting] = {
         LocalTrialSetting("external_room_sensor", ("external_room_sensor",)),
         LocalTrialSetting("window_open_external", ("window_open_external",)),
         LocalTrialSetting("load_balancing", ("load_balancing",)),
+        # 0x404E ``adaptation_run_settings``: enable/disable the automatic nightly adaptation run
+        # (a boolean). NOT the command attribute 0x404C ``adaptation_run_control``.
+        LocalTrialSetting("adaptation_run_settings", ("adaptation_setting",)),
     )
 }
 
@@ -186,7 +189,8 @@ async def async_local_write_setting(
 ) -> dict[str, Any]:
     """Write ONE tunnel setting (``radiator_covered``, ``setpoint_offset`` in °C,
     ``regulation_speed``, ``external_room_sensor`` in °C, ``window_open_external``,
-    ``load_balancing``), read the head back and return what it holds now.
+    ``load_balancing``, ``adaptation_run_settings``), read the head back and return what it holds
+    now.
 
     Raises ``LocalWriteRefused`` (nothing sent), ``LocalWriteNotConfirmed`` (no read-back) or
     ``LocalWriteRejected`` (the head said no, or holds another value)."""

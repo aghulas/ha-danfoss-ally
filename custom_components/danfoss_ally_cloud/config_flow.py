@@ -105,6 +105,8 @@ _LOCAL_TRIAL_LABELS = {
     "-80 °C disables it; must be refreshed periodically)",
     "window_open_external": "External window open (attribute 0x4003)",
     "load_balancing": "Load balancing (attribute 0x4032; managed by the room on an Ally gateway)",
+    "adaptation_run_settings": "Automatic adaptation run on/off (attribute 0x404E; NOT the "
+    "run launch/cancel command 0x404C)",
 }
 
 
