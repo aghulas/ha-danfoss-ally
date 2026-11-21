@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased — Danfoss room sensor; external sensor, external window and load balancing writes
+## 1.4.0 — Zigbee2MQTT convergence: room sensor, tunnel-write settings, heat-available and the app message center
 
-**Not validated on real hardware.** The three new tunnel writes are closed by default and open
-only for a supervised trial, like the batch C2 settings (`docs/tunnel-settings-trial.md`).
+**Not validated on real hardware.** Every new tunnel write in this release (external measured room
+sensor, external window open, load balancing, and automatic-adaptation on/off) is closed by default
+and opens only for a supervised trial, like the batch C2 settings
+(`docs/tunnel-settings-trial.md`). The new read-only entities and the message-center sensor only
+read.
 
 **Added**
 
@@ -39,6 +42,22 @@ only for a supervised trial, like the batch C2 settings (`docs/tunnel-settings-t
 
 Closes the remaining §2 / §6 gaps of `docs/zigbee2mqtt-alignment.md` (external room sensor,
 external window contact, load balancing, and the room sensor).
+
+- Read-only diagnostic `binary_sensor` **"heat available"** (Danfoss attribute `0x4030`), the same
+  notion as Zigbee2MQTT's `heat_available`, fed by the local tunnel's daily settings pass (B3).
+- A **supervised local-tunnel write** for the **automatic adaptation run** on/off
+  (`adaptation_run_settings`, attribute `0x404E`): a config `switch`, **closed by default** and
+  opened only on the one designated trial head like the batch C2 settings, read back through the
+  tunnel. This is the enable/disable of the nightly adaptation run, **not** the one-shot
+  `adaptation_run_control` command.
+- The app's **message center** is read into Home Assistant (Tuya `smartlife.m.msg.list`, read
+  only): an account-level `sensor` whose state is the timestamp of the latest **device alert**
+  (recent messages as attributes, without ids, each head named by its Home Assistant device) and a
+  **`danfoss_ally_cloud_message` event** fired once per new device alert (payload carries the
+  `device_id` and the message type). Login and system messages are filtered out; new-message
+  detection uses a high-water mark saved in Home Assistant storage; a dedicated, conservative
+  30-minute poll. `docs/message-center.md` documents the interface, and
+  `docs/cloud-mqtt-interface.md` maps the Tuya cloud MQTT channel from a real listen-only capture.
 
 ## 1.3.1 — Room sensor in the room card by area
 
