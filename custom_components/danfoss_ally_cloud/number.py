@@ -128,9 +128,19 @@ async def async_setup_entry(
         # open on that channel FOR THAT HEAD (proven, or under supervised trial on the designated
         # trial head). An entity whose DP is closed by configuration is not provided, and its
         # registry entry is removed so it does not linger "restored, unavailable".
+        companion = getattr(coordinator, "companion", None)
         closed: list[str] = []
         for dev in coordinator.data.values():
-            if not (dev.is_head and write_allowed(dev)):
+            if not dev.is_head:
+                continue
+            if companion is not None:
+                for desc in HEAD_BOUNDS:
+                    uid = f"{dev.id}_{desc.key}"
+                    if uid not in known_head_uids:
+                        known_head_uids.add(uid)
+                        entities.append(DanfossHeadBound(coordinator, dev.id, desc, None))
+                continue
+            if not write_allowed(dev):
                 continue
             isolated = coordinator.group_of(dev.id) is None
             supervised = supervised_for(data, dev.id)
@@ -388,7 +398,7 @@ class _HeadMqttNumber(DanfossEntity, NumberEntity):
         self,
         coordinator: DanfossCoordinator,
         device_id: str,
-        link: CloudMqttLink,
+        link: CloudMqttLink | None,
         supervised_dps: frozenset[int] = frozenset(),
     ) -> None:
         super().__init__(coordinator, device_id)
@@ -396,7 +406,11 @@ class _HeadMqttNumber(DanfossEntity, NumberEntity):
         self._supervised_dps = supervised_dps
 
     def _write_path(self, dev: DanfossDevice | None) -> str:
-        if dev is None or not write_allowed(dev) or not dev.node_id or not dev.mesh_id:
+        if dev is None:
+            return PATH_NONE
+        if getattr(self.coordinator, "companion", None) is not None:
+            return "mqtt_companion"
+        if self._link is None or not write_allowed(dev) or not dev.node_id or not dev.mesh_id:
             return PATH_NONE
         if self.coordinator.group_of(dev.id) is not None:
             return PATH_NONE  # a grouped head is written through its room, not here
@@ -410,9 +424,16 @@ class _HeadMqttNumber(DanfossEntity, NumberEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, str | bool]:
-        path = self._write_path(self.device)
+        dev = self.device
+        path = self._write_path(dev)
         attrs: dict[str, str | bool] = {"write_path": path}
-        if path == PATH_MQTT:
+        if path == "mqtt_companion" and dev is not None:
+            attrs["write_scope"] = "head"
+            companion = getattr(self.coordinator, "companion", None)
+            route = companion.device_route.get(dev.id) if companion is not None else None
+            if route is not None:
+                attrs["mqtt_bridge"] = route[0]
+        elif path == PATH_MQTT:
             attrs["write_scope"] = "head"
             if any(dp in MQTT_CANDIDATE_DPS for dp in self._dps):
                 attrs["write_trial"] = True
@@ -429,7 +450,7 @@ class DanfossHeadBound(_HeadMqttNumber):
         coordinator: DanfossCoordinator,
         device_id: str,
         description: HeadBoundDescription,
-        link: CloudMqttLink,
+        link: CloudMqttLink | None,
         supervised_dps: frozenset[int] = frozenset(),
     ) -> None:
         super().__init__(coordinator, device_id, link, supervised_dps)
@@ -449,7 +470,26 @@ class DanfossHeadBound(_HeadMqttNumber):
 
     async def async_set_native_value(self, value: float) -> None:
         dev = self.device
-        if dev is None or self._write_path(dev) != PATH_MQTT:
+        if dev is None:
+            raise HomeAssistantError("bound write unavailable for this head")
+        path = self._write_path(dev)
+        if path == "mqtt_companion":
+            companion = getattr(self.coordinator, "companion", None)
+            if companion is None:
+                raise HomeAssistantError("bound write unavailable for this head")
+            try:
+                raw = encode_setpoint(
+                    value, self._attr_native_min_value, self._attr_native_max_value, SETPOINT_STEP
+                )
+            except CloudError as err:
+                raise HomeAssistantError(f"bound refused: {err}") from err
+            kw = "max_setpoint" if self.entity_description.bound == "upper" else "min_setpoint"
+            try:
+                await companion.async_send_device_set(dev.id, **{kw: raw / 10})
+            except (KeyError, ValueError) as err:
+                raise HomeAssistantError(f"bound write failed: {err}") from err
+            return
+        if path != PATH_MQTT or self._link is None:
             raise HomeAssistantError("bound write unavailable for this head")
         dps = bound_write_dps(self.entity_description, dev, value)
         await async_mqtt_write(
@@ -575,6 +615,8 @@ class DanfossHeadSetpoint(_HeadMqttNumber):
                 f"{dev.mode!r}"
             )
         # Build the HTTP block BEFORE publishing: if it cannot be built, nothing is sent at all.
+        if self._link is None:
+            raise HomeAssistantError("setpoint write unavailable for this head")
         block = settings_block(dev, {desc.dp: raw}) if desc.in_settings_block else None
         await async_mqtt_write(
             self.coordinator,

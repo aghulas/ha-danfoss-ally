@@ -90,10 +90,16 @@ from .mqtt_write import (  # noqa: F401 - timeout re-exported
 _LOGGER = logging.getLogger(__name__)
 
 # Write paths of a setting switch (``write_path`` attribute).
+PATH_COMPANION = "mqtt_companion"  # Companion MQTT bridge (zigbee2mqtt / danfoss2mqtt)
 PATH_ROOM = "room"  # group publish on the head's room: affects every head of the room
 PATH_MQTT = "cloud_mqtt"  # isolated head via dedicated-session Tuya cloud MQTT (gated, this head)
 PATH_LOCAL = "local"  # local Zigbee tunnel, this head only
 PATH_NONE = "none"  # no proven path: the switch is unavailable
+
+_COMPANION_SWITCH_KWARGS: dict[str, str] = {
+    "child_lock": "child_lock",
+    "window_detection": "window_detection",
+}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -135,20 +141,42 @@ async def async_setup_entry(
     mqtt_link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
     cloud_mqtt_enabled: bool = bool(data.get(DATA_CLOUD_MQTT, False))
 
-    entities: list[SwitchEntity] = [
-        DanfossSwitch(
-            coordinator,
-            dev.id,
-            desc,
-            local,
-            mqtt_link,
-            cloud_mqtt_enabled,
-            supervised_for(data, dev.id),  # the trial is confined to its designated head
-        )
-        for dev in coordinator.data.values()
-        if dev.is_head and write_allowed(dev)
-        for desc in SWITCHES
-    ]
+    companion = getattr(coordinator, "companion", None)
+    known_switch_uids: set[str] = set()
+
+    def _collect_switches() -> list[SwitchEntity]:
+        new_entities: list[SwitchEntity] = []
+        for dev in coordinator.data.values():
+            if not (dev.is_head and (companion is not None or write_allowed(dev))):
+                continue
+            for desc in SWITCHES:
+                uid = f"{dev.id}_{desc.key}"
+                if uid in known_switch_uids:
+                    continue
+                known_switch_uids.add(uid)
+                new_entities.append(
+                    DanfossSwitch(
+                        coordinator,
+                        dev.id,
+                        desc,
+                        local,
+                        mqtt_link,
+                        cloud_mqtt_enabled,
+                        supervised_for(data, dev.id),
+                    )
+                )
+        return new_entities
+
+    entities: list[SwitchEntity] = _collect_switches()
+    if companion is not None:
+
+        @callback
+        def _sync_companion_switches() -> None:
+            added = _collect_switches()
+            if added:
+                async_add_entities(added)
+
+        entry.async_on_unload(coordinator.async_add_listener(_sync_companion_switches))
     if local is not None:
         gws = local.manager.gateway_ids
         entities += [
@@ -362,7 +390,14 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
         return Head(dev.id, dev.node_id, dev.mesh_id)
 
     def _write_path(self, dev: DanfossDevice | None) -> str:
-        if dev is None or not write_allowed(dev):
+        if dev is None:
+            return PATH_NONE
+        if (
+            getattr(self.coordinator, "companion", None) is not None
+            and self.entity_description.key in _COMPANION_SWITCH_KWARGS
+        ):
+            return PATH_COMPANION
+        if not write_allowed(dev):
             return PATH_NONE
         if self.coordinator.group_of(dev.id) is not None:
             return PATH_ROOM
@@ -396,7 +431,13 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
         dev = self.device
         path = self._write_path(dev)
         attrs: dict[str, Any] = {"write_path": path}
-        if path == PATH_ROOM and dev is not None:
+        if path == PATH_COMPANION and dev is not None:
+            attrs["write_scope"] = "head"
+            companion = getattr(self.coordinator, "companion", None)
+            route = companion.device_route.get(dev.id) if companion is not None else None
+            if route is not None:
+                attrs["mqtt_bridge"] = route[0]
+        elif path == PATH_ROOM and dev is not None:
             group_id = self.coordinator.group_of(dev.id)
             attrs["write_scope"] = "room"
             attrs["room_head_count"] = len(self.coordinator.room_members(group_id or ""))
@@ -413,6 +454,16 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
         if dev is None or path == PATH_NONE:
             return
         dp = str(self.entity_description.dp)
+        if path == PATH_COMPANION:
+            companion = getattr(self.coordinator, "companion", None)
+            kw = _COMPANION_SWITCH_KWARGS.get(self.entity_description.key)
+            if companion is None or kw is None:
+                return
+            try:
+                await companion.async_send_device_set(dev.id, **{kw: state})
+            except (KeyError, ValueError) as err:
+                raise HomeAssistantError(f"companion switch write failed: {err}") from err
+            return
         if path == PATH_ROOM:
             group_id = self.coordinator.group_of(dev.id) or ""
             try:

@@ -487,3 +487,70 @@ end_vacation:
       selector:
         config_entry:
           integration: danfoss_ally_cloud
+
+companion_set_room:
+  fields:
+    room_id:
+      required: true
+      example: "chapelle"
+      selector:
+        text:
+    name:
+      required: true
+      example: "B-0 Chapelle"
+      selector:
+        text:
+    head_ids:
+      required: true
+      example: '["0x842712fffe86dfbd", "0x842712fffe87064d"]'
+      selector:
+        object:
+    sensor_id:
+      required: false
+      example: "0xa4c138f86da7457d"
+      selector:
+        text:
+    comfort_setpoint:
+      required: false
+      default: 21.0
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    setback_setpoint:
+      required: false
+      default: 17.0
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+companion_delete_room:
+  fields:
+    room_id:
+      required: true
+      example: "chapelle"
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+companion_sync_rooms:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud

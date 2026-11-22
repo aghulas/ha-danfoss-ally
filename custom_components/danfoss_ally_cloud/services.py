@@ -155,6 +155,47 @@ _END_VACATION = vol.Schema(
         vol.Optional("config_entry_id"): cv.string,
     }
 )
+_COMPANION_SET_ROOM = vol.Schema(
+    {
+        vol.Required("room_id"): cv.string,
+        vol.Required("name"): cv.string,
+        vol.Required("head_ids"): [cv.string],
+        vol.Optional("sensor_id"): vol.Any(None, cv.string),
+        vol.Optional("comfort_setpoint", default=21.0): vol.Coerce(float),
+        vol.Optional("setback_setpoint", default=17.0): vol.Coerce(float),
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
+_COMPANION_DELETE_ROOM = vol.Schema(
+    {
+        vol.Required("room_id"): cv.string,
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
+_COMPANION_SYNC_ROOMS = vol.Schema({vol.Optional("config_entry_id"): cv.string})
+
+
+def _companion_store(hass: HomeAssistant, call: ServiceCall) -> tuple[str, dict]:
+    """Return ``(entry_id, store)`` for the targeted MQTT Companion entry."""
+    entries = {
+        k: v
+        for k, v in hass.data.get(DOMAIN, {}).items()
+        if isinstance(v, dict) and "room_manager" in v
+    }
+    entry_id = call.data.get("config_entry_id")
+    if entry_id:
+        if entry_id not in entries:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="entry_not_found"
+            )
+        return entry_id, entries[entry_id]
+    if len(entries) == 1:
+        eid, store = next(iter(entries.items()))
+        return eid, store
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="entry_not_found" if not entries else "ambiguous_entry",
+    )
 
 
 def _store(hass: HomeAssistant, call: ServiceCall) -> dict:
@@ -463,4 +504,77 @@ def async_register_services(hass: HomeAssistant) -> None:
         SupportsResponse.OPTIONAL,
     )
     reg(DOMAIN, "cancel_vacation", cancel_vacation, _CANCEL_VACATION, SupportsResponse.OPTIONAL)
+
+    async def companion_set_room(call: ServiceCall) -> dict:
+        from .companion_rooms import CompanionRoomConfig
+
+        entry_id, store = _companion_store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+        except ops.OperationError as err:
+            _raise(err)
+        mgr = store["room_manager"]
+        cfg = CompanionRoomConfig(
+            room_id=call.data["room_id"],
+            name=call.data["name"],
+            head_ids=list(call.data["head_ids"]),
+            sensor_id=call.data.get("sensor_id") or None,
+            comfort_setpoint=float(call.data.get("comfort_setpoint", 21.0)),
+            setback_setpoint=float(call.data.get("setback_setpoint", 17.0)),
+        )
+        mgr.add_virtual_room(cfg)
+        await mgr.async_save(hass, entry_id)
+        store["companion"]._notify_listeners()
+        await mgr.async_sync_telemetry()
+        return {
+            "room_id": cfg.room_id,
+            "name": cfg.name,
+            "head_ids": list(cfg.head_ids),
+            "sensor_id": cfg.sensor_id,
+        }
+
+    async def companion_delete_room(call: ServiceCall) -> dict:
+        entry_id, store = _companion_store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+        except ops.OperationError as err:
+            _raise(err)
+        mgr = store["room_manager"]
+        removed = call.data["room_id"] in mgr.virtual_rooms
+        mgr.remove_virtual_room(call.data["room_id"])
+        await mgr.async_save(hass, entry_id)
+        store["companion"]._notify_listeners()
+        return {"room_id": call.data["room_id"], "removed": removed}
+
+    async def companion_sync_rooms(call: ServiceCall) -> dict:
+        _entry_id, store = _companion_store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+        except ops.OperationError as err:
+            _raise(err)
+        mgr = store["room_manager"]
+        await mgr.async_sync_telemetry()
+        return {"synced": len(mgr.virtual_rooms)}
+
     reg(DOMAIN, "end_vacation", end_vacation, _END_VACATION, SupportsResponse.OPTIONAL)
+    reg(
+        DOMAIN,
+        "companion_set_room",
+        companion_set_room,
+        _COMPANION_SET_ROOM,
+        SupportsResponse.OPTIONAL,
+    )
+    reg(
+        DOMAIN,
+        "companion_delete_room",
+        companion_delete_room,
+        _COMPANION_DELETE_ROOM,
+        SupportsResponse.OPTIONAL,
+    )
+    reg(
+        DOMAIN,
+        "companion_sync_rooms",
+        companion_sync_rooms,
+        _COMPANION_SYNC_ROOMS,
+        SupportsResponse.OPTIONAL,
+    )

@@ -701,3 +701,113 @@ async def test_companion_climate_set_temperature_and_attributes(
 
     with pytest.raises(HomeAssistantError, match="refused"):
         await entity.async_set_temperature(temperature=30.0)
+
+
+async def test_companion_switch_number_and_room_services(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Companion switch/number writes and companion_set_room / sync / delete services."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from custom_components.danfoss_ally_cloud.const import (
+        CONF_CONNECTION_MODE,
+        CONF_MQTT_PREFIXES,
+        CONNECTION_MODE_MQTT_COMPANION,
+        DOMAIN,
+    )
+    from custom_components.danfoss_ally_cloud.number import HEAD_BOUNDS, DanfossHeadBound
+    from custom_components.danfoss_ally_cloud.switch import SWITCHES, DanfossSwitch
+
+    pub = AsyncMock()
+    monkeypatch.setattr(mqtt_mod, "async_wait_for_mqtt_client", AsyncMock(return_value=True))
+    monkeypatch.setattr(mqtt_mod, "async_subscribe", AsyncMock(return_value=lambda: None))
+    monkeypatch.setattr(mqtt_mod, "async_publish", pub)
+    monkeypatch.setattr("custom_components.danfoss_ally_cloud.async_register_frontend", AsyncMock())
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_CONNECTION_MODE: CONNECTION_MODE_MQTT_COMPANION,
+            CONF_MQTT_PREFIXES: ["zigbee2mqtt"],
+        },
+        unique_id="mqtt_companion:zigbee2mqtt",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    store = hass.data[DOMAIN][entry.entry_id]
+    comp: MqttCompanionCoordinator = store["companion"]
+    comp.process_mqtt_message(
+        "zigbee2mqtt/bridge/devices",
+        json.dumps(
+            [
+                {
+                    "ieee_address": "0x842712fffe86dfbd",
+                    "friendly_name": "Chapelle-1",
+                    "definition": {"vendor": "Danfoss", "model": "014G2461"},
+                },
+                {
+                    "ieee_address": "0xa4c138f86da7457d",
+                    "friendly_name": "Chapelle-Sensor",
+                    "definition": {"vendor": "Danfoss", "model": "014G2480"},
+                },
+            ]
+        ),
+    )
+    comp.process_mqtt_message(
+        "zigbee2mqtt/Chapelle-Sensor",
+        json.dumps({"temperature": 19.25, "humidity": 50.0, "battery": 95}),
+    )
+
+    # 1) Switch write (child_lock)
+    sw = DanfossSwitch(store["coordinator"], "0x842712fffe86dfbd", SWITCHES[0], None, None, False)
+    assert sw.extra_state_attributes["write_path"] == "mqtt_companion"
+    await sw.async_turn_on()
+    assert json.loads(pub.call_args.args[2]) == {"keypad_lockout": "lock"}
+
+    # 2) Number write (upper bound)
+    num = DanfossHeadBound(store["coordinator"], "0x842712fffe86dfbd", HEAD_BOUNDS[0], None)
+    assert num.extra_state_attributes["write_path"] == "mqtt_companion"
+    await num.async_set_native_value(23.5)
+    assert json.loads(pub.call_args.args[2]) == {"max_heat_setpoint_limit": 23.5}
+
+    # 3) Virtual room services (set -> sync -> delete)
+    pub.reset_mock()
+    res = await hass.services.async_call(
+        DOMAIN,
+        "companion_set_room",
+        {
+            "room_id": "chapelle",
+            "name": "B-0 Chapelle",
+            "head_ids": ["0x842712fffe86dfbd"],
+            "sensor_id": "0xa4c138f86da7457d",
+        },
+        blocking=True,
+        return_response=True,
+    )
+    assert res["room_id"] == "chapelle"
+    assert "chapelle" in store["room_manager"].virtual_rooms
+    # Telemetry sync pushed external_measured_room_sensor=1925 to Chapelle-1
+    assert any(
+        c.args[1] == "zigbee2mqtt/Chapelle-1/set"
+        and json.loads(c.args[2]).get("external_measured_room_sensor") == 1925
+        for c in pub.call_args_list
+    )
+
+    sync_res = await hass.services.async_call(
+        DOMAIN, "companion_sync_rooms", {}, blocking=True, return_response=True
+    )
+    assert sync_res == {"synced": 1}
+
+    del_res = await hass.services.async_call(
+        DOMAIN,
+        "companion_delete_room",
+        {"room_id": "chapelle"},
+        blocking=True,
+        return_response=True,
+    )
+    assert del_res == {"room_id": "chapelle", "removed": True}
+    assert "chapelle" not in store["room_manager"].virtual_rooms
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
