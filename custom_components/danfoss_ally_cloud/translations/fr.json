@@ -864,6 +864,10 @@
   "head_fault": {
    "title": "Défaut matériel Danfoss Ally sur {name}",
    "description": "La tête thermostatique **{name}** signale un ou plusieurs défauts actifs : **{faults}**. Vérifiez le montage, les piles ou le pointeau sur place."
+  },
+  "duplicate_cloud_provider": {
+   "title": "Danfoss Ally : fournisseur en double actif",
+   "description": "Le **Companion** Danfoss Ally (zigbee2mqtt / danfoss2mqtt) tourne, mais une autre entrée Danfoss Ally en **cloud direct** est encore active. Les deux exposent les mêmes têtes : chaque tête se retrouve avec des entités en double (les suffixes `_2` / `_3` dans l'entity-id). Faites du Companion le seul fournisseur : désactivez ou supprimez l'ancienne entrée cloud direct, et arrêtez tout pont MQTT-discovery qui publie encore les mêmes têtes. Guide pas à pas : `docs/v2-cutover.md`. Cet avertissement disparaît tout seul une fois l'ancienne entrée retirée."
   }
  }
 }

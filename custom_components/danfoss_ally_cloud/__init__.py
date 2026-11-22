@@ -91,7 +91,7 @@ from .frontend import async_register_frontend, async_unregister_frontend
 from .local_write import LOCAL_TRIAL_SETTINGS
 from .mqtt_coverage import CoverageStats
 from .mqtt_publisher import MqttPublisher
-from .repairs import clear_repairs, sync_repairs
+from .repairs import clear_repairs, sync_provider_conflict, sync_repairs
 from .services import async_register_services
 from .websocket_api import async_register as async_register_ws
 from .writejob import JobManager
@@ -180,9 +180,15 @@ async def _async_setup_companion_entry(hass: HomeAssistant, entry: ConfigEntry) 
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # The Companion is meant to be the sole provider: warn if a v1.x direct-cloud entry still runs
+    # alongside it (duplicate entities). Re-evaluated on every update so it clears once the old
+    # entry is removed (docs/v2-cutover.md).
+    sync_provider_conflict(hass, entry)
+
     @callback
     def _on_companion_update() -> None:
         sync_repairs(hass, entry.entry_id, companion.data)
+        sync_provider_conflict(hass, entry)
 
     async def _periodic_telemetry(_now: object = None) -> None:
         await room_manager.async_sync_telemetry()
