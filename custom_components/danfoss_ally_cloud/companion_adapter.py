@@ -64,14 +64,17 @@ class CompanionCoordinatorView:
         raw = self.companion.native_rooms.get(group_id)
         if isinstance(raw, dict):
             return str(raw.get("home_id") or "default")
-        if group_id in self.room_manager.virtual_rooms:
-            return "companion"
+        cfg = self.room_manager.virtual_rooms.get(group_id)
+        if cfg is not None:
+            return cfg.home_id or "companion"
         return None
 
     def head_home(self, head_id: str) -> str | None:
         """Return the home gid of ``head_id``."""
         if head_id in self.device_home:
             return self.device_home[head_id]
+        if head_id in self.companion.device_home:
+            return self.companion.device_home[head_id]
         gid = self.group_of(head_id)
         if gid is not None:
             return self.home_of(gid)
