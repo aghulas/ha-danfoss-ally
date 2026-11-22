@@ -1,5 +1,38 @@
 # Changelog
 
+## 2.0.0 — Bridge + Companion architecture (Zigbee2MQTT + danfoss2mqtt over Mosquitto)
+
+Major release. Home Assistant no longer speaks Tuya HTTP, Tuya cloud MQTT or `tinytuya` LAN
+sockets directly. Two bridges publish to the local Mosquitto broker in the **Zigbee2MQTT device
+dialect** — `zigbee2mqtt` for heads on a local coordinator, and **`danfoss2mqtt`** (a standalone
+add-on backed by the `pydanfoss-cloud` library) for heads on the Danfoss gateways — and a single
+**Danfoss Ally Companion** integration reads both. Modelled on the `ebusd` ↔ Mosquitto ↔
+`ha-weishaupt` split; see `docs/companion-contract.md`.
+
+Validated on real hardware (2026-11-22): the Companion reads both bridges with fresh state; a
+room-level setpoint round-trips over each channel (zigbee2mqtt local fan-out and danfoss2mqtt cloud
+path 1a); the cloud path refuses an isolated head and declines fields it cannot prove, with no
+optimistic state.
+
+**Added**
+
+- **Unified Companion** (`mqtt_companion.py`, `companion_rooms.py`, `companion_adapter.py`): one
+  integration subscribing to the `zigbee2mqtt` and `danfoss2mqtt` prefixes, a unified
+  `DanfossDevice` model, native and virtual rooms, the room card and side panel fed from the
+  bridges.
+- **`danfoss2mqtt` bridge** (Z2M dialect contract `api/z2m_contract.py`; standalone daemon in
+  `pydanfoss-cloud`): publishes `bridge/devices`, `bridge/rooms`, `bridge/holidays` and per-device
+  state; `/set` is routed only through proven cloud paths and declines the rest loudly.
+- **Duplicate-provider Repairs warning** (`repairs.sync_provider_conflict`): fires when the
+  Companion runs alongside a v1.x direct-cloud `danfoss_ally_cloud` entry, and clears once the old
+  entry is gone. Cutover procedure: `docs/v2-cutover.md`.
+
+**Migration**
+
+- The 1.4.x direct-cloud line is frozen. After upgrading, make the Companion the sole provider of
+  each head by following `docs/v2-cutover.md` (disable the v1.x cloud entry and the local-bridge
+  MQTT discovery). The Repairs warning guides this; it is an operational step on the live install.
+
 ## 1.4.0 — Zigbee2MQTT convergence: room sensor, tunnel-write settings, heat-available and the app message center
 
 **Not validated on real hardware.** Every new tunnel write in this release (external measured room
