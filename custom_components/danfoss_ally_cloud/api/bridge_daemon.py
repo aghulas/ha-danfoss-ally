@@ -1,4 +1,4 @@
-"""Standalone ``danfoss2mqtt`` bridge daemon & CLI (Batch 2.6, ``docs/companion-contract.md`` §4).
+"""Standalone ``danfoss2mqtt`` bridge daemon & CLI (Batch 2.6 + Step 3).
 
 Zero Home Assistant dependency: connects ``pydanfoss_cloud`` (``DanfossDevice`` fleet + rooms) to a
 standard Mosquitto MQTT broker (via ``paho-mqtt``) and speaks the Zigbee2MQTT dialect defined in
@@ -6,20 +6,29 @@ standard Mosquitto MQTT broker (via ``paho-mqtt``) and speaks the Zigbee2MQTT di
 
 Can run as:
 - a standalone CLI process (``danfoss2mqtt`` console script in ``pyproject.toml``),
-- a Docker container / Home Assistant Add-on alongside ``ebusd`` and ``zigbee2mqtt``,
+- a Docker container / Home Assistant Add-on (``addons/danfoss2mqtt/``) alongside ``ebusd`` and
+  ``zigbee2mqtt``,
 - or embedded in tests using an injected ``MqttTransport`` double (no network).
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
+import contextlib
 import json
 import logging
 import os
+import signal
+import threading
 from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
+from .client import CloudClient
 from .decode import DanfossDevice
+from .mqtt_client import _new_paho_client
 from .rooms import RoomState
 from .z2m_contract import encode_z2m_descriptor, encode_z2m_state
 
@@ -27,6 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 
 AVAIL_ONLINE = "online"
 AVAIL_OFFLINE = "offline"
+DEFAULT_POLL_INTERVAL = 60
 
 
 class MqttTransport(Protocol):
@@ -35,6 +45,173 @@ class MqttTransport(Protocol):
     def publish(self, topic: str, payload: str, *, retain: bool = False) -> None: ...
 
     def subscribe(self, topic: str, callback: Callable[[str, str], None]) -> None: ...
+
+
+@dataclass(frozen=True)
+class BridgeConfig:
+    """Runtime configuration for the standalone ``danfoss2mqtt`` bridge."""
+
+    mqtt_host: str = "localhost"
+    mqtt_port: int = 1883
+    mqtt_username: str | None = None
+    mqtt_password: str | None = None
+    mqtt_tls: bool = False
+    base_topic: str = "danfoss2mqtt"
+    client_id: str = "danfoss2mqtt"
+    # Optional Danfoss Cloud credentials (required for live polling, omitted for --dry-run).
+    username: str | None = None
+    password: str | None = None
+    country_code: str = "33"
+    region: str = "eu"
+    sign_key: str | None = None
+    device_id: str | None = None
+    ch_key: str | None = None
+    poll_interval: int = DEFAULT_POLL_INTERVAL
+
+    @property
+    def has_cloud_credentials(self) -> bool:
+        return bool(
+            self.username
+            and self.password
+            and self.sign_key
+            and self.device_id
+            and self.ch_key
+        )
+
+
+def _topic_matches(pattern: str, topic: str) -> bool:
+    """Simple MQTT wildcard matcher supporting ``+`` and ``#`` (fallback when paho is mocked)."""
+    p_parts = pattern.split("/")
+    t_parts = topic.split("/")
+    for i, part in enumerate(p_parts):
+        if part == "#":
+            return True
+        if i >= len(t_parts):
+            return False
+        if part != "+" and part != t_parts[i]:
+            return False
+    return len(p_parts) == len(t_parts)
+
+
+class PahoMqttTransport:
+    """``paho-mqtt`` implementation of ``MqttTransport`` for Mosquitto brokers.
+
+    Supports paho-mqtt 1.6.x and 2.x (via ``_new_paho_client``), sets a Last Will & Testament on
+    ``<base_topic>/bridge/state`` = ``offline`` before connecting, and automatically re-subscribes
+    to all registered topic filters after any broker reconnect.
+    """
+
+    def __init__(
+        self,
+        host: str,
+        port: int = 1883,
+        *,
+        base_topic: str = "danfoss2mqtt",
+        username: str | None = None,
+        password: str | None = None,
+        tls: bool = False,
+        client_id: str = "danfoss2mqtt",
+        paho_module: Any | None = None,
+    ) -> None:
+        self._host = host
+        self._port = port
+        self._base = base_topic.rstrip("/") or "danfoss2mqtt"
+        self._username = username
+        self._password = password
+        self._tls = tls
+        self._client_id = client_id
+        self._paho_module = paho_module
+        self._client: Any | None = None
+        self._connected = False
+        self._lock = threading.Lock()
+        self._subscriptions: list[tuple[str, Callable[[str, str], None]]] = []
+
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
+    def connect(self, keepalive: int = 60) -> None:
+        """Open the MQTT connection and start paho's background network loop."""
+        mqtt = self._paho_module
+        if mqtt is None:
+            import paho.mqtt.client as mqtt  # type: ignore[no-redef]
+            self._paho_module = mqtt
+
+        client = _new_paho_client(mqtt, self._client_id)
+        if self._username:
+            client.username_pw_set(self._username, self._password)
+        if self._tls:
+            client.tls_set()
+        client.will_set(f"{self._base}/bridge/state", AVAIL_OFFLINE, qos=1, retain=True)
+        if hasattr(client, "reconnect_delay_set"):
+            client.reconnect_delay_set(min_delay=2, max_delay=60)
+        client.on_connect = self._on_connect
+        client.on_disconnect = self._on_disconnect
+        client.on_message = self._on_message
+        self._client = client
+        client.connect(self._host, self._port, keepalive=keepalive)
+        client.loop_start()
+
+    def disconnect(self) -> None:
+        """Stop the background loop and close the MQTT connection cleanly."""
+        client = self._client
+        if client is None:
+            return
+        try:
+            client.loop_stop()
+        finally:
+            try:
+                client.disconnect()
+            finally:
+                self._connected = False
+                self._client = None
+
+    def publish(self, topic: str, payload: str, *, retain: bool = False) -> None:
+        client = self._client
+        if client is None:
+            raise RuntimeError("PahoMqttTransport is not connected")
+        client.publish(topic, payload, qos=1 if retain else 0, retain=retain)
+
+    def subscribe(self, topic: str, callback: Callable[[str, str], None]) -> None:
+        with self._lock:
+            self._subscriptions.append((topic, callback))
+            client = self._client
+            connected = self._connected
+        if client is not None and connected:
+            client.subscribe(topic, qos=1)
+
+    def _on_connect(self, client: Any, _userdata: Any, _flags: Any, rc: int) -> None:
+        if rc != 0:
+            _LOGGER.warning("danfoss2mqtt: broker refused connection (rc=%s)", rc)
+            return
+        self._connected = True
+        with self._lock:
+            topics = [topic for topic, _ in self._subscriptions]
+        for topic in topics:
+            client.subscribe(topic, qos=1)
+        _LOGGER.info("danfoss2mqtt: connected to Mosquitto %s:%d", self._host, self._port)
+
+    def _on_disconnect(self, _client: Any, _userdata: Any, rc: int) -> None:
+        self._connected = False
+        if rc != 0:
+            _LOGGER.warning("danfoss2mqtt: unexpected broker disconnect (rc=%s)", rc)
+
+    def _on_message(self, _client: Any, _userdata: Any, msg: Any) -> None:
+        topic = str(getattr(msg, "topic", ""))
+        raw = getattr(msg, "payload", b"")
+        text = (
+            raw.decode("utf-8", errors="replace")
+            if isinstance(raw, (bytes, bytearray))
+            else str(raw)
+        )
+        matcher = getattr(self._paho_module, "topic_matches_sub", _topic_matches)
+        with self._lock:
+            callbacks = [cb for sub, cb in self._subscriptions if matcher(sub, topic)]
+        for cb in callbacks:
+            try:
+                cb(topic, text)
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("danfoss2mqtt: callback error on topic %s", topic)
 
 
 class StandaloneDanfoss2MqttDaemon:
@@ -194,26 +371,189 @@ class StandaloneDanfoss2MqttDaemon:
         self._transport.publish(resp_topic, json.dumps(reply), retain=False)
 
 
+def _z2m_set_to_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    """Translate a Zigbee2MQTT ``/set`` payload into ``CloudClient.async_write_setting`` pairs."""
+    settings: dict[str, Any] = {}
+    if "keypad_lockout" in payload:
+        val = str(payload["keypad_lockout"]).lower()
+        settings["child_lock"] = val in {"lock1", "lock", "true", "1"}
+    elif "child_lock" in payload:
+        val = str(payload["child_lock"]).lower()
+        settings["child_lock"] = val in {"lock", "lock1", "true", "1"}
+    if "window_open_feature" in payload:
+        settings["window_check"] = bool(payload["window_open_feature"])
+    if "viewing_direction" in payload:
+        settings["viewing_direction"] = bool(payload["viewing_direction"])
+    if "occupied_heating_setpoint" in payload:
+        settings["temp_set"] = round(float(payload["occupied_heating_setpoint"]) * 10)
+    if "max_heat_setpoint_limit" in payload:
+        settings["upper_temp"] = round(float(payload["max_heat_setpoint_limit"]) * 10)
+    if "min_heat_setpoint_limit" in payload:
+        settings["lower_temp"] = round(float(payload["min_heat_setpoint_limit"]) * 10)
+    return settings
+
+
+async def async_run_bridge(
+    config: BridgeConfig,
+    *,
+    transport: MqttTransport | None = None,
+    client: CloudClient | None = None,
+    stop_event: asyncio.Event | None = None,
+) -> None:
+    """Run the ``danfoss2mqtt`` polling + command loop until ``stop_event`` is set."""
+    own_transport = transport is None
+    if transport is None:
+        paho_transport = PahoMqttTransport(
+            host=config.mqtt_host,
+            port=config.mqtt_port,
+            base_topic=config.base_topic,
+            username=config.mqtt_username,
+            password=config.mqtt_password,
+            tls=config.mqtt_tls,
+            client_id=config.client_id,
+        )
+        paho_transport.connect()
+        transport = paho_transport
+
+    own_client = client is None
+    if client is None:
+        if not config.has_cloud_credentials:
+            raise ValueError("Danfoss Cloud credentials are required to start the live bridge")
+        client = CloudClient(
+            username=config.username or "",
+            password=config.password or "",
+            country_code=config.country_code,
+            sign_key=config.sign_key or "",
+            device_id=config.device_id or "",
+            ch_key=config.ch_key or "",
+            region=config.region,
+        )
+
+    loop = asyncio.get_running_loop()
+    refresh_event = asyncio.Event()
+    stop = stop_event or asyncio.Event()
+
+    async def _apply_set(dev: DanfossDevice, payload: dict[str, Any]) -> None:
+        for setting_name, value in _z2m_set_to_settings(payload).items():
+            await client.async_write_setting(dev.id, setting_name, value)
+        refresh_event.set()
+
+    def _on_device_set(dev: DanfossDevice, payload: dict[str, Any]) -> None:
+        loop.call_soon_threadsafe(asyncio.create_task, _apply_set(dev, payload))
+
+    def _on_bridge_request(action: str, _payload: dict[str, Any]) -> dict[str, Any]:
+        if action == "refresh":
+            loop.call_soon_threadsafe(refresh_event.set)
+            return {"refreshed": True}
+        raise ValueError(f"unsupported bridge request: {action}")
+
+    daemon = StandaloneDanfoss2MqttDaemon(
+        transport,
+        base_topic=config.base_topic,
+        on_device_set=_on_device_set,
+        on_bridge_request=_on_bridge_request,
+    )
+    daemon.start()
+
+    try:
+        while not stop.is_set():
+            try:
+                devices = await client.async_list_devices()
+                daemon.publish_fleet(devices)
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("danfoss2mqtt: poll cycle failed")
+
+            refresh_event.clear()
+            stop_task = asyncio.create_task(stop.wait())
+            refresh_task = asyncio.create_task(refresh_event.wait())
+            done, pending = await asyncio.wait(
+                {stop_task, refresh_task},
+                timeout=max(5, config.poll_interval),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            for task in done:
+                task.result()
+    finally:
+        daemon.stop()
+        if own_client:
+            await client.async_close()
+        if own_transport and isinstance(transport, PahoMqttTransport):
+            transport.disconnect()
+
+
+def load_bridge_config(
+    args: argparse.Namespace,
+    options_path: str | Path | None = None,
+) -> BridgeConfig:
+    """Build ``BridgeConfig`` from HA Add-on ``options.json``, env vars, and CLI args."""
+    opts: dict[str, Any] = {}
+    path = options_path or getattr(args, "options", None)
+    if path:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            opts = raw
+
+    def _pick(arg_name: str, opt_key: str, env_key: str, default: Any = None) -> Any:
+        cli_val = getattr(args, arg_name, None)
+        if cli_val is not None:
+            return cli_val
+        if opts.get(opt_key) not in (None, ""):
+            return opts[opt_key]
+        env_val = os.environ.get(env_key)
+        if env_val not in (None, ""):
+            return env_val
+        return default
+
+    return BridgeConfig(
+        mqtt_host=str(_pick("mqtt_host", "mqtt_host", "DANFOSS_MQTT_HOST", "localhost")),
+        mqtt_port=int(_pick("mqtt_port", "mqtt_port", "DANFOSS_MQTT_PORT", 1883)),
+        mqtt_username=_pick("mqtt_username", "mqtt_username", "DANFOSS_MQTT_USERNAME"),
+        mqtt_password=_pick("mqtt_password", "mqtt_password", "DANFOSS_MQTT_PASSWORD"),
+        mqtt_tls=bool(_pick("mqtt_tls", "mqtt_tls", "DANFOSS_MQTT_TLS", False)),
+        base_topic=str(_pick("base_topic", "base_topic", "DANFOSS_BASE_TOPIC", "danfoss2mqtt")),
+        username=_pick("username", "username", "DANFOSS_USERNAME"),
+        password=_pick("password", "password", "DANFOSS_PASSWORD"),
+        country_code=str(_pick("country_code", "country_code", "DANFOSS_COUNTRY_CODE", "33")),
+        region=str(_pick("region", "region", "DANFOSS_REGION", "eu")),
+        sign_key=_pick("sign_key", "sign_key", "DANFOSS_SIGN_KEY"),
+        device_id=_pick("device_id", "device_id", "DANFOSS_DEVICE_ID"),
+        ch_key=_pick("ch_key", "ch_key", "DANFOSS_CH_KEY"),
+        poll_interval=int(
+            _pick("poll_interval", "poll_interval", "DANFOSS_POLL_INTERVAL", DEFAULT_POLL_INTERVAL)
+        ),
+    )
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="danfoss2mqtt",
         description="Standalone Danfoss Ally -> Mosquitto (Zigbee2MQTT dialect) bridge daemon.",
     )
     parser.add_argument(
-        "--mqtt-host",
-        default=os.environ.get("DANFOSS_MQTT_HOST", "localhost"),
-        help="Mosquitto broker hostname (default: DANFOSS_MQTT_HOST or localhost)",
+        "--options",
+        default=os.environ.get("DANFOSS_OPTIONS_FILE"),
+        help="Path to Home Assistant Add-on options.json (optional)",
+    )
+    parser.add_argument("--mqtt-host", default=None, help="Mosquitto broker hostname")
+    parser.add_argument("--mqtt-port", type=int, default=None, help="Mosquitto broker port")
+    parser.add_argument("--mqtt-username", default=None, help="Mosquitto username")
+    parser.add_argument("--mqtt-password", default=None, help="Mosquitto password")
+    parser.add_argument("--mqtt-tls", action="store_true", default=None, help="Enable MQTT TLS")
+    parser.add_argument(
+        "--base-topic", default=None, help="Base MQTT topic (default: danfoss2mqtt)"
     )
     parser.add_argument(
-        "--mqtt-port",
+        "--poll-interval",
         type=int,
-        default=int(os.environ.get("DANFOSS_MQTT_PORT", "1883")),
-        help="Mosquitto broker port (default: 1883)",
+        default=None,
+        help="Cloud poll interval in seconds (default: 60)",
     )
     parser.add_argument(
-        "--base-topic",
-        default=os.environ.get("DANFOSS_BASE_TOPIC", "danfoss2mqtt"),
-        help="Base MQTT topic (default: danfoss2mqtt)",
+        "--dry-run",
+        action="store_true",
+        help="Validate configuration and exit without connecting",
     )
     return parser
 
@@ -221,10 +561,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point for ``danfoss2mqtt``."""
     args = build_arg_parser().parse_args(argv)
+    config = load_bridge_config(args)
     _LOGGER.info(
-        "danfoss2mqtt configured for broker %s:%d (topic %s)",
-        args.mqtt_host,
-        args.mqtt_port,
-        args.base_topic,
+        "danfoss2mqtt configured for broker %s:%d (topic %s, poll=%ds)",
+        config.mqtt_host,
+        config.mqtt_port,
+        config.base_topic,
+        config.poll_interval,
     )
+    if args.dry_run or not config.has_cloud_credentials:
+        return 0
+
+    async def _run_with_signals() -> None:
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with contextlib.suppress(NotImplementedError):
+                loop.add_signal_handler(sig, stop_event.set)
+        await async_run_bridge(config, stop_event=stop_event)
+
+    asyncio.run(_run_with_signals())
     return 0
