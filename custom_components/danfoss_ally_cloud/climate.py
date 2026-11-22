@@ -212,9 +212,12 @@ class DanfossRoomClimate(CoordinatorEntity[DanfossCoordinator], ClimateEntity):
 
     @property
     def supported_features(self) -> ClimateEntityFeature:
-        # Setpoint write only for verified products (otherwise read-only).
+        # Setpoint write for Companion virtual rooms and verified cloud products.
         room = self.room
-        if room is not None and room.pid in WRITE_VERIFIED_PRODUCTS:
+        if room is not None and (
+            getattr(self.coordinator, "room_manager", None) is not None
+            or room.pid in WRITE_VERIFIED_PRODUCTS
+        ):
             return ClimateEntityFeature.TARGET_TEMPERATURE
         return ClimateEntityFeature(0)
 
