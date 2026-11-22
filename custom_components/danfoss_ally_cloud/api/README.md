@@ -47,6 +47,11 @@ pip install -e '.[local,mqtt]'         # development install from the repository
 
 ## Changes
 
+- **0.4.0** — v2.x Bridge + Companion foundation (`docs/companion-contract.md`):
+  `z2m_contract` (bidirectional Zigbee2MQTT dialect encoder/decoder for Danfoss Ally heads,
+  `014G2480` room sensors, and boiler relays) and `bridge_daemon` (`StandaloneDanfoss2MqttDaemon`,
+  `PahoMqttTransport`, `BridgeConfig`, `async_run_bridge`, and the `danfoss2mqtt` CLI console
+  script with `/data/options.json` support for the Home Assistant Add-on).
 - **0.3.1** — additive, no change to existing behaviour. `writes`: `MQTT_CANDIDATE_DPS` (DPs
   implemented on the cloud-MQTT write path but not proven on real hardware), `mqtt_dp_open()`, and
   an optional third argument `supervised` to `mqtt_write_value()` (the candidates opened for a
