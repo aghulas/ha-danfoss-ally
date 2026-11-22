@@ -56,6 +56,7 @@ class CompanionRoomConfig:
     name: str
     head_ids: list[str]
     sensor_id: str | None = None
+    home_id: str | None = None
     comfort_setpoint: float = 21.0
     setback_setpoint: float = 17.0
     schedule: dict[str, list[dict[str, str]]] = field(default_factory=dict)
@@ -101,6 +102,7 @@ class CompanionRoomManager:
                     name=str(item.get("name") or item["room_id"]),
                     head_ids=[str(h) for h in item.get("head_ids", [])],
                     sensor_id=str(item["sensor_id"]) if item.get("sensor_id") else None,
+                    home_id=str(item["home_id"]) if item.get("home_id") else None,
                     comfort_setpoint=float(item.get("comfort_setpoint", 21.0)),
                     setback_setpoint=float(item.get("setback_setpoint", 17.0)),
                     schedule=dict(item.get("schedule") or {}),

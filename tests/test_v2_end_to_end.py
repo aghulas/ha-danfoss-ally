@@ -811,3 +811,52 @@ async def test_companion_switch_number_and_room_services(
     assert "chapelle" not in store["room_manager"].virtual_rooms
 
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_companion_home_id_grouping_for_isolated_and_virtual_rooms(
+    hass: HomeAssistant,
+) -> None:
+    """Isolated danfoss2mqtt heads and virtual rooms attach to their real Danfoss home_id."""
+    comp = MqttCompanionCoordinator(hass, prefixes=("zigbee2mqtt", "danfoss2mqtt"))
+    comp.process_mqtt_message(
+        "danfoss2mqtt/bridge/holidays",
+        json.dumps({"home_ab": {"name": "Batiment A - B"}}),
+    )
+    comp.process_mqtt_message(
+        "danfoss2mqtt/bridge/devices",
+        json.dumps(
+            [
+                {
+                    "ieee_address": "0x1111",
+                    "friendly_name": "A-0 A03",
+                    "definition": {"vendor": "Danfoss", "model": "014G2461"},
+                    "danfoss": {"dev_id": "bf_iso_1", "home_id": "home_ab"},
+                }
+            ]
+        ),
+    )
+    comp.process_mqtt_message(
+        "zigbee2mqtt/bridge/devices",
+        json.dumps(
+            [
+                {
+                    "ieee_address": "0x2222",
+                    "friendly_name": "B-0 Chapelle-1",
+                    "definition": {"vendor": "Danfoss", "model": "014G2461"},
+                }
+            ]
+        ),
+    )
+    mgr = CompanionRoomManager(comp)
+    mgr.add_virtual_room(
+        CompanionRoomConfig(
+            room_id="b0_chapelle",
+            name="B-0 Chapelle",
+            head_ids=["0x2222"],
+            home_id="home_ab",
+        )
+    )
+    view = build_companion_store(comp, mgr)["coordinator"]
+    assert view.head_home("bf_iso_1") == "home_ab"
+    assert view.home_of("b0_chapelle") == "home_ab"
+    assert view.head_home("0x2222") == "home_ab"

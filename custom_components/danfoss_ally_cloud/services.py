@@ -161,6 +161,7 @@ _COMPANION_SET_ROOM = vol.Schema(
         vol.Required("name"): cv.string,
         vol.Required("head_ids"): [cv.string],
         vol.Optional("sensor_id"): vol.Any(None, cv.string),
+        vol.Optional("home_id"): vol.Any(None, cv.string),
         vol.Optional("comfort_setpoint", default=21.0): vol.Coerce(float),
         vol.Optional("setback_setpoint", default=17.0): vol.Coerce(float),
         vol.Optional("config_entry_id"): cv.string,
@@ -519,6 +520,7 @@ def async_register_services(hass: HomeAssistant) -> None:
             name=call.data["name"],
             head_ids=list(call.data["head_ids"]),
             sensor_id=call.data.get("sensor_id") or None,
+            home_id=call.data.get("home_id") or None,
             comfort_setpoint=float(call.data.get("comfort_setpoint", 21.0)),
             setback_setpoint=float(call.data.get("setback_setpoint", 17.0)),
         )

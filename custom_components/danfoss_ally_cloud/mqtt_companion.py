@@ -77,6 +77,8 @@ class MqttCompanionCoordinator:
         self.native_rooms: dict[str, dict[str, Any]] = {}
         # Native holidays published on <prefix>/bridge/holidays
         self.holidays: dict[str, dict[str, Any]] = {}
+        # Optional home_id per device published under danfoss.home_id in bridge/devices
+        self.device_home: dict[str, str] = {}
 
         self._unsubs: list[CALLBACK_TYPE] = []
         self._listeners: list[Callable[[], None]] = []
@@ -204,6 +206,9 @@ class MqttCompanionCoordinator:
                 self.data[dev.id] = dev
             self.device_route[dev.id] = (prefix, friendly)
             self._by_topic_key[(prefix, friendly)] = dev.id
+            ext = entry.get("danfoss")
+            if isinstance(ext, dict) and ext.get("home_id"):
+                self.device_home[dev.id] = str(ext["home_id"])
             seen_for_prefix.add(dev.id)
 
         # Remove stale devices that belonged to this prefix and disappeared from bridge/devices
@@ -215,6 +220,7 @@ class MqttCompanionCoordinator:
         for dev_id in stale_ids:
             p, f = self.device_route.pop(dev_id)
             self._by_topic_key.pop((p, f), None)
+            self.device_home.pop(dev_id, None)
             self.data.pop(dev_id, None)
 
         self._notify_listeners()

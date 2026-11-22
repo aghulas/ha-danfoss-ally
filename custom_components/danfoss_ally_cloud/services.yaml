@@ -510,6 +510,11 @@ companion_set_room:
       example: "0xa4c138f86da7457d"
       selector:
         text:
+    home_id:
+      required: false
+      example: "244975257"
+      selector:
+        text:
     comfort_setpoint:
       required: false
       default: 21.0
