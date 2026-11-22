@@ -267,3 +267,40 @@ def test_encode_z2m_set_command_validation() -> None:
         encode_z2m_set_command(setpoint=20.3)
     with pytest.raises(ValueError, match="empty"):
         encode_z2m_set_command()
+
+
+def test_decode_z2m_2x_string_enums_from_real_hardware() -> None:
+    """Real Zigbee2MQTT 2.x payloads send string enums for orientation, display, and lockout."""
+    head = DanfossDevice(id="0x0011223344556677", name="Room A", category="head", online=True)
+    decode_z2m_state(
+        head,
+        {
+            "local_temperature": 15.62,
+            "occupied_heating_setpoint": 14,
+            "pi_heating_demand": 78,
+            "battery": 66,
+            "keypad_lockout": "unlock",
+            "window_open_feature": True,
+            "viewing_direction": "normal",
+            "thermostat_orientation": "horizontal",
+            "programming_operation_mode": "schedule_with_preheat",
+            "running_state": "heat",
+        },
+    )
+    assert head.viewing_direction is False
+    assert head.orientation == "Horizontal"
+    assert head.child_lock is False
+    assert head.preheat is True
+    assert head.heating is True
+
+    decode_z2m_state(
+        head,
+        {
+            "keypad_lockout": "lock1",
+            "viewing_direction": "flipped",
+            "thermostat_orientation": "vertical",
+        },
+    )
+    assert head.child_lock is True
+    assert head.viewing_direction is True
+    assert head.orientation == "Vertical"

@@ -301,7 +301,8 @@ def decode_z2m_state(
         if isinstance(kl, bool):
             dev.child_lock = kl
         elif isinstance(kl, str):
-            dev.child_lock = kl.strip().lower() in ("lock", "locked", "true", "on", "1")
+            low = kl.strip().lower()
+            dev.child_lock = low.startswith("lock") or low in ("true", "on", "1")
 
     if "max_heat_setpoint_limit" in payload and payload["max_heat_setpoint_limit"] is not None:
         dev.max_setpoint = float(payload["max_heat_setpoint_limit"])
@@ -319,9 +320,32 @@ def decode_z2m_state(
             dev.preheat = pre
 
     if "viewing_direction" in payload and payload["viewing_direction"] is not None:
-        dev.viewing_direction = bool(payload["viewing_direction"])
+        vd = payload["viewing_direction"]
+        if isinstance(vd, bool):
+            dev.viewing_direction = vd
+        elif isinstance(vd, str):
+            dev.viewing_direction = vd.strip().lower() in (
+                "flipped",
+                "inverted",
+                "reverse",
+                "true",
+                "on",
+                "1",
+            )
+        else:
+            dev.viewing_direction = bool(vd)
     if "thermostat_orientation" in payload and payload["thermostat_orientation"] is not None:
-        dev.orientation = "Vertical" if bool(payload["thermostat_orientation"]) else "Horizontal"
+        to = payload["thermostat_orientation"]
+        if isinstance(to, bool):
+            dev.orientation = "Vertical" if to else "Horizontal"
+        elif isinstance(to, str):
+            low = to.strip().lower()
+            if low in ("vertical", "true", "on", "1"):
+                dev.orientation = "Vertical"
+            elif low in ("horizontal", "false", "off", "0"):
+                dev.orientation = "Horizontal"
+        else:
+            dev.orientation = "Vertical" if bool(to) else "Horizontal"
 
     ext = payload.get("danfoss")
     if isinstance(ext, dict):
