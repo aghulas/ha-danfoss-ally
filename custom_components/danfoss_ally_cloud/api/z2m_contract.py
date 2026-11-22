@@ -31,9 +31,7 @@ def clean_friendly_name(name: str, fallback: str = "") -> str:
     return raw
 
 
-def programming_mode_to_z2m(
-    schedule_active: bool | None, preheat: bool | None
-) -> str | None:
+def programming_mode_to_z2m(schedule_active: bool | None, preheat: bool | None) -> str | None:
     """Map ``(schedule_active, preheat)`` (DP 172 bits 0 & 1 / tunnel 0x0025) to Z2M's enum."""
     if schedule_active is None:
         return None
@@ -226,9 +224,10 @@ def decode_z2m_descriptor(entry: dict[str, Any]) -> DanfossDevice | None:
     friendly = str(entry.get("friendly_name") or ieee).strip()
     dev_id = str(danfoss_meta.get("dev_id") or ieee or friendly)
     defn = entry.get("definition") or {}
-    product_id = str(
-        danfoss_meta.get("product_id") or defn.get("model") or entry.get("model_id") or ""
-    ) or None
+    product_id = (
+        str(danfoss_meta.get("product_id") or defn.get("model") or entry.get("model_id") or "")
+        or None
+    )
 
     return DanfossDevice(
         id=dev_id,
@@ -270,10 +269,7 @@ def decode_z2m_state(
 
     if "local_temperature" in payload and payload["local_temperature"] is not None:
         dev.temperature = float(payload["local_temperature"])
-    if (
-        "occupied_heating_setpoint" in payload
-        and payload["occupied_heating_setpoint"] is not None
-    ):
+    if "occupied_heating_setpoint" in payload and payload["occupied_heating_setpoint"] is not None:
         dev.setpoint = float(payload["occupied_heating_setpoint"])
     elif (
         "occupied_heating_setpoint_scheduled" in payload
@@ -307,15 +303,9 @@ def decode_z2m_state(
         elif isinstance(kl, str):
             dev.child_lock = kl.strip().lower() in ("lock", "locked", "true", "on", "1")
 
-    if (
-        "max_heat_setpoint_limit" in payload
-        and payload["max_heat_setpoint_limit"] is not None
-    ):
+    if "max_heat_setpoint_limit" in payload and payload["max_heat_setpoint_limit"] is not None:
         dev.max_setpoint = float(payload["max_heat_setpoint_limit"])
-    if (
-        "min_heat_setpoint_limit" in payload
-        and payload["min_heat_setpoint_limit"] is not None
-    ):
+    if "min_heat_setpoint_limit" in payload and payload["min_heat_setpoint_limit"] is not None:
         dev.min_setpoint = float(payload["min_heat_setpoint_limit"])
     if "heat_required" in payload and payload["heat_required"] is not None:
         dev.heat_request = bool(payload["heat_required"])
@@ -330,21 +320,14 @@ def decode_z2m_state(
 
     if "viewing_direction" in payload and payload["viewing_direction"] is not None:
         dev.viewing_direction = bool(payload["viewing_direction"])
-    if (
-        "thermostat_orientation" in payload
-        and payload["thermostat_orientation"] is not None
-    ):
-        dev.orientation = (
-            "Vertical" if bool(payload["thermostat_orientation"]) else "Horizontal"
-        )
+    if "thermostat_orientation" in payload and payload["thermostat_orientation"] is not None:
+        dev.orientation = "Vertical" if bool(payload["thermostat_orientation"]) else "Horizontal"
 
     ext = payload.get("danfoss")
     if isinstance(ext, dict):
         if isinstance(ext.get("setpoints"), dict):
             dev.setpoints = {
-                str(k): float(v)
-                for k, v in ext["setpoints"].items()
-                if isinstance(v, (int, float))
+                str(k): float(v) for k, v in ext["setpoints"].items() if isinstance(v, (int, float))
             }
         if isinstance(ext.get("mode"), str):
             dev.mode = ext["mode"]
@@ -373,9 +356,7 @@ def encode_z2m_set_command(
     ``zigbee2mqtt`` and ``danfoss2mqtt``."""
     cmd: dict[str, Any] = {}
     if setpoint is not None:
-        if not (5.0 <= setpoint <= 35.0) or not math.isclose(
-            round(setpoint * 2), setpoint * 2
-        ):
+        if not (5.0 <= setpoint <= 35.0) or not math.isclose(round(setpoint * 2), setpoint * 2):
             raise ValueError(f"setpoint {setpoint} out of range (5.0..35.0 °C, step 0.5)")
         cmd["occupied_heating_setpoint"] = float(setpoint)
     if max_setpoint is not None:
@@ -387,9 +368,7 @@ def encode_z2m_set_command(
     if window_detection is not None:
         cmd["window_open_feature"] = bool(window_detection)
     if preheat is not None:
-        cmd["programming_operation_mode"] = (
-            "schedule_with_preheat" if preheat else "schedule"
-        )
+        cmd["programming_operation_mode"] = "schedule_with_preheat" if preheat else "schedule"
     if external_sensor_temp_c is not None:
         # Z2M / Danfoss attribute 0x4015 is in 0.01 °C (-8000 = disabled).
         cmd["external_measured_room_sensor"] = int(round(external_sensor_temp_c * 100))

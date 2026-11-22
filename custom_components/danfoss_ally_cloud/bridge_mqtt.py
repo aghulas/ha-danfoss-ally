@@ -307,6 +307,4 @@ class Danfoss2MqttBridge:
         if tx is not None:
             reply["transaction"] = tx
 
-        await mqtt.async_publish(
-            self._hass, resp_topic, json.dumps(reply), qos=0, retain=False
-        )
+        await mqtt.async_publish(self._hass, resp_topic, json.dumps(reply), qos=0, retain=False)

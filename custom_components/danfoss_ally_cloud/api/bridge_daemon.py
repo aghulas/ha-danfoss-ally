@@ -71,11 +71,7 @@ class BridgeConfig:
     @property
     def has_cloud_credentials(self) -> bool:
         return bool(
-            self.username
-            and self.password
-            and self.sign_key
-            and self.device_id
-            and self.ch_key
+            self.username and self.password and self.sign_key and self.device_id and self.ch_key
         )
 
 
@@ -135,6 +131,7 @@ class PahoMqttTransport:
         mqtt = self._paho_module
         if mqtt is None:
             import paho.mqtt.client as mqtt  # type: ignore[no-redef]
+
             self._paho_module = mqtt
 
         client = _new_paho_client(mqtt, self._client_id)
@@ -241,9 +238,7 @@ class StandaloneDanfoss2MqttDaemon:
         """Announce bridge online and subscribe to ``+/set`` and ``bridge/request/+``."""
         self._transport.publish(f"{self._base}/bridge/state", AVAIL_ONLINE, retain=True)
         self._transport.subscribe(f"{self._base}/+/set", self._handle_set)
-        self._transport.subscribe(
-            f"{self._base}/bridge/request/+", self._handle_bridge_request
-        )
+        self._transport.subscribe(f"{self._base}/bridge/request/+", self._handle_bridge_request)
 
     def stop(self) -> None:
         """Mark bridge offline on clean shutdown."""

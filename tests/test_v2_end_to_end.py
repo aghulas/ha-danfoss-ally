@@ -635,9 +635,7 @@ async def test_step_1_companion_config_flow_setup_unload_and_storage(
     )
     await pre_mgr.async_save(hass, entry.entry_id)
 
-    monkeypatch.setattr(
-        "custom_components.danfoss_ally_cloud.async_register_frontend", AsyncMock()
-    )
+    monkeypatch.setattr("custom_components.danfoss_ally_cloud.async_register_frontend", AsyncMock())
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
@@ -648,4 +646,3 @@ async def test_step_1_companion_config_flow_setup_unload_and_storage(
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.entry_id not in hass.data[DOMAIN]
-

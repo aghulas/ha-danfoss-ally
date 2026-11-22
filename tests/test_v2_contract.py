@@ -194,15 +194,24 @@ def test_non_danfoss_z2m_devices_are_ignored_and_edge_cases() -> None:
     """Non-Danfoss devices on Zigbee2MQTT are skipped; fallback vendor classification works."""
     non_danfoss = {"friendly_name": "Sonoff", "definition": {"vendor": "SONOFF"}}
     assert decode_z2m_descriptor(non_danfoss) is None
-    assert classify_z2m_descriptor(
-        {"definition": {"vendor": "Danfoss", "description": "Room humidity sensor"}}
-    ) == "sensor"
-    assert classify_z2m_descriptor(
-        {"definition": {"vendor": "Danfoss", "description": "Boiler relay unit"}}
-    ) == "relay"
-    assert classify_z2m_descriptor(
-        {"definition": {"vendor": "Danfoss", "description": "Radiator valve"}}
-    ) == "head"
+    assert (
+        classify_z2m_descriptor(
+            {"definition": {"vendor": "Danfoss", "description": "Room humidity sensor"}}
+        )
+        == "sensor"
+    )
+    assert (
+        classify_z2m_descriptor(
+            {"definition": {"vendor": "Danfoss", "description": "Boiler relay unit"}}
+        )
+        == "relay"
+    )
+    assert (
+        classify_z2m_descriptor(
+            {"definition": {"vendor": "Danfoss", "description": "Radiator valve"}}
+        )
+        == "head"
+    )
 
     # Programming mode conversions
     assert programming_mode_to_z2m(None, None) is None

@@ -203,12 +203,8 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                     },
                 )
 
-        schema = vol.Schema(
-            {vol.Required(CONF_MQTT_PREFIXES, default=DEFAULT_MQTT_PREFIXES): str}
-        )
-        return self.async_show_form(
-            step_id="companion", data_schema=_schema(schema), errors=errors
-        )
+        schema = vol.Schema({vol.Required(CONF_MQTT_PREFIXES, default=DEFAULT_MQTT_PREFIXES): str})
+        return self.async_show_form(step_id="companion", data_schema=_schema(schema), errors=errors)
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> Any:
         """The login was refused at runtime (``ConfigEntryAuthFailed``): ask for new credentials."""

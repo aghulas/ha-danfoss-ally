@@ -157,8 +157,10 @@ async def _async_setup_companion_entry(hass: HomeAssistant, entry: ConfigEntry) 
     from .mqtt_companion import DEFAULT_COMPANION_PREFIXES, MqttCompanionCoordinator
 
     raw_prefixes = entry.data.get(CONF_MQTT_PREFIXES) or list(DEFAULT_COMPANION_PREFIXES)
-    prefixes = tuple(str(p) for p in raw_prefixes) if isinstance(raw_prefixes, list) else (
-        tuple(p.strip() for p in str(raw_prefixes).split(",") if p.strip())
+    prefixes = (
+        tuple(str(p) for p in raw_prefixes)
+        if isinstance(raw_prefixes, list)
+        else (tuple(p.strip() for p in str(raw_prefixes).split(",") if p.strip()))
     )
     companion = MqttCompanionCoordinator(hass, prefixes=prefixes or DEFAULT_COMPANION_PREFIXES)
     room_manager = CompanionRoomManager(companion)

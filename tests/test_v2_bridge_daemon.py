@@ -185,9 +185,7 @@ def test_paho_transport_lifecycle_lwt_auth_and_dispatch() -> None:
     transport.disconnect()  # safe no-op when already disconnected
 
 
-def test_load_bridge_config_precedence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_bridge_config_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     opts = tmp_path / "options.json"
     opts.write_text(
         json.dumps(
@@ -277,9 +275,7 @@ async def test_async_run_bridge_poll_set_refresh_and_shutdown() -> None:
         json.dumps({"transaction": "tx-2"}),
     )
     await asyncio.sleep(0.05)
-    assert any(
-        t == "danfoss2mqtt/bridge/response/refresh" and '"ok"' in p for t, p, _ in published
-    )
+    assert any(t == "danfoss2mqtt/bridge/response/refresh" and '"ok"' in p for t, p, _ in published)
     assert any(
         t == "danfoss2mqtt/bridge/response/unknown" and '"error"' in p for t, p, _ in published
     )

@@ -112,9 +112,7 @@ class CompanionRoomManager:
         store: Store[dict[str, Any]] = Store(
             hass, _ROOMS_STORE_VERSION, f"{DOMAIN}_companion_rooms_{entry_id}"
         )
-        await store.async_save(
-            {"rooms": [asdict(cfg) for cfg in self.virtual_rooms.values()]}
-        )
+        await store.async_save({"rooms": [asdict(cfg) for cfg in self.virtual_rooms.values()]})
 
     def room_members(self) -> dict[str, tuple[str, ...]]:
         """Map ``room_id -> tuple of member head_ids`` for all native and virtual rooms."""
@@ -136,9 +134,7 @@ class CompanionRoomManager:
         # 1) Native rooms from danfoss2mqtt/bridge/rooms
         for gid, raw in self._companion.native_rooms.items():
             member_ids = tuple(str(m) for m in (raw.get("members") or ()))
-            members = [
-                self._companion.data[m] for m in member_ids if m in self._companion.data
-            ]
+            members = [self._companion.data[m] for m in member_ids if m in self._companion.data]
             if members:
                 room = Room(
                     group_id=gid,
@@ -151,9 +147,7 @@ class CompanionRoomManager:
 
         # 2) Companion-managed virtual rooms (zigbee2mqtt or mixed heads + 014G2480 sensor)
         for rid, cfg in self.virtual_rooms.items():
-            members = [
-                self._companion.data[m] for m in cfg.head_ids if m in self._companion.data
-            ]
+            members = [self._companion.data[m] for m in cfg.head_ids if m in self._companion.data]
             if not members:
                 continue
             room = Room(
@@ -182,9 +176,7 @@ class CompanionRoomManager:
                 for m in members_map.get(gid, ())
                 if m in self._companion.data
             ]
-            demands = [
-                m.valve_opening for m in members if m.valve_opening is not None
-            ]
+            demands = [m.valve_opening for m in members if m.valve_opening is not None]
             if room_state.heating or any(m.heat_request for m in members):
                 calling.append(
                     {
@@ -206,9 +198,7 @@ class CompanionRoomManager:
         sent = 0
         for head_id in member_ids:
             if head_id in self._companion.device_route:
-                await self._companion.async_send_device_set(
-                    head_id, setpoint=temperature_c
-                )
+                await self._companion.async_send_device_set(head_id, setpoint=temperature_c)
                 sent += 1
         return sent
 
@@ -301,9 +291,7 @@ class CompanionRoomManager:
 
             # 2) Multi-head room load balancing (mean pi_heating_demand -> load_room_mean)
             if len(members) > 1:
-                openings = [
-                    m.valve_opening for m in members if m.valve_opening is not None
-                ]
+                openings = [m.valve_opening for m in members if m.valve_opening is not None]
                 if len(openings) == len(members):
                     mean_load = int(round(sum(openings) / len(openings)))
                     if (

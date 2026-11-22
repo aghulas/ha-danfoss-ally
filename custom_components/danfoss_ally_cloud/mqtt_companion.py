@@ -217,9 +217,7 @@ class MqttCompanionCoordinator:
 
         self._notify_listeners()
 
-    def _ingest_device_state(
-        self, prefix: str, friendly: str, raw_payload: str | bytes
-    ) -> None:
+    def _ingest_device_state(self, prefix: str, friendly: str, raw_payload: str | bytes) -> None:
         dev_id = self._by_topic_key.get((prefix, friendly))
         if dev_id is None or dev_id not in self.data:
             return
@@ -273,9 +271,7 @@ class MqttCompanionCoordinator:
         )
         return cmd
 
-    async def async_send_raw_device_set(
-        self, dev_id: str, payload: dict[str, Any]
-    ) -> None:
+    async def async_send_raw_device_set(self, dev_id: str, payload: dict[str, Any]) -> None:
         """Publish a raw JSON payload (e.g. ``weekly_schedule``) to ``<prefix>/<friendly>/set``."""
         route = self.device_route.get(dev_id)
         if route is None:
