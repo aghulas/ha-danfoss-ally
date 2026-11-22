@@ -72,6 +72,7 @@ def test_reconfigure_and_issue_translations_present() -> None:
         assert "reconfigure_successful" in data["config"]["abort"]
         assert "gateway_offline" in data["issues"]
         assert "head_fault" in data["issues"]
+        assert "duplicate_cloud_provider" in data["issues"]
 
 
 async def test_reconfigure_flow_updates_and_preserves_blank_secrets(hass: HomeAssistant) -> None:

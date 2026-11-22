@@ -864,6 +864,10 @@
     "head_fault": {
       "title": "Danfoss Ally hardware fault on {name}",
       "description": "Radiator thermostat **{name}** reports active fault(s): **{faults}**. Inspect the valve mounting, battery or pin on site."
+    },
+    "duplicate_cloud_provider": {
+      "title": "Danfoss Ally: duplicate provider active",
+      "description": "The Danfoss Ally **Companion** (zigbee2mqtt / danfoss2mqtt) is running, but another Danfoss Ally **direct-cloud** entry is also active. Both provide the same heads, so every head gets duplicate entities (the `_2` / `_3` entity-id suffixes). Make the Companion the sole provider: disable or remove the old direct-cloud entry, and stop any MQTT-discovery bridge still publishing the same heads. Step-by-step guide: `docs/v2-cutover.md`. This warning clears automatically once the old entry is gone."
     }
   }
 }

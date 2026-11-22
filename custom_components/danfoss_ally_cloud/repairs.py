@@ -9,14 +9,21 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 
 from .api import DanfossDevice
-from .const import DOMAIN
+from .const import CONF_CONNECTION_MODE, CONNECTION_MODE_MQTT_COMPANION, DOMAIN
 
 # Tracks issue_ids currently raised per config entry so cleared/removed devices are deleted cleanly.
 _ACTIVE_ISSUES: dict[str, set[str]] = {}
+
+# Provider-conflict issues are tracked apart from the fleet issues above: they are keyed on the
+# Companion entry, not on a device, and are recomputed from the set of loaded config entries rather
+# than from the coordinator fleet, so ``sync_repairs`` (fleet) and ``sync_provider_conflict`` never
+# clobber each other's ``_ACTIVE_*`` accounting.
+_ACTIVE_PROVIDER_ISSUES: dict[str, set[str]] = {}
 
 
 def _gateway_issue_id(entry_id: str, dev_id: str) -> str:
@@ -85,8 +92,58 @@ def sync_repairs(
         _ACTIVE_ISSUES.pop(entry_id, None)
 
 
+def _duplicate_provider_issue_id(entry_id: str) -> str:
+    return f"duplicate_cloud_provider_{entry_id}"
+
+
+@callback
+def sync_provider_conflict(hass: HomeAssistant, companion_entry: ConfigEntry) -> None:
+    """Raise a Repairs issue while a v1.x direct-cloud entry runs alongside this Companion entry.
+
+    In v2 the Companion (``zigbee2mqtt`` + ``danfoss2mqtt``) is meant to be the SOLE provider of the
+    Danfoss head entities. A left-over v1.x direct-cloud ``danfoss_ally_cloud`` entry provides every
+    head a second time, so each head ends up with duplicate entities (the ``_2`` / ``_3`` entity-id
+    suffixes). This raises a non-fixable warning pointing at ``docs/v2-cutover.md`` so the user
+    disables or removes the old entry; it clears automatically once the old entry is gone.
+
+    The old entry's title is the account e-mail, so it is NEVER put in a placeholder (contract:
+    no personal data in issues/diagnostics/logs); only a count is shown. Called both at Companion
+    setup and on every Companion update, so removing the old entry clears the issue within seconds.
+    """
+    others = [
+        entry
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.entry_id != companion_entry.entry_id
+        and entry.data.get(CONF_CONNECTION_MODE) != CONNECTION_MODE_MQTT_COMPANION
+        and entry.state is ConfigEntryState.LOADED
+    ]
+    issue_id = _duplicate_provider_issue_id(companion_entry.entry_id)
+    current: set[str] = set()
+    if others:
+        current.add(issue_id)
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="duplicate_cloud_provider",
+            translation_placeholders={"count": str(len(others))},
+        )
+
+    previous = _ACTIVE_PROVIDER_ISSUES.get(companion_entry.entry_id, set())
+    for stale_id in previous - current:
+        ir.async_delete_issue(hass, DOMAIN, stale_id)
+    if current:
+        _ACTIVE_PROVIDER_ISSUES[companion_entry.entry_id] = current
+    else:
+        _ACTIVE_PROVIDER_ISSUES.pop(companion_entry.entry_id, None)
+
+
 @callback
 def clear_repairs(hass: HomeAssistant, entry_id: str) -> None:
     """Remove all Repairs issues owned by ``entry_id`` (called on unload)."""
     for issue_id in _ACTIVE_ISSUES.pop(entry_id, ()):
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
+    for issue_id in _ACTIVE_PROVIDER_ISSUES.pop(entry_id, ()):
         ir.async_delete_issue(hass, DOMAIN, issue_id)
