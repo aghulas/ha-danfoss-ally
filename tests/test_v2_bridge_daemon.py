@@ -328,3 +328,27 @@ def test_unsupported_set_keys_cover_non_cloud_fields() -> None:
         "weekly_schedule",
     ):
         assert key in _CLOUD_UNSUPPORTED_SET_KEYS
+
+
+def test_load_bridge_config_auto_generates_and_persists_device_id(tmp_path: Path) -> None:
+    opts = tmp_path / "options.json"
+    opts.write_text(
+        json.dumps(
+            {
+                "username": "user@example.test",
+                "password": "pw",
+                "sign_key": "sk",
+                "ch_key": "ck",
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = build_arg_parser().parse_args(["--options", str(opts)])
+    cfg1 = load_bridge_config(args)
+    assert cfg1.has_cloud_credentials is True
+    assert cfg1.device_id is not None and len(cfg1.device_id) == 44
+    assert (tmp_path / "device_id").read_text(encoding="utf-8").strip() == cfg1.device_id
+
+    # Second load reuses the exact same persisted device_id (stable across restarts)
+    cfg2 = load_bridge_config(args)
+    assert cfg2.device_id == cfg1.device_id

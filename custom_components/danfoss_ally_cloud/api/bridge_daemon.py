@@ -19,6 +19,7 @@ import contextlib
 import json
 import logging
 import os
+import secrets
 import signal
 import threading
 from collections.abc import Callable
@@ -78,9 +79,22 @@ class BridgeConfig:
 
     @property
     def has_cloud_credentials(self) -> bool:
-        return bool(
-            self.username and self.password and self.sign_key and self.device_id and self.ch_key
-        )
+        return bool(self.username and self.password and self.sign_key and self.ch_key)
+
+
+def ensure_device_id(state_dir: Path) -> str:
+    """Return a stable 44-hex ``device_id`` persisted in ``state_dir/device_id`` (0600)."""
+    id_file = state_dir / "device_id"
+    if id_file.is_file():
+        existing = id_file.read_text(encoding="utf-8").strip()
+        if existing:
+            return existing
+    state_dir.mkdir(parents=True, exist_ok=True)
+    generated = secrets.token_hex(22)
+    id_file.write_text(f"{generated}\n", encoding="utf-8")
+    with contextlib.suppress(OSError):
+        id_file.chmod(0o600)
+    return generated
 
 
 def _topic_matches(pattern: str, topic: str) -> bool:
@@ -439,7 +453,7 @@ async def async_run_bridge(
             password=config.password or "",
             country_code=config.country_code,
             sign_key=config.sign_key or "",
-            device_id=config.device_id or "",
+            device_id=config.device_id or secrets.token_hex(22),
             ch_key=config.ch_key or "",
             region=config.region,
         )
@@ -574,6 +588,20 @@ def load_bridge_config(
             return env_val
         return default
 
+    username = _pick("username", "username", "DANFOSS_USERNAME")
+    password = _pick("password", "password", "DANFOSS_PASSWORD")
+    sign_key = _pick("sign_key", "sign_key", "DANFOSS_SIGN_KEY")
+    ch_key = _pick("ch_key", "ch_key", "DANFOSS_CH_KEY")
+    device_id = _pick("device_id", "device_id", "DANFOSS_DEVICE_ID")
+    if not device_id and username and password and sign_key and ch_key:
+        if path:
+            state_dir = Path(path).resolve().parent
+        elif os.environ.get("DANFOSS_STATE_DIR"):
+            state_dir = Path(os.environ["DANFOSS_STATE_DIR"])
+        else:
+            state_dir = Path.home() / ".danfoss2mqtt"
+        device_id = ensure_device_id(state_dir)
+
     return BridgeConfig(
         mqtt_host=str(_pick("mqtt_host", "mqtt_host", "DANFOSS_MQTT_HOST", "localhost")),
         mqtt_port=int(_pick("mqtt_port", "mqtt_port", "DANFOSS_MQTT_PORT", 1883)),
@@ -581,13 +609,13 @@ def load_bridge_config(
         mqtt_password=_pick("mqtt_password", "mqtt_password", "DANFOSS_MQTT_PASSWORD"),
         mqtt_tls=bool(_pick("mqtt_tls", "mqtt_tls", "DANFOSS_MQTT_TLS", False)),
         base_topic=str(_pick("base_topic", "base_topic", "DANFOSS_BASE_TOPIC", "danfoss2mqtt")),
-        username=_pick("username", "username", "DANFOSS_USERNAME"),
-        password=_pick("password", "password", "DANFOSS_PASSWORD"),
+        username=username,
+        password=password,
         country_code=str(_pick("country_code", "country_code", "DANFOSS_COUNTRY_CODE", "33")),
         region=str(_pick("region", "region", "DANFOSS_REGION", "eu")),
-        sign_key=_pick("sign_key", "sign_key", "DANFOSS_SIGN_KEY"),
-        device_id=_pick("device_id", "device_id", "DANFOSS_DEVICE_ID"),
-        ch_key=_pick("ch_key", "ch_key", "DANFOSS_CH_KEY"),
+        sign_key=sign_key,
+        device_id=device_id,
+        ch_key=ch_key,
         poll_interval=int(
             _pick("poll_interval", "poll_interval", "DANFOSS_POLL_INTERVAL", DEFAULT_POLL_INTERVAL)
         ),

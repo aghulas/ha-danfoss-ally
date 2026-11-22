@@ -47,6 +47,9 @@ pip install -e '.[local,mqtt]'         # development install from the repository
 
 ## Changes
 
+- **0.4.2** — `z2m_contract`: decode real Zigbee2MQTT 2.x string enums (`thermostat_orientation`
+  `horizontal`/`vertical`, `viewing_direction` `normal`/`flipped`, `keypad_lockout` `lock1`).
+  `bridge_daemon`: auto-generate and persist a dedicated 44-hex `device_id` when omitted.
 - **0.4.1** — `bridge_daemon`: route `occupied_heating_setpoint` on `/set` through the proven
   `CloudClient.async_set_room_setpoint` path (guarded by `WRITE_VERIFIED_PRODUCTS`), explicitly
   log unsupported non-cloud `/set` fields instead of silently dropping them, keep strong task

@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 # la vendre par import relatif (installation HACS autonome).
 [project]
 name = "pydanfoss-cloud"
-version = "0.4.1"
+version = "0.4.2"
 description = "Accès à l'API cloud non officielle Danfoss Ally (voie 1a) : client, décodage DP, écritures gardées, clés passerelles, tunnel Zigbee local, MQTT cloud Tuya (trames 2.3)."
 readme = "custom_components/danfoss_ally_cloud/api/README.md"
 requires-python = ">=3.11"
