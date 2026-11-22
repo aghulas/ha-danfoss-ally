@@ -184,3 +184,11 @@ POST_COMMAND_SETTLE = 15  # seconds
 DEFAULT_MQTT_MODE = "off"
 DEFAULT_MQTT_SOURCE = "cloud"
 DEFAULT_MQTT_BASE_TOPIC = "danfoss_ally_cloud"
+
+# v2.x MQTT Companion mode (docs/companion-contract.md)
+CONF_CONNECTION_MODE = "connection_mode"
+CONNECTION_MODE_CLOUD = "cloud"
+CONNECTION_MODE_MQTT_COMPANION = "mqtt_companion"
+CONF_MQTT_PREFIXES = "mqtt_prefixes"
+DEFAULT_MQTT_PREFIXES = "zigbee2mqtt,danfoss2mqtt"
+COMPANION_TELEMETRY_INTERVAL = 900  # seconds (15 min)

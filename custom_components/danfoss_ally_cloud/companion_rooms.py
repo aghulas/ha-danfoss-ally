@@ -20,11 +20,17 @@ virtual rooms (grouping ``zigbee2mqtt`` heads ``014G2461`` + an optional ``014G2
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
+
 from .api.rooms import Room, RoomState, aggregate_room
+from .const import DOMAIN
 from .mqtt_companion import MqttCompanionCoordinator
+
+_ROOMS_STORE_VERSION = 1
 
 EXTERNAL_SENSOR_REFRESH_SECONDS = 1800.0
 EXTERNAL_SENSOR_DELTA_C = 0.2
@@ -77,6 +83,38 @@ class CompanionRoomManager:
     def remove_virtual_room(self, room_id: str) -> None:
         self.virtual_rooms.pop(room_id, None)
         self._telemetry.pop(room_id, None)
+
+    async def async_load(self, hass: HomeAssistant, entry_id: str) -> None:
+        """Load persisted virtual room configs from HA storage."""
+        store: Store[dict[str, Any]] = Store(
+            hass, _ROOMS_STORE_VERSION, f"{DOMAIN}_companion_rooms_{entry_id}"
+        )
+        raw = await store.async_load()
+        if not isinstance(raw, dict):
+            return
+        for item in raw.get("rooms", []):
+            if not isinstance(item, dict) or not item.get("room_id"):
+                continue
+            self.add_virtual_room(
+                CompanionRoomConfig(
+                    room_id=str(item["room_id"]),
+                    name=str(item.get("name") or item["room_id"]),
+                    head_ids=[str(h) for h in item.get("head_ids", [])],
+                    sensor_id=str(item["sensor_id"]) if item.get("sensor_id") else None,
+                    comfort_setpoint=float(item.get("comfort_setpoint", 21.0)),
+                    setback_setpoint=float(item.get("setback_setpoint", 17.0)),
+                    schedule=dict(item.get("schedule") or {}),
+                )
+            )
+
+    async def async_save(self, hass: HomeAssistant, entry_id: str) -> None:
+        """Persist virtual room configs to HA storage."""
+        store: Store[dict[str, Any]] = Store(
+            hass, _ROOMS_STORE_VERSION, f"{DOMAIN}_companion_rooms_{entry_id}"
+        )
+        await store.async_save(
+            {"rooms": [asdict(cfg) for cfg in self.virtual_rooms.values()]}
+        )
 
     def room_members(self) -> dict[str, tuple[str, ...]]:
         """Map ``room_id -> tuple of member head_ids`` for all native and virtual rooms."""

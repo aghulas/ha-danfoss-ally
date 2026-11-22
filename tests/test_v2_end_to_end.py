@@ -562,3 +562,90 @@ async def test_v2_edge_cases_and_migration(
     daemon_err._handle_bridge_request("danfoss2mqtt/bridge/request/act", "[1, 2]")
     daemon_err._handle_bridge_request("danfoss2mqtt/bridge/request/act", "{}")
     assert json.loads(published["danfoss2mqtt/bridge/response/act"])["error"] == "boom"
+
+
+async def test_step_1_companion_config_flow_setup_unload_and_storage(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Companion MQTT config flow, HA entry setup/unload, and persistent virtual rooms Store."""
+    from homeassistant.config_entries import SOURCE_USER
+    from homeassistant.data_entry_flow import FlowResultType
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from custom_components.danfoss_ally_cloud.const import (
+        CONF_CONNECTION_MODE,
+        CONF_MQTT_PREFIXES,
+        CONNECTION_MODE_MQTT_COMPANION,
+        DOMAIN,
+    )
+
+    monkeypatch.setattr(mqtt_mod, "async_wait_for_mqtt_client", AsyncMock(return_value=True))
+    monkeypatch.setattr(mqtt_mod, "async_subscribe", AsyncMock(return_value=lambda: None))
+    monkeypatch.setattr(mqtt_mod, "async_publish", AsyncMock())
+
+    # 1) Config flow via SOURCE_USER menu -> companion
+    menu = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    assert menu["type"] is FlowResultType.MENU
+    assert menu["menu_options"] == ["companion", "cloud"]
+    init = await hass.config_entries.flow.async_configure(
+        menu["flow_id"], {"next_step_id": "companion"}
+    )
+    assert init["type"] is FlowResultType.FORM
+    assert init["step_id"] == "companion"
+    # Empty prefixes rejected
+    res_bad = await hass.config_entries.flow.async_configure(
+        init["flow_id"],
+        {CONF_MQTT_PREFIXES: " , "},
+    )
+    assert res_bad["type"] is FlowResultType.FORM
+    assert res_bad["step_id"] == "companion"
+    assert res_bad["errors"] == {"base": "empty_prefixes"}
+
+    # Valid prefixes create Companion entry
+    res_ok = await hass.config_entries.flow.async_configure(
+        init["flow_id"],
+        {CONF_MQTT_PREFIXES: "zigbee2mqtt, danfoss2mqtt"},
+    )
+    assert res_ok["type"] is FlowResultType.CREATE_ENTRY
+    assert res_ok["data"] == {
+        CONF_CONNECTION_MODE: CONNECTION_MODE_MQTT_COMPANION,
+        CONF_MQTT_PREFIXES: ["zigbee2mqtt", "danfoss2mqtt"],
+    }
+
+    # 2) Persistent virtual rooms Store + async_setup_entry / async_unload_entry
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_CONNECTION_MODE: CONNECTION_MODE_MQTT_COMPANION,
+            CONF_MQTT_PREFIXES: ["zigbee2mqtt", "danfoss2mqtt"],
+        },
+        unique_id="mqtt_companion:zigbee2mqtt,danfoss2mqtt",
+    )
+    entry.add_to_hass(hass)
+
+    # Pre-seed storage with 1 virtual room to verify reload on setup
+    pre_mgr = CompanionRoomManager(MqttCompanionCoordinator(hass))
+    pre_mgr.add_virtual_room(
+        CompanionRoomConfig(
+            room_id="z2m-room-1",
+            name="Classe Z2M",
+            head_ids=["0x1111"],
+            sensor_id="0x2222",
+        )
+    )
+    await pre_mgr.async_save(hass, entry.entry_id)
+
+    monkeypatch.setattr(
+        "custom_components.danfoss_ally_cloud.async_register_frontend", AsyncMock()
+    )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    store = hass.data[DOMAIN][entry.entry_id]
+    assert "z2m-room-1" in store["room_manager"].virtual_rooms
+    assert store["room_manager"].virtual_rooms["z2m-room-1"].sensor_id == "0x2222"
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.entry_id not in hass.data[DOMAIN]
+

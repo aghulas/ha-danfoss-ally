@@ -2,6 +2,14 @@
   "config": {
     "step": {
       "user": {
+        "title": "Danfoss Ally",
+        "description": "Choose how to connect to your Danfoss Ally radiator thermostats.",
+        "menu_options": {
+          "companion": "MQTT Companion (Zigbee2MQTT / danfoss2mqtt)",
+          "cloud": "Danfoss Ally Cloud account (direct v1 mode)"
+        }
+      },
+      "cloud": {
         "title": "Danfoss Ally (Cloud)",
         "description": "Sign in with your Danfoss Ally / Smart Life app account. No developer app or API key is required. The installation secrets (sign key, device id, channel key) are captured once on the installation (see the documentation).",
         "data": {
@@ -36,10 +44,18 @@
           "device_id": "Device id (deviceId) — only if it changed",
           "ch_key": "Channel key (chKey) — only if it changed"
         }
+      },
+      "companion": {
+        "title": "Danfoss Ally Companion (MQTT)",
+        "description": "Connect to one or more Zigbee2MQTT-compatible bridges on Home Assistant's Mosquitto broker (e.g. zigbee2mqtt, danfoss2mqtt). No cloud credentials required.",
+        "data": {
+          "mqtt_prefixes": "MQTT bridge prefixes (comma-separated)"
+        }
       }
     },
     "error": {
       "cannot_connect": "Cannot connect",
+      "empty_prefixes": "Specify at least one MQTT prefix (e.g. zigbee2mqtt)",
       "invalid_auth": "Invalid credentials or installation secrets",
       "unknown": "Unexpected error"
     },
