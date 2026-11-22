@@ -93,6 +93,7 @@ _MIN_TEMP = 5.0
 _MAX_TEMP = 35.0
 
 # ``write_path`` state attribute of an isolated head's climate (same values as the numbers').
+_PATH_COMPANION = "mqtt_companion"
 _PATH_MQTT = "cloud_mqtt"
 _PATH_NONE = "none"
 
@@ -267,10 +268,20 @@ class DanfossRoomClimate(CoordinatorEntity[DanfossCoordinator], ClimateEntity):
         other modes have no proven path-1a group method).
         """
         room = self.room
-        if room is None or room.pid not in WRITE_VERIFIED_PRODUCTS:
+        if room is None:
             return
         temp = kwargs.get(ATTR_TEMPERATURE)
         if temp is None:
+            return
+        room_manager = getattr(self.coordinator, "room_manager", None)
+        if room_manager is not None:
+            try:
+                encoded = encode_setpoint(temp, self.min_temp, self.max_temp, SETPOINT_STEP)
+            except CloudError as err:
+                raise HomeAssistantError(f"setpoint refused: {err}") from err
+            await room_manager.async_set_room_setpoint(self._group_id, encoded / 10)
+            return
+        if room.pid not in WRITE_VERIFIED_PRODUCTS:
             return
         dps_nums = MODE_GROUP_SETPOINT_DP.get(room.mode or "")
         if not dps_nums:
@@ -406,6 +417,13 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
         if dev.mode is not None:
             attrs["mode"] = _MODES.get(dev.mode, dev.mode)
         attrs.update(_setpoint_attributes(dev.setpoint, dev.setpoints))
+        companion = getattr(self.coordinator, "companion", None)
+        if companion is not None:
+            attrs["write_path"] = _PATH_COMPANION
+            route = companion.device_route.get(dev.id)
+            if route is not None:
+                attrs["mqtt_bridge"] = route[0]
+            return attrs
         # What a setpoint write would do now, so that nobody has to guess it from ``mode``.
         setting = self._write_setting(dev)
         attrs["write_path"] = _PATH_NONE if setting is None else _PATH_MQTT
@@ -414,14 +432,24 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
         return attrs
 
     async def async_set_temperature(self, **kwargs) -> None:
-        """Write an isolated head's setpoint over Cloud MQTT when enabled, else refuse cleanly.
-
-        The setting written (comfort or setback) is the one ``write_setting`` announces. A comfort
-        write publishes DP 16 with DP 118, as the app does: the head takes the value as its current
-        setpoint at once and, when it is not in a comfort slot, goes back to its schedule's value
-        by itself within 1 to 5 minutes (real hardware, 2026-11-19).
-        """
+        """Write an isolated head's setpoint over MQTT Companion or Cloud MQTT, else refuse."""
         dev = self.device
+        companion = getattr(self.coordinator, "companion", None)
+        if companion is not None and dev is not None:
+            temp = kwargs.get(ATTR_TEMPERATURE)
+            if temp is None:
+                return
+            low = dev.min_setpoint if dev.min_setpoint is not None else self.min_temp
+            high = dev.max_setpoint if dev.max_setpoint is not None else self.max_temp
+            try:
+                raw = encode_setpoint(temp, low, high, SETPOINT_STEP)
+            except CloudError as err:
+                raise HomeAssistantError(f"setpoint refused: {err}") from err
+            try:
+                await companion.async_send_device_set(dev.id, setpoint=raw / 10)
+            except (KeyError, ValueError) as err:
+                raise HomeAssistantError(f"setpoint write failed: {err}") from err
+            return
         if not self._mqtt_ready(dev) or dev is None or self._link is None:
             raise HomeAssistantError(
                 "Read-only: this head is not in a Danfoss room, and no HTTP setpoint write is "

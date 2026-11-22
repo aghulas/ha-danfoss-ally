@@ -646,3 +646,58 @@ async def test_step_1_companion_config_flow_setup_unload_and_storage(
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.entry_id not in hass.data[DOMAIN]
+
+
+async def test_companion_climate_set_temperature_and_attributes(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Companion climate entities report mqtt_companion write_path and publish /set on Mosquitto."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.danfoss_ally_cloud.climate import DanfossHeadClimate
+
+    pub = AsyncMock()
+    monkeypatch.setattr(mqtt_mod, "async_publish", pub)
+
+    comp = MqttCompanionCoordinator(hass, prefixes=("zigbee2mqtt", "danfoss2mqtt"))
+    comp.process_mqtt_message(
+        "zigbee2mqtt/bridge/devices",
+        json.dumps(
+            [
+                {
+                    "ieee_address": "0x842712fffe86dfbd",
+                    "friendly_name": "Room Z2M",
+                    "definition": {"vendor": "Danfoss", "model": "014G2461"},
+                }
+            ]
+        ),
+    )
+    comp.process_mqtt_message(
+        "zigbee2mqtt/Room Z2M",
+        json.dumps(
+            {
+                "local_temperature": 18.5,
+                "occupied_heating_setpoint": 19.0,
+                "min_heat_setpoint_limit": 5.0,
+                "max_heat_setpoint_limit": 24.0,
+                "running_state": "heat",
+            }
+        ),
+    )
+
+    mgr = CompanionRoomManager(comp)
+    store = build_companion_store(comp, mgr)
+    entity = DanfossHeadClimate(store["coordinator"], "0x842712fffe86dfbd")
+
+    attrs = entity.extra_state_attributes
+    assert attrs["write_path"] == "mqtt_companion"
+    assert attrs["mqtt_bridge"] == "zigbee2mqtt"
+
+    await entity.async_set_temperature(temperature=20.5)
+    pub.assert_awaited_once()
+    _hass, topic, payload = pub.call_args.args[:3]
+    assert topic == "zigbee2mqtt/Room Z2M/set"
+    assert json.loads(payload) == {"occupied_heating_setpoint": 20.5}
+
+    with pytest.raises(HomeAssistantError, match="refused"):
+        await entity.async_set_temperature(temperature=30.0)
