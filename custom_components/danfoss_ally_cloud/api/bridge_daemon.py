@@ -26,10 +26,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from .client import CloudClient
+from .client import CloudClient, CloudError
+from .const import (
+    MODE_GROUP_SETPOINT_DP,
+    SETPOINT_MAX,
+    SETPOINT_MIN,
+    SETPOINT_STEP,
+    WRITE_VERIFIED_PRODUCTS,
+)
 from .decode import DanfossDevice
 from .mqtt_client import _new_paho_client
 from .rooms import RoomState
+from .writes import encode_setpoint
 from .z2m_contract import encode_z2m_descriptor, encode_z2m_state
 
 _LOGGER = logging.getLogger(__name__)
@@ -367,26 +375,37 @@ class StandaloneDanfoss2MqttDaemon:
         self._transport.publish(resp_topic, json.dumps(reply), retain=False)
 
 
-def _z2m_set_to_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    """Translate a Zigbee2MQTT ``/set`` payload into ``CloudClient.async_write_setting`` pairs."""
-    settings: dict[str, Any] = {}
-    if "keypad_lockout" in payload:
-        val = str(payload["keypad_lockout"]).lower()
-        settings["child_lock"] = val in {"lock1", "lock", "true", "1"}
-    elif "child_lock" in payload:
-        val = str(payload["child_lock"]).lower()
-        settings["child_lock"] = val in {"lock", "lock1", "true", "1"}
-    if "window_open_feature" in payload:
-        settings["window_check"] = bool(payload["window_open_feature"])
-    if "viewing_direction" in payload:
-        settings["viewing_direction"] = bool(payload["viewing_direction"])
-    if "occupied_heating_setpoint" in payload:
-        settings["temp_set"] = round(float(payload["occupied_heating_setpoint"]) * 10)
-    if "max_heat_setpoint_limit" in payload:
-        settings["upper_temp"] = round(float(payload["max_heat_setpoint_limit"]) * 10)
-    if "min_heat_setpoint_limit" in payload:
-        settings["lower_temp"] = round(float(payload["min_heat_setpoint_limit"]) * 10)
-    return settings
+# Zigbee2MQTT ``/set`` fields the standalone cloud bridge has NO proven path 1a for from the
+# CloudClient alone (``docs/interface-contract.md``, real-hardware W-3 2026-11-19):
+#   - child lock (DP 30) applies only over Tuya cloud MQTT, not HTTP ``settings.change``;
+#   - window detection (DP 116) is a local-tunnel-only write;
+#   - preheat / programming mode (Zigbee attr 0x0025), external room sensor, load balancing and the
+#     weekly schedule reach the head only through the local tunnel.
+# Accepting them on ``/set`` and dropping them silently is a lie; we log instead.
+_CLOUD_UNSUPPORTED_SET_KEYS = frozenset(
+    {
+        "keypad_lockout",
+        "child_lock",
+        "window_open_feature",
+        "viewing_direction",
+        "max_heat_setpoint_limit",
+        "min_heat_setpoint_limit",
+        "programming_operation_mode",
+        "external_measured_room_sensor",
+        "window_open_external",
+        "load_room_mean",
+        "weekly_schedule",
+    }
+)
+
+# Fields the bridge answers to but that carry no write (state echoes / mode label).
+_CLOUD_IGNORED_SET_KEYS = frozenset({"system_mode"})
+
+
+def _group_setpoint_dps(setpoint_c: float) -> dict[str, int]:
+    """Build the comfort-setpoint group DPs for a ``/set`` ``occupied_heating_setpoint`` (°C)."""
+    encoded = encode_setpoint(setpoint_c, SETPOINT_MIN, SETPOINT_MAX, SETPOINT_STEP)
+    return {str(dp): encoded for dp in MODE_GROUP_SETPOINT_DP["at_home"]}
 
 
 async def async_run_bridge(
@@ -428,14 +447,67 @@ async def async_run_bridge(
     loop = asyncio.get_running_loop()
     refresh_event = asyncio.Event()
     stop = stop_event or asyncio.Event()
+    pending_writes: set[asyncio.Task[None]] = set()
 
     async def _apply_set(dev: DanfossDevice, payload: dict[str, Any]) -> None:
-        for setting_name, value in _z2m_set_to_settings(payload).items():
-            await client.async_write_setting(dev.id, setting_name, value)
-        refresh_event.set()
+        applied = False
+
+        # Only the room-level setpoint has a proven path 1a from the cloud (group publish +
+        # schedule rewrite); ``async_set_room_setpoint`` resolves the head's room and refuses an
+        # isolated one.
+        raw_setpoint = payload.get("occupied_heating_setpoint")
+        if raw_setpoint is not None:
+            if dev.product_id not in WRITE_VERIFIED_PRODUCTS:
+                _LOGGER.warning(
+                    "danfoss2mqtt: setpoint write not verified for product %s (%s); skipping",
+                    dev.product_id,
+                    dev.id,
+                )
+            else:
+                try:
+                    dps = _group_setpoint_dps(float(raw_setpoint))
+                    group_id = await client.async_set_room_setpoint(dev.id, dps)
+                    _LOGGER.info(
+                        "danfoss2mqtt: setpoint %.1f °C written on room %s (head %s)",
+                        float(raw_setpoint),
+                        group_id,
+                        dev.id,
+                    )
+                    applied = True
+                except (CloudError, ValueError) as err:
+                    _LOGGER.warning("danfoss2mqtt: setpoint write refused for %s: %s", dev.id, err)
+
+        unsupported = sorted(k for k in payload if k in _CLOUD_UNSUPPORTED_SET_KEYS)
+        if unsupported:
+            _LOGGER.warning(
+                "danfoss2mqtt: /set field(s) %s for %s have no proven Danfoss cloud path from the "
+                "standalone bridge (child lock via Tuya cloud MQTT; window detection, preheat, "
+                "external sensor, load balancing and schedule via the local tunnel) - ignored",
+                unsupported,
+                dev.id,
+            )
+        unknown = sorted(
+            k
+            for k in payload
+            if k not in _CLOUD_UNSUPPORTED_SET_KEYS
+            and k not in _CLOUD_IGNORED_SET_KEYS
+            and k != "occupied_heating_setpoint"
+        )
+        if unknown:
+            _LOGGER.debug("danfoss2mqtt: unrecognized /set field(s) %s for %s", unknown, dev.id)
+
+        # Re-poll only after a real write; a no-op must not spin the cloud.
+        if applied:
+            refresh_event.set()
 
     def _on_device_set(dev: DanfossDevice, payload: dict[str, Any]) -> None:
-        loop.call_soon_threadsafe(asyncio.create_task, _apply_set(dev, payload))
+        def _spawn() -> None:
+            # Keep a strong reference until completion: the loop only weakly references tasks.
+            task = asyncio.create_task(_apply_set(dev, payload))
+            pending_writes.add(task)
+            task.add_done_callback(pending_writes.discard)
+
+        loop.call_soon_threadsafe(_spawn)
 
     def _on_bridge_request(action: str, _payload: dict[str, Any]) -> dict[str, Any]:
         if action == "refresh":
