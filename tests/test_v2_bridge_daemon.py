@@ -13,12 +13,13 @@ import pytest
 import yaml
 
 from custom_components.danfoss_ally_cloud.api.bridge_daemon import (
+    _CLOUD_UNSUPPORTED_SET_KEYS,
     AVAIL_OFFLINE,
     AVAIL_ONLINE,
     BridgeConfig,
     PahoMqttTransport,
+    _group_setpoint_dps,
     _topic_matches,
-    _z2m_set_to_settings,
     async_run_bridge,
     build_arg_parser,
     load_bridge_config,
@@ -236,7 +237,7 @@ async def test_async_run_bridge_poll_set_refresh_and_shutdown() -> None:
 
     fake_client = SimpleNamespace(
         async_list_devices=AsyncMock(return_value=[_head()]),
-        async_write_setting=AsyncMock(return_value=None),
+        async_set_room_setpoint=AsyncMock(return_value="grp1"),
         async_close=AsyncMock(return_value=None),
     )
 
@@ -257,13 +258,22 @@ async def test_async_run_bridge_poll_set_refresh_and_shutdown() -> None:
     assert ("danfoss2mqtt/bridge/state", AVAIL_ONLINE, True) in published
     assert any(t == "danfoss2mqtt/bridge/devices" for t, _, _ in published)
 
-    # Incoming /set triggers async_write_setting and immediate re-poll
+    # A setpoint /set goes through the proven room path and triggers an immediate re-poll
+    subs["danfoss2mqtt/+/set"](
+        "danfoss2mqtt/Salle 101/set",
+        json.dumps({"occupied_heating_setpoint": 21.0}),
+    )
+    await asyncio.sleep(0.05)
+    fake_client.async_set_room_setpoint.assert_awaited_once_with("dev_1", {"118": 210})
+
+    # An unsupported /set field (child lock) is logged, never silently written, and does not route
+    fake_client.async_set_room_setpoint.reset_mock()
     subs["danfoss2mqtt/+/set"](
         "danfoss2mqtt/Salle 101/set",
         json.dumps({"child_lock": "LOCK"}),
     )
     await asyncio.sleep(0.05)
-    fake_client.async_write_setting.assert_awaited()
+    fake_client.async_set_room_setpoint.assert_not_awaited()
 
     # bridge/request/refresh succeeds; unknown action returns error
     subs["danfoss2mqtt/bridge/request/+"](
@@ -298,24 +308,27 @@ async def test_async_run_bridge_requires_credentials_without_client() -> None:
         await async_run_bridge(BridgeConfig(), transport=_NoopTransport())
 
 
-def test_z2m_set_to_settings_translation() -> None:
-    assert _z2m_set_to_settings(
-        {
-            "keypad_lockout": "lock1",
-            "window_open_feature": True,
-            "viewing_direction": False,
-            "occupied_heating_setpoint": 20.5,
-            "max_heat_setpoint_limit": 28.0,
-            "min_heat_setpoint_limit": 7.5,
-        }
-    ) == {
-        "child_lock": True,
-        "window_check": True,
-        "viewing_direction": False,
-        "temp_set": 205,
-        "upper_temp": 280,
-        "lower_temp": 75,
-    }
+def test_group_setpoint_dps() -> None:
+    # Comfort setpoint (DP 118) in tenths of °C, rounded to the 0.5 °C step.
+    assert _group_setpoint_dps(20.5) == {"118": 205}
+    assert _group_setpoint_dps(21.0) == {"118": 210}
+
+
+def test_unsupported_set_keys_cover_non_cloud_fields() -> None:
+    # Fields that only reach the head through Tuya cloud MQTT or the local tunnel must be refused by
+    # the standalone cloud bridge, not silently dropped.
+    for key in (
+        "keypad_lockout",
+        "child_lock",
+        "window_open_feature",
+        "max_heat_setpoint_limit",
+        "min_heat_setpoint_limit",
+        "programming_operation_mode",
+        "external_measured_room_sensor",
+        "load_room_mean",
+        "weekly_schedule",
+    ):
+        assert key in _CLOUD_UNSUPPORTED_SET_KEYS
 
 
 def test_addon_manifests_are_valid_yaml() -> None:
