@@ -40,6 +40,9 @@ Homepage = "https://github.com/aghulas/ha-danfoss-ally"
 Repository = "https://github.com/aghulas/ha-danfoss-ally"
 Issues = "https://github.com/aghulas/ha-danfoss-ally/issues"
 
+[project.scripts]
+danfoss2mqtt = "pydanfoss_cloud.bridge_daemon:main"
+
 [tool.setuptools]
 packages = ["pydanfoss_cloud", "pydanfoss_cloud._tuya", "pydanfoss_cloud.local"]
 
