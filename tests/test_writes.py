@@ -31,6 +31,10 @@ def _coord(dev):
     coord.data = {dev.id: dev}
     coord.client.async_write_setting = AsyncMock(return_value={"ok": True})
     coord.async_request_refresh = AsyncMock()
+    # No Companion MQTT bridge in these tests: the switch write path is the direct cloud
+    # (room / isolated), not PATH_COMPANION. Without this, ``_write_path`` sees a truthy
+    # MagicMock ``companion`` and routes to the Companion, awaiting a non-async mock.
+    coord.companion = None
     return coord
 
 
