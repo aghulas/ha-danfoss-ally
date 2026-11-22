@@ -23,6 +23,10 @@ _FLOW = "custom_components.danfoss_ally_cloud.config_flow.CloudClient"
 async def _submit(hass: HomeAssistant, fake: FakeCloudClient):
     with patch(_FLOW, return_value=fake):
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+        assert result["type"] == FlowResultType.MENU
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"next_step_id": "cloud"}
+        )
         return await hass.config_entries.flow.async_configure(result["flow_id"], ENTRY_DATA)
 
 

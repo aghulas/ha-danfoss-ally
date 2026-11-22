@@ -30,6 +30,7 @@ from .const import (
     CONF_CLOUD_MQTT_PROBE,
     CONF_CLOUD_MQTT_SUPERVISED_DPS,
     CONF_CLOUD_MQTT_SUPERVISED_HEAD,
+    CONF_CONNECTION_MODE,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
@@ -41,6 +42,7 @@ from .const import (
     CONF_LOCAL_SUPERVISED_SETTINGS,
     CONF_MQTT_BASE_TOPIC,
     CONF_MQTT_MODE,
+    CONF_MQTT_PREFIXES,
     CONF_MQTT_SOURCE,
     CONF_PASSWORD,
     CONF_POST_COMMAND_REFRESH,
@@ -48,6 +50,7 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SIGN_KEY,
     CONF_USERNAME,
+    CONNECTION_MODE_MQTT_COMPANION,
     DATA_COORDINATOR,
     DEFAULT_CLOUD_MQTT_PROBE,
     DEFAULT_DISTINCT_DEVICE_ID,
@@ -56,6 +59,7 @@ from .const import (
     DEFAULT_ENABLE_VACATION_WRITE,
     DEFAULT_MQTT_BASE_TOPIC,
     DEFAULT_MQTT_MODE,
+    DEFAULT_MQTT_PREFIXES,
     DEFAULT_MQTT_SOURCE,
     DEFAULT_POST_COMMAND_REFRESH,
     DEFAULT_SCAN_INTERVAL,
@@ -124,6 +128,14 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> Any:
+        """Choose between v2 MQTT Companion mode (Z2M / danfoss2mqtt) and v1 direct Cloud mode."""
+        return self.async_show_menu(
+            step_id="user",
+            menu_options=["companion", "cloud"],
+        )
+
+    async def async_step_cloud(self, user_input: dict[str, Any] | None = None) -> Any:
+        """v1 direct Danfoss Ally / Tuya cloud account setup."""
         errors: dict[str, str] = {}
         if user_input is not None:
             await self.async_set_unique_id(_account_id(user_input[CONF_USERNAME]))
@@ -164,7 +176,35 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_CH_KEY): _SECRET,
             }
         )
-        return self.async_show_form(step_id="user", data_schema=_schema(schema), errors=errors)
+        return self.async_show_form(step_id="cloud", data_schema=_schema(schema), errors=errors)
+
+    async def async_step_companion(self, user_input: dict[str, Any] | None = None) -> Any:
+        """v2.x MQTT Companion setup: connect to zigbee2mqtt and/or danfoss2mqtt via Mosquitto."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            raw = user_input.get(CONF_MQTT_PREFIXES, DEFAULT_MQTT_PREFIXES)
+            if isinstance(raw, list):
+                prefixes = [str(p).strip().rstrip("/") for p in raw if str(p).strip().rstrip("/")]
+            else:
+                prefixes = [
+                    p.strip().rstrip("/") for p in str(raw).split(",") if p.strip().rstrip("/")
+                ]
+            prefixes = list(dict.fromkeys(prefixes))
+            if not prefixes:
+                errors["base"] = "empty_prefixes"
+            else:
+                await self.async_set_unique_id(f"mqtt_companion:{','.join(prefixes)}")
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(
+                    title=f"Danfoss Ally Companion ({', '.join(prefixes)})",
+                    data={
+                        CONF_CONNECTION_MODE: CONNECTION_MODE_MQTT_COMPANION,
+                        CONF_MQTT_PREFIXES: prefixes,
+                    },
+                )
+
+        schema = vol.Schema({vol.Required(CONF_MQTT_PREFIXES, default=DEFAULT_MQTT_PREFIXES): str})
+        return self.async_show_form(step_id="companion", data_schema=_schema(schema), errors=errors)
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> Any:
         """The login was refused at runtime (``ConfigEntryAuthFailed``): ask for new credentials."""

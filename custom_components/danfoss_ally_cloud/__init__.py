@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
@@ -29,10 +30,12 @@ from .api.mqtt_client import (
 )
 from .const import (
     CLOUD_MQTT_PROBE_MAX_SECONDS,
+    COMPANION_TELEMETRY_INTERVAL,
     CONF_CH_KEY,
     CONF_CLOUD_MQTT_PROBE,
     CONF_CLOUD_MQTT_SUPERVISED_DPS,
     CONF_CLOUD_MQTT_SUPERVISED_HEAD,
+    CONF_CONNECTION_MODE,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_DISTINCT_DEVICE_ID,
@@ -44,6 +47,7 @@ from .const import (
     CONF_LOCAL_SUPERVISED_SETTINGS,
     CONF_MQTT_BASE_TOPIC,
     CONF_MQTT_MODE,
+    CONF_MQTT_PREFIXES,
     CONF_MQTT_SOURCE,
     CONF_PASSWORD,
     CONF_POST_COMMAND_REFRESH,
@@ -51,6 +55,7 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SIGN_KEY,
     CONF_USERNAME,
+    CONNECTION_MODE_MQTT_COMPANION,
     DATA_CLOUD_MQTT,
     DATA_COORDINATOR,
     DATA_HEAD_UNBIND,
@@ -145,8 +150,56 @@ def _client_from_entry(entry: ConfigEntry) -> CloudClient:
     )
 
 
+async def _async_setup_companion_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up a v2.x MQTT Companion entry (subscribing to zigbee2mqtt and/or danfoss2mqtt)."""
+    from .companion_adapter import build_companion_store
+    from .companion_rooms import CompanionRoomManager
+    from .mqtt_companion import DEFAULT_COMPANION_PREFIXES, MqttCompanionCoordinator
+
+    raw_prefixes = entry.data.get(CONF_MQTT_PREFIXES) or list(DEFAULT_COMPANION_PREFIXES)
+    prefixes = (
+        tuple(str(p) for p in raw_prefixes)
+        if isinstance(raw_prefixes, list)
+        else (tuple(p.strip() for p in str(raw_prefixes).split(",") if p.strip()))
+    )
+    companion = MqttCompanionCoordinator(hass, prefixes=prefixes or DEFAULT_COMPANION_PREFIXES)
+    room_manager = CompanionRoomManager(companion)
+    await room_manager.async_load(hass, entry.entry_id)
+    await companion.async_start()
+
+    store = build_companion_store(companion, room_manager)
+    view = store[DATA_COORDINATOR]
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = store
+    entry.runtime_data = DanfossRuntimeData(
+        coordinator=view,
+        local_coordinator=None,
+        mqtt_publisher=None,
+        jobs=store[DATA_JOBS],
+        schedules=store[DATA_SCHEDULES],
+    )
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    @callback
+    def _on_companion_update() -> None:
+        sync_repairs(hass, entry.entry_id, companion.data)
+
+    async def _periodic_telemetry(_now: object = None) -> None:
+        await room_manager.async_sync_telemetry()
+
+    entry.async_on_unload(companion.async_add_listener(_on_companion_update))
+    entry.async_on_unload(
+        async_track_time_interval(
+            hass, _periodic_telemetry, timedelta(seconds=COMPANION_TELEMETRY_INTERVAL)
+        )
+    )
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up an entry (one Danfoss Ally account)."""
+    """Set up an entry (one Danfoss Ally account, or a v2.x MQTT Companion)."""
+    if entry.data.get(CONF_CONNECTION_MODE) == CONNECTION_MODE_MQTT_COMPANION:
+        return await _async_setup_companion_entry(hass, entry)
     client = _client_from_entry(entry)
     scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     coordinator = DanfossCoordinator(
@@ -507,8 +560,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             messages: DanfossMessageCoordinator | None = data.get(DATA_MESSAGES)
             if messages is not None:
                 await messages.async_shutdown()
-            coordinator: DanfossCoordinator = data[DATA_COORDINATOR]
-            await coordinator.client.async_close()
+            companion = data.get("companion")
+            if companion is not None:
+                await companion.async_stop()
+            coordinator = data[DATA_COORDINATOR]
+            client = getattr(coordinator, "client", None)
+            if client is not None:
+                await client.async_close()
     return unloaded
 
 

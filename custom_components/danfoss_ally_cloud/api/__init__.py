@@ -14,7 +14,7 @@ Reuse (see docs/reuse.md):
 
 from __future__ import annotations
 
-from . import schedule
+from . import schedule, z2m_contract
 from .client import (
     CloudAuthError,
     CloudClient,
@@ -48,6 +48,17 @@ from .writes import (
     mqtt_write_value,
     write_allowed,
 )
+from .z2m_contract import (
+    classify_z2m_descriptor,
+    clean_friendly_name,
+    decode_z2m_descriptor,
+    decode_z2m_state,
+    encode_z2m_descriptor,
+    encode_z2m_set_command,
+    encode_z2m_state,
+    programming_mode_from_z2m,
+    programming_mode_to_z2m,
+)
 
 __all__ = [
     "CloudAuthError",
@@ -62,9 +73,13 @@ __all__ = [
     "UnknownTargetError",
     "apply_dps_overlay",
     "async_fetch_gateway_keys",
+    "classify_z2m_descriptor",
+    "clean_friendly_name",
     "count_transitions",
     "decode_device",
     "decode_operation",
+    "decode_z2m_descriptor",
+    "decode_z2m_state",
     "derive_distinct_device_id",
     "MQTT_CANDIDATE_DPS",
     "MQTT_CLOUD_CONFIRMED_DPS",
@@ -73,13 +88,19 @@ __all__ = [
     "MQTT_TENTHS_RANGE",
     "MQTT_WRITE_DPS",
     "encode_setpoint",
+    "encode_z2m_descriptor",
+    "encode_z2m_set_command",
+    "encode_z2m_state",
     "mqtt_dp_open",
     "mqtt_write_value",
     "parse_messages",
+    "programming_mode_from_z2m",
+    "programming_mode_to_z2m",
     "head_state",
     "holiday_running",
     "holiday_temperature",
     "schedule",
     "validate_days",
     "write_allowed",
+    "z2m_contract",
 ]

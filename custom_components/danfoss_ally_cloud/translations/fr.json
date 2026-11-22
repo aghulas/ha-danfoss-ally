@@ -2,6 +2,14 @@
  "config": {
   "step": {
    "user": {
+    "title": "Danfoss Ally",
+    "description": "Choisissez comment vous connecter à vos têtes thermostatiques Danfoss Ally.",
+    "menu_options": {
+     "companion": "Companion MQTT (Zigbee2MQTT / danfoss2mqtt)",
+     "cloud": "Compte cloud Danfoss Ally (mode direct v1)"
+    }
+   },
+   "cloud": {
     "title": "Danfoss Ally (Cloud)",
     "description": "Connectez-vous avec le compte de l'application Danfoss Ally / Smart Life. Aucune application développeur ni clé API n'est requise. Les secrets d'installation (clé de signature, identifiant d'appareil, clé de canal) sont capturés une fois sur l'installation (voir la documentation).",
     "data": {
@@ -36,10 +44,18 @@
      "device_id": "Identifiant d'appareil (deviceId) — seulement s'il a changé",
      "ch_key": "Clé de canal (chKey) — seulement si elle a changé"
     }
+   },
+   "companion": {
+    "title": "Danfoss Ally Companion (MQTT)",
+    "description": "Se connecte à un ou plusieurs ponts compatibles Zigbee2MQTT sur le broker Mosquitto de Home Assistant (ex. zigbee2mqtt, danfoss2mqtt). Aucun identifiant cloud requis.",
+    "data": {
+     "mqtt_prefixes": "Préfixes MQTT des ponts (séparés par des virgules)"
+    }
    }
   },
   "error": {
    "cannot_connect": "Connexion impossible",
+   "empty_prefixes": "Indiquez au moins un préfixe MQTT (ex. zigbee2mqtt)",
    "invalid_auth": "Identifiants ou secrets d'installation invalides",
    "unknown": "Erreur inattendue"
   },
