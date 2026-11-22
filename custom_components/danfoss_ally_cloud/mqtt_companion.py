@@ -82,7 +82,9 @@ class MqttCompanionCoordinator:
         self._listeners: list[Callable[[], None]] = []
 
     @callback
-    def async_add_listener(self, update_callback: Callable[[], None]) -> CALLBACK_TYPE:
+    def async_add_listener(
+        self, update_callback: Callable[[], None], context: Any = None
+    ) -> CALLBACK_TYPE:
         """Register a listener notified whenever the fleet or room state changes."""
         self._listeners.append(update_callback)
 

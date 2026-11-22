@@ -90,8 +90,10 @@ class CompanionCoordinatorView:
     def room_retired(self, group_id: str) -> bool:
         return group_id not in self.rooms
 
-    def async_add_listener(self, update_callback: Callable[[], None]) -> CALLBACK_TYPE:
-        return self.companion.async_add_listener(update_callback)
+    def async_add_listener(
+        self, update_callback: Callable[[], None], context: Any = None
+    ) -> CALLBACK_TYPE:
+        return self.companion.async_add_listener(update_callback, context)
 
 
 def build_companion_store(
