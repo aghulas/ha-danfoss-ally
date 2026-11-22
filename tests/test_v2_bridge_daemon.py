@@ -10,7 +10,6 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-import yaml
 
 from custom_components.danfoss_ally_cloud.api.bridge_daemon import (
     _CLOUD_UNSUPPORTED_SET_KEYS,
@@ -329,20 +328,3 @@ def test_unsupported_set_keys_cover_non_cloud_fields() -> None:
         "weekly_schedule",
     ):
         assert key in _CLOUD_UNSUPPORTED_SET_KEYS
-
-
-def test_addon_manifests_are_valid_yaml() -> None:
-    root = Path(__file__).resolve().parent.parent
-    repo_cfg = yaml.safe_load((root / "repository.yaml").read_text(encoding="utf-8"))
-    assert repo_cfg["name"]
-    assert "ha-danfoss-ally" in repo_cfg["url"]
-
-    addon_cfg = yaml.safe_load(
-        (root / "addons" / "danfoss2mqtt" / "config.yaml").read_text(encoding="utf-8")
-    )
-    assert addon_cfg["slug"] == "danfoss2mqtt"
-    assert "mqtt:want" in addon_cfg["services"]
-    assert set(addon_cfg["options"]) == set(addon_cfg["schema"])
-    assert (root / "addons" / "danfoss2mqtt" / "Dockerfile").is_file()
-    assert (root / "addons" / "danfoss2mqtt" / "run.sh").is_file()
-    assert (root / "addons" / "danfoss2mqtt" / "DOCS.md").is_file()

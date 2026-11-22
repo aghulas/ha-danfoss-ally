@@ -47,6 +47,10 @@ pip install -e '.[local,mqtt]'         # development install from the repository
 
 ## Changes
 
+- **0.4.1** — `bridge_daemon`: route `occupied_heating_setpoint` on `/set` through the proven
+  `CloudClient.async_set_room_setpoint` path (guarded by `WRITE_VERIFIED_PRODUCTS`), explicitly
+  log unsupported non-cloud `/set` fields instead of silently dropping them, keep strong task
+  references for in-flight writes, and re-poll only after an actual write.
 - **0.4.0** — v2.x Bridge + Companion foundation (`docs/companion-contract.md`):
   `z2m_contract` (bidirectional Zigbee2MQTT dialect encoder/decoder for Danfoss Ally heads,
   `014G2480` room sensors, and boiler relays) and `bridge_daemon` (`StandaloneDanfoss2MqttDaemon`,
