@@ -130,8 +130,9 @@ class PahoMqttTransport:
         """Open the MQTT connection and start paho's background network loop."""
         mqtt = self._paho_module
         if mqtt is None:
-            import paho.mqtt.client as mqtt  # type: ignore[no-redef]
+            import paho.mqtt.client as paho_mqtt
 
+            mqtt = paho_mqtt
             self._paho_module = mqtt
 
         client = _new_paho_client(mqtt, self._client_id)
