@@ -26,8 +26,8 @@ of a room, holidays, the boiler relay's heat demand, the re-imposition of settin
 **Where it stands.** The Companion already holds a first version of four of these for
 Zigbee2MQTT heads (`companion_rooms.py`): virtual rooms, setpoint fan-out, room sensor feed, load
 mean. Two more are written and not reachable (schedule fan-out, heat-demand list). None has a
-write-up under `docs/validation/`, and the two periodic feeds run as soon as a virtual room
-exists, with no option to close them (§4).
+write-up under `docs/validation/`. The two periodic feeds are each behind a Companion option,
+closed by default (§4).
 
 **Recommendation.** Move room coordination out of Home Assistant into a **standalone room
 coordinator on MQTT**, a sibling of `danfoss2mqtt`: same package, same add-on repository, same
@@ -87,18 +87,19 @@ second is a deliberate reconciliation (§5.5).
 ## 4. What the Companion does today, and the gap
 
 Code read at `main` (2.0.3): `companion_rooms.py`, `mqtt_companion.py`, `companion_adapter.py`,
-`services.py`, `__init__.py`.
+`services.py`, `__init__.py`. Rows 3, 7 and 8 and point 1 below are as of the stage 0 hardening
+(§7), which changed code only: nothing in it was tried on real hardware.
 
 | # | Function | Zigbee2MQTT lever | Companion today [R] | Gap |
 |---|---|---|---|---|
 | 1 | Room | none; fan-out | Virtual rooms (`companion_set_room` / `companion_delete_room` services, admin only), stored in Home Assistant storage; a room `climate` | No UI; rooms exist only inside Home Assistant; `native_rooms` is one dictionary for all prefixes, so a second bridge publishing `bridge/rooms` would overwrite the first |
 | 2 | Room setpoint | `occupied_heating_setpoint` per head | Fan-out from the room `climate` (`async_set_room_setpoint`). Reported working on one four-head room on 2026-11-22, owner present; not recorded under `docs/validation/` | QoS 0 publish, no per-head verification, no retry, no write job; comfort and setback are stored but have no entity |
-| 3 | Weekly schedule | `weekly_schedule` on `/set` | `async_set_room_schedule` exists, **called by nothing** | Truncates silently to six transitions where R1 says refuse; never sets the programming mode; no read-back; never tried |
+| 3 | Weekly schedule | `weekly_schedule` on `/set` | `async_set_room_schedule` exists, **called by nothing**. It refuses the whole request, before storing or sending anything, when a day needs more than six entries (the 00:00 entry included, so at least as strict as R1) | Never sets the programming mode; no read-back; never tried |
 | 4 | Modes | `programming_operation_mode` | Read only | No room mode |
 | 5 | Room-wide settings | per-head `/set` | Per-head switches and numbers only | No room-level setting, no drift detection |
 | 6 | Preheat | `programming_operation_mode` | Per-head switch | No room-level value, nothing checks it holds |
-| 7 | Load balancing | `load_room_mean`, `load_balancing_enable` | Mean of the members' `load_estimate`, written every 15 min or on a change of 25, for rooms of two heads or more | Written whether or not `load_balancing_enable` is on; never tried on real hardware; effect of a stale mean unknown |
-| 8 | Room sensor | `external_measured_room_sensor`, `radiator_covered` | Sensor temperature written to every member on a change of 0.2 °C or after 30 min; −8000 when the sensor goes offline | Evaluated on a 15-min timer only: the keep-alive lands at 30 **or 45** min, past the 35-min reset of room-sensor mode [Z]; ignores `radiator_covered` |
+| 7 | Load balancing | `load_room_mean`, `load_balancing_enable` | Option `companion_feed_load_mean`, **off by default**. When on: mean of the members' `load_estimate`, written every 15 to 18 min or on a change of 25, for rooms of two heads or more where **every** configured member reports `load_balancing_enable` on (unknown counts as off) | Never tried on real hardware; effect of a stale mean unknown, and closing the option writes nothing, so the heads keep the last mean they received |
+| 8 | Room sensor | `external_measured_room_sensor`, `radiator_covered` | Option `companion_feed_external_sensor`, off by default (kept on for an entry that already had a room with a sensor, see point 1). When on: sensor temperature written per head on a change of 0.2 °C or when that head's last write is 20 min old, never twice within 5 min; one −8000 when the sensor goes offline. Evaluated on a 6-min timer, so the keep-alive lands at 24 to 26 min, under the 30 min of room-sensor mode [Z] | Still timer-driven, not triggered by the sensor's messages; ignores `radiator_covered` (the room-sensor cadence is used in both modes, more often than offset mode asks for); timing not verified on real hardware |
 | 9 | Window across a room | `window_open_external` | Nothing | To decide (§5.7) |
 | 10 | Holidays | none | Reads `danfoss2mqtt/bridge/holidays` only | Nothing for Zigbee2MQTT rooms |
 | 11 | Heat demand | `heat_required`, `pi_heating_demand` | `rooms_calling_for_heat` exists, **called by nothing** | No entity, no consumer |
@@ -107,10 +108,16 @@ Code read at `main` (2.0.3): `companion_rooms.py`, `mqtt_companion.py`, `compani
 
 Three points deserve attention before any new work:
 
-1. **The two periodic feeds are open by default.** Defining a virtual room with a sensor starts
-   writes of `external_measured_room_sensor` and `load_room_mean` to every member, every 15
-   minutes, with no option to close them. The project's rule is the opposite: a new write is
-   closed until its supervised trial (`docs/architecture.md`, "Rules for adding a route").
+1. **The two periodic feeds were open by default until stage 0.** Defining a virtual room with a
+   sensor started writes of `external_measured_room_sensor` and `load_room_mean` to every member,
+   every 15 minutes, with no option to close them, against the project's rule that a new write
+   is closed until its supervised trial (`docs/architecture.md`, "Rules for adding a route").
+   Each feed now has its own Companion option, off by default. One exception, so that an upgrade
+   does not silently cut a feed heads are regulating on: at the first start after the upgrade,
+   an entry that already stores a virtual room with a sensor gets the sensor option stored **on**
+   (logged as a warning); every other entry gets it stored off. The load mean has no such
+   carry-over: an install that was writing it stops on upgrade, and its heads keep the last mean
+   received (what they do with it is open, §8). Neither feed has a supervised trial yet.
 2. **A feed was already running before the Companion.** On 2026-11-21 the Zigbee2MQTT heads of
    the trial area regulated on an external room sensor (`external_measured_room_sensor` = 1403,
    `docs/validation/2026-11-real-hardware-validation.md`). What wrote that value is not recorded
@@ -267,7 +274,7 @@ on one room, read back from the heads, recorded under `docs/validation/`
 
 | Stage | Content | Real hardware |
 |---|---|---|
-| 0 | Before anything: find what fed the external sensor on 2026-11-21; record the 2026-11-22 Companion validation under `docs/validation/`; put the Companion's two feeds behind an option and fix the sensor keep-alive (30 / 45 min against a 35-min reset) | Read-only check |
+| 0 | Before anything: find what fed the external sensor on 2026-11-21; record the 2026-11-22 Companion validation under `docs/validation/`; put the Companion's two feeds behind an option and fix the sensor keep-alive (30 / 45 min against a 35-min reset). **Code part done** (options, keep-alive, load-balancing gate, schedule refusal; §4), not tried on real hardware; the two read-only items remain | Read-only check |
 | 1 | Coordinator, **read only**: room store, `bridge/rooms` aggregates, heat demand, drift report. Companion reads it (rooms per prefix) | None (no write) |
 | 2 | Room setpoint fan-out with per-head verification and write jobs | Trial: one room, both setpoint properties |
 | 3 | Room sensor feed, event-driven, both `radiator_covered` modes | Trial, including the stop test: coordinator stopped, the head back to −8000 at 35 min |

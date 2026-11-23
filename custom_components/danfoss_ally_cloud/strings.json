@@ -87,6 +87,14 @@
           "mqtt_source": "Source of published values: cloud or local",
           "mqtt_base_topic": "MQTT topic prefix"
         }
+      },
+      "companion": {
+        "title": "Companion options",
+        "description": "Periodic writes from the Companion to the Zigbee2MQTT heads of a virtual room. Each one stays closed unless ticked. Closing one sends nothing: the heads keep the last value they received (a head drops a room-sensor value by itself after 35 minutes or 3 hours).",
+        "data": {
+          "companion_feed_external_sensor": "Feed each virtual room's sensor temperature to its heads (external_measured_room_sensor): on a change of 0.2 °C or every 20 minutes, at most once every 5 minutes per head",
+          "companion_feed_load_mean": "Write the room's mean load to its heads (load_room_mean) — NOT validated on real hardware. Only for rooms of two heads or more where every head reports load_balancing_enable on"
+        }
       }
     }
   },

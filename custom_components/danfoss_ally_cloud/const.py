@@ -191,4 +191,14 @@ CONNECTION_MODE_CLOUD = "cloud"
 CONNECTION_MODE_MQTT_COMPANION = "mqtt_companion"
 CONF_MQTT_PREFIXES = "mqtt_prefixes"
 DEFAULT_MQTT_PREFIXES = "zigbee2mqtt,danfoss2mqtt"
-COMPANION_TELEMETRY_INTERVAL = 900  # seconds (15 min)
+# Tick of the Companion's virtual-room feeds (companion_rooms.async_sync_telemetry). 6 min: longer
+# than the 5-min per-head floor of the external-sensor feed (so consecutive ticks always clear it),
+# and short enough that the 20-min keep-alive lands at 24-26 min, under the head's 30-min deadline.
+COMPANION_TELEMETRY_INTERVAL = 360  # seconds
+# The two periodic feeds to Zigbee2MQTT heads of a virtual room, each behind its own option
+# (docs/z2m-cloud-parity.md §4). Closed by default; see __init__._async_setup_companion_entry for
+# the one-time carry-over of an install that was already feeding its heads from a room sensor.
+CONF_COMPANION_FEED_EXTERNAL_SENSOR = "companion_feed_external_sensor"
+DEFAULT_COMPANION_FEED_EXTERNAL_SENSOR = False
+CONF_COMPANION_FEED_LOAD_MEAN = "companion_feed_load_mean"
+DEFAULT_COMPANION_FEED_LOAD_MEAN = False
