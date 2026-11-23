@@ -73,15 +73,49 @@ class MqttCompanionCoordinator:
         self._by_topic_key: dict[tuple[str, str], str] = {}
         # prefix -> bridge online bool
         self.bridge_online: dict[str, bool] = {p: False for p in self.prefixes}
-        # Native rooms published on <prefix>/bridge/rooms (group_id -> raw room dict)
-        self.native_rooms: dict[str, dict[str, Any]] = {}
-        # Native holidays published on <prefix>/bridge/holidays
-        self.holidays: dict[str, dict[str, Any]] = {}
+        # Rooms/holidays are indexed BY PREFIX: each bridge (danfoss2mqtt, the standalone room
+        # coordinator, …) publishes its own ``bridge/rooms`` / ``bridge/holidays`` and must not
+        # overwrite another's. The flat ``native_rooms`` / ``holidays`` properties merge them for
+        # the existing consumers, ``native_rooms_by_prefix`` keeps the source for write routing.
+        self._rooms_by_prefix: dict[str, dict[str, dict[str, Any]]] = {}
+        self._holidays_by_prefix: dict[str, dict[str, Any]] = {}
         # Optional home_id per device published under danfoss.home_id in bridge/devices
         self.device_home: dict[str, str] = {}
 
         self._unsubs: list[CALLBACK_TYPE] = []
         self._listeners: list[Callable[[], None]] = []
+
+    @property
+    def native_rooms(self) -> dict[str, dict[str, Any]]:
+        """All bridges' rooms merged ``group_id -> room`` (read-only view).
+
+        Rooms are stored per prefix so a second bridge publishing ``bridge/rooms`` never overwrites
+        the first; the group ids are distinct across bridges in practice.
+        """
+        merged: dict[str, dict[str, Any]] = {}
+        for rooms in self._rooms_by_prefix.values():
+            merged.update(rooms)
+        return merged
+
+    @property
+    def native_rooms_by_prefix(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """Rooms kept per source prefix (so a room write can be routed to its owning bridge)."""
+        return {p: dict(rooms) for p, rooms in self._rooms_by_prefix.items()}
+
+    @property
+    def holidays(self) -> dict[str, dict[str, Any]]:
+        """All bridges' holidays merged (read-only view), indexed per prefix underneath."""
+        merged: dict[str, dict[str, Any]] = {}
+        for holidays in self._holidays_by_prefix.values():
+            merged.update(holidays)
+        return merged
+
+    def prefix_of_room(self, group_id: str) -> str | None:
+        """Return the source bridge prefix that owns ``group_id`` (for write routing)."""
+        for prefix, rooms in self._rooms_by_prefix.items():
+            if group_id in rooms:
+                return prefix
+        return None
 
     @callback
     def async_add_listener(
@@ -154,11 +188,11 @@ class MqttCompanionCoordinator:
             return
 
         if suffix == "bridge/rooms":
-            self._ingest_bridge_rooms(raw_payload)
+            self._ingest_bridge_rooms(matched_prefix, raw_payload)
             return
 
         if suffix == "bridge/holidays":
-            self._ingest_bridge_holidays(raw_payload)
+            self._ingest_bridge_holidays(matched_prefix, raw_payload)
             return
 
         if suffix.startswith("bridge/") or suffix.endswith("/set"):
@@ -240,7 +274,7 @@ class MqttCompanionCoordinator:
         decode_z2m_state(self.data[dev_id], payload)
         self._notify_listeners()
 
-    def _ingest_bridge_rooms(self, raw_payload: str | bytes) -> None:
+    def _ingest_bridge_rooms(self, prefix: str, raw_payload: str | bytes) -> None:
         try:
             text = raw_payload.decode("utf-8") if isinstance(raw_payload, bytes) else raw_payload
             rooms = json.loads(text)
@@ -249,14 +283,15 @@ class MqttCompanionCoordinator:
         except (ValueError, UnicodeDecodeError):
             return
 
-        self.native_rooms = {
+        # Replace THIS prefix's rooms only; other bridges' rooms are untouched.
+        self._rooms_by_prefix[prefix] = {
             str(r["group_id"]): r
             for r in rooms
             if isinstance(r, dict) and r.get("group_id") is not None
         }
         self._notify_listeners()
 
-    def _ingest_bridge_holidays(self, raw_payload: str | bytes) -> None:
+    def _ingest_bridge_holidays(self, prefix: str, raw_payload: str | bytes) -> None:
         try:
             text = raw_payload.decode("utf-8") if isinstance(raw_payload, bytes) else raw_payload
             holidays = json.loads(text)
@@ -264,7 +299,7 @@ class MqttCompanionCoordinator:
                 return
         except (ValueError, UnicodeDecodeError):
             return
-        self.holidays = holidays
+        self._holidays_by_prefix[prefix] = holidays
         self._notify_listeners()
 
     async def async_send_device_set(self, dev_id: str, **kwargs: Any) -> dict[str, Any]:
