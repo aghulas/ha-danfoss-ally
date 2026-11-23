@@ -12,13 +12,14 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api.mqtt_client import CloudMqttLink
 from .const import DATA_COORDINATOR, DATA_LOCAL, DATA_MQTT_LINK, DOMAIN
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 from .entity import DanfossEntity, DanfossHomeEntity, DanfossLocalEntity
+from .mqtt_companion import MqttCompanionCoordinator
 
 
 async def async_setup_entry(
@@ -57,7 +58,54 @@ async def async_setup_entry(
     link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
     if link is not None:
         entities.append(DanfossCloudMqttConnectivity(entry.entry_id, link))
+    companion: MqttCompanionCoordinator | None = data.get("companion")
+    if companion is not None:
+        for prefix in companion.prefixes:
+            entities.append(DanfossBridgeConnectivity(entry.entry_id, companion, prefix))
     async_add_entities(entities)
+
+
+class DanfossBridgeConnectivity(BinarySensorEntity):
+    """Online/offline connectivity of a v2.x MQTT bridge (e.g. ``danfoss2mqtt``, ``zigbee2mqtt``).
+
+    Tracks ``<prefix>/bridge/state`` pushed by ``MqttCompanionCoordinator`` so Home Assistant
+    automations and daily health checks can detect a stopped bridge.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_should_poll = False
+
+    def __init__(
+        self,
+        entry_id: str,
+        companion: MqttCompanionCoordinator,
+        prefix: str,
+    ) -> None:
+        self._companion = companion
+        self._prefix = prefix
+        self._attr_unique_id = f"{entry_id}_bridge_{prefix}"
+        self._attr_name = f"{prefix} bridge"
+
+    async def async_added_to_hass(self) -> None:
+        @callback
+        def _on_update() -> None:
+            self.async_write_ha_state()
+
+        self.async_on_remove(self._companion.async_add_listener(_on_update))
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self._companion.bridge_online.get(self._prefix, False))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | int]:
+        count = sum(1 for p, _ in self._companion.device_route.values() if p == self._prefix)
+        return {
+            "prefix": self._prefix,
+            "state": "online" if self.is_on else "offline",
+            "devices": count,
+        }
 
 
 class DanfossCloudMqttConnectivity(BinarySensorEntity):

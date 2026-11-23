@@ -957,3 +957,77 @@ async def test_virtual_room_load_balancing_uses_load_estimate(
     stats_shift = await mgr.async_sync_telemetry(now=1950.0)
     assert stats_shift["load_mean_writes"] == 4
     assert ("zigbee2mqtt/Head-2/set", {"load_room_mean": 625}) in sent_mqtt
+
+
+async def test_companion_bridge_connectivity_binary_sensors(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Companion exposes a connectivity binary_sensor per bridge prefix."""
+    from homeassistant.components import mqtt as mqtt_mod
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from custom_components.danfoss_ally_cloud.const import (
+        CONF_CONNECTION_MODE,
+        CONF_MQTT_PREFIXES,
+        CONNECTION_MODE_MQTT_COMPANION,
+        DOMAIN,
+    )
+
+    monkeypatch.setattr(mqtt_mod, "async_wait_for_mqtt_client", AsyncMock(return_value=True))
+    monkeypatch.setattr(mqtt_mod, "async_subscribe", AsyncMock(return_value=lambda: None))
+    monkeypatch.setattr(mqtt_mod, "async_publish", AsyncMock())
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Companion",
+        data={
+            CONF_CONNECTION_MODE: CONNECTION_MODE_MQTT_COMPANION,
+            CONF_MQTT_PREFIXES: "zigbee2mqtt,danfoss2mqtt",
+        },
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Initially both bridges are offline
+    d2m = hass.states.get("binary_sensor.danfoss2mqtt_bridge")
+    z2m = hass.states.get("binary_sensor.zigbee2mqtt_bridge")
+    assert d2m is not None and d2m.state == "off"
+    assert z2m is not None and z2m.state == "off"
+    assert d2m.attributes["device_class"] == "connectivity"
+    assert d2m.attributes["prefix"] == "danfoss2mqtt"
+    assert d2m.attributes["state"] == "offline"
+    assert d2m.attributes["devices"] == 0
+
+    comp: MqttCompanionCoordinator = hass.data[DOMAIN][entry.entry_id]["companion"]
+
+    # danfoss2mqtt comes online with 1 head
+    comp.process_mqtt_message("danfoss2mqtt/bridge/state", '{"state": "online"}')
+    comp.process_mqtt_message(
+        "danfoss2mqtt/bridge/devices",
+        json.dumps(
+            [
+                {
+                    "ieee_address": "bf_head_1",
+                    "friendly_name": "Salle 1",
+                    "definition": {"vendor": "Danfoss", "model": "014G2461"},
+                }
+            ]
+        ),
+    )
+    await hass.async_block_till_done()
+
+    d2m = hass.states.get("binary_sensor.danfoss2mqtt_bridge")
+    assert d2m is not None and d2m.state == "on"
+    assert d2m.attributes["state"] == "online"
+    assert d2m.attributes["devices"] == 1
+
+    # danfoss2mqtt goes offline (e.g. LWT on add-on stop)
+    comp.process_mqtt_message("danfoss2mqtt/bridge/state", "offline")
+    await hass.async_block_till_done()
+
+    d2m = hass.states.get("binary_sensor.danfoss2mqtt_bridge")
+    assert d2m is not None and d2m.state == "off"
+    assert d2m.attributes["state"] == "offline"
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
