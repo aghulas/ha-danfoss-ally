@@ -5,12 +5,15 @@ virtual rooms (grouping ``zigbee2mqtt`` heads ``014G2461`` + an optional ``014G2
 
 1. **Unified ``RoomState``**: aggregates member heads (via ``api.rooms.aggregate_room``) and
    overrides room temperature with the linked ``014G2480`` room sensor when online.
-2. **External Room Sensor & Load Balancing Loop** (``async_sync_telemetry``):
+2. **External Room Sensor & Load Balancing Loop** (``async_sync_telemetry``), two feeds, each
+   closed unless its Companion option is on (``feed_external_sensor`` / ``feed_load_mean``):
    - Pushes the linked ``014G2480`` temperature to each member head's
-     ``external_measured_room_sensor`` (in 0.01 °C) when temperature shifts by >= 0.2 °C or
-     >= 30 min have elapsed (and sends ``-8000`` if the sensor goes offline).
+     ``external_measured_room_sensor`` (in 0.01 °C) when it shifted by >= 0.2 °C or the head's last
+     write is >= 20 min old, never more often than every 5 min per head (and sends ``-8000`` once
+     if the sensor goes offline).
    - Computes the room's mean ``load_estimate`` across member heads reporting a valid load
-     (excluding -8000) and pushes ``load_room_mean`` when it shifts by >= 25 or >= 15 min.
+     (excluding -8000) and pushes ``load_room_mean`` when it shifts by >= 25 or >= 15 min, only
+     when every member of the room reports ``load_balancing_enable`` on.
 3. **Boiler Demand Aggregation** (``rooms_calling_for_heat``): lists all rooms across both
    ``zigbee2mqtt`` and ``danfoss2mqtt`` calling for heat.
 4. **Setpoint & Weekly Schedule Fan-Out**: dispatches room setpoints and weekly schedules to all
@@ -27,15 +30,23 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .api.rooms import Room, RoomState, aggregate_room
+from .api.schedule import MAX_TRANSITIONS_PER_DAY
 from .const import DOMAIN
 from .mqtt_companion import MqttCompanionCoordinator
 
 _ROOMS_STORE_VERSION = 1
 
-EXTERNAL_SENSOR_REFRESH_SECONDS = 1800.0
+# External-sensor feed timing. In room-sensor mode (``radiator_covered`` true) the head wants a
+# write at least every 30 min, at most every 5 min, and resets the value by itself after 35 min
+# (Zigbee2MQTT's documentation of 014G2461, not observed on our hardware). The feed is evaluated on
+# a timer, so a keep-alive lands at most one tick after its threshold:
+# EXTERNAL_SENSOR_REFRESH_SECONDS + COMPANION_TELEMETRY_INTERVAL must stay under 30 min.
+EXTERNAL_SENSOR_REFRESH_SECONDS = 1200.0  # keep-alive threshold, per head
+EXTERNAL_SENSOR_MIN_INTERVAL_SECONDS = 300.0  # floor between two writes to one head
+EXTERNAL_SENSOR_DEADLINE_SECONDS = 1800.0  # the head's "at least every 30 min"
 EXTERNAL_SENSOR_DELTA_C = 0.2
 EXTERNAL_SENSOR_DISABLED_RAW = -8000
-LOAD_MEAN_REFRESH_SECONDS = 900.0  # 15 minutes (Danfoss gateway cadence)
+LOAD_MEAN_REFRESH_SECONDS = 900.0  # 15 min; on the telemetry tick this lands at 15-18 min
 LOAD_MEAN_DELTA = 25  # load estimate delta to trigger update
 LOAD_ESTIMATE_DISABLED_RAW = -8000
 
@@ -65,9 +76,15 @@ class CompanionRoomConfig:
 
 
 @dataclass(slots=True)
+class _HeadSensorFeed:
+    """Last external-sensor write to one head (``value`` None = never fed, or reset to -8000)."""
+
+    value: float | None = None
+    sent_at: float | None = None
+
+
+@dataclass(slots=True)
 class _TelemetryCache:
-    last_ext_temp_c: float | None = None
-    last_ext_sent_at: float = 0.0
     last_load_mean: int | None = None
     last_load_sent_at: float = 0.0
 
@@ -75,18 +92,30 @@ class _TelemetryCache:
 class CompanionRoomManager:
     """Manages unified rooms, external sensor sync, load balancing, and boiler demand."""
 
-    def __init__(self, companion: MqttCompanionCoordinator) -> None:
+    def __init__(
+        self,
+        companion: MqttCompanionCoordinator,
+        *,
+        feed_external_sensor: bool = False,
+        feed_load_mean: bool = False,
+    ) -> None:
         self._companion = companion
         self.virtual_rooms: dict[str, CompanionRoomConfig] = {}
         self._telemetry: dict[str, _TelemetryCache] = {}
+        self._sensor_feed: dict[str, _HeadSensorFeed] = {}
+        # The two periodic feeds, closed unless opened (Companion options, read at every sync).
+        self.feed_external_sensor = feed_external_sensor
+        self.feed_load_mean = feed_load_mean
 
     def add_virtual_room(self, cfg: CompanionRoomConfig) -> None:
         self.virtual_rooms[cfg.room_id] = cfg
         self._telemetry.setdefault(cfg.room_id, _TelemetryCache())
 
     def remove_virtual_room(self, room_id: str) -> None:
-        self.virtual_rooms.pop(room_id, None)
+        cfg = self.virtual_rooms.pop(room_id, None)
         self._telemetry.pop(room_id, None)
+        for head_id in cfg.head_ids if cfg else ():
+            self._sensor_feed.pop(head_id, None)
 
     async def async_load(self, hass: HomeAssistant, entry_id: str) -> None:
         """Load persisted virtual room configs from HA storage."""
@@ -223,34 +252,60 @@ class CompanionRoomManager:
 
         comfort = comfort_c if comfort_c is not None else (cfg.comfort_setpoint if cfg else 21.0)
         setback = setback_c if setback_c is not None else (cfg.setback_setpoint if cfg else 17.0)
+
+        # Validate the whole request before storing or sending anything: a refused day must not
+        # leave the heads with half a week.
+        payloads: list[dict[str, Any]] = []
+        for day_name, windows in days.items():
+            day_bit = _Z2M_DAY_BITS.get(day_name.strip().lower())
+            if day_bit is None:
+                raise ValueError(f"Invalid day name: {day_name}")
+            transitions = _build_z2m_day_transitions(windows, comfort, setback)
+            if len(transitions) > MAX_TRANSITIONS_PER_DAY:
+                raise ValueError(
+                    f"Too many transitions on {day_name}: {len(transitions)} > "
+                    f"{MAX_TRANSITIONS_PER_DAY} (R1); nothing was sent"
+                )
+            payloads.append(
+                {
+                    "weekly_schedule": {
+                        "dayofweek": day_bit,
+                        "num_of_transitions": len(transitions),
+                        "mode": 1,  # heat
+                        "transitions": transitions,
+                    }
+                }
+            )
+
         if cfg is not None:
             cfg.schedule.update(days)
             cfg.comfort_setpoint = comfort
             cfg.setback_setpoint = setback
 
         sent = 0
-        for day_name, windows in days.items():
-            day_bit = _Z2M_DAY_BITS.get(day_name.strip().lower())
-            if day_bit is None:
-                raise ValueError(f"Invalid day name: {day_name}")
-            transitions = _build_z2m_day_transitions(windows, comfort, setback)
-            payload = {
-                "weekly_schedule": {
-                    "dayofweek": day_bit,
-                    "num_of_transitions": len(transitions),
-                    "mode": 1,  # heat
-                    "transitions": transitions,
-                }
-            }
+        for payload in payloads:
             for head_id in member_ids:
                 if head_id in self._companion.device_route:
                     await self._companion.async_send_raw_device_set(head_id, payload)
                     sent += 1
         return sent
 
+    def _load_balancing_on(self, cfg: CompanionRoomConfig) -> bool:
+        """True when every configured member of the room reports ``load_balancing_enable`` on.
+
+        A member that is unknown, or has not reported the attribute, counts as off: a head with
+        load balancing disabled has no use for a room mean, and one we know nothing about is not
+        written on a guess."""
+        return len(cfg.head_ids) > 1 and all(
+            (dev := self._companion.data.get(head_id)) is not None
+            and dev.load_balancing_enable is True
+            for head_id in cfg.head_ids
+        )
+
     async def async_sync_telemetry(self, *, now: float | None = None) -> dict[str, int]:
         """Push external sensor temperatures (014G2480 -> heads) and ``load_room_mean`` for
-        virtual rooms. Returns ``{"external_sensor_writes": n1, "load_mean_writes": n2}``."""
+        virtual rooms, each feed only when its option is on.
+        Returns ``{"external_sensor_writes": n1, "load_mean_writes": n2}``."""
         ts = time.monotonic() if now is None else now
         ext_writes = 0
         load_writes = 0
@@ -265,37 +320,41 @@ class CompanionRoomManager:
             if not members:
                 continue
 
-            # 1) External room sensor temperature (014G2480 -> member heads)
-            if cfg.sensor_id:
+            # 1) External room sensor temperature (014G2480 -> member heads), tracked per head so a
+            #    head that missed a round (offline) is not left waiting for the room's next one.
+            if self.feed_external_sensor and cfg.sensor_id:
                 sensor = self._companion.data.get(cfg.sensor_id)
-                if sensor is not None and sensor.online and sensor.temperature is not None:
-                    temp = sensor.temperature
-                    due = (
-                        cache.last_ext_temp_c is None
-                        or abs(temp - cache.last_ext_temp_c) >= EXTERNAL_SENSOR_DELTA_C
-                        or (ts - cache.last_ext_sent_at) >= EXTERNAL_SENSOR_REFRESH_SECONDS
+                temp = sensor.temperature if sensor is not None and sensor.online else None
+                for head in members:
+                    feed = self._sensor_feed.setdefault(head.id, _HeadSensorFeed())
+                    if (
+                        feed.sent_at is not None
+                        and (ts - feed.sent_at) < EXTERNAL_SENSOR_MIN_INTERVAL_SECONDS
+                    ):
+                        continue
+                    if temp is None:
+                        # Sensor offline: disable the external temperature once (-80.0 °C = -8000)
+                        if feed.value is None:
+                            continue
+                        value = EXTERNAL_SENSOR_DISABLED_RAW / 100.0
+                    elif (
+                        feed.value is None
+                        or feed.sent_at is None
+                        or abs(temp - feed.value) >= EXTERNAL_SENSOR_DELTA_C - 1e-9
+                        or (ts - feed.sent_at) >= EXTERNAL_SENSOR_REFRESH_SECONDS
+                    ):
+                        value = temp
+                    else:
+                        continue
+                    await self._companion.async_send_device_set(
+                        head.id, external_sensor_temp_c=value
                     )
-                    if due:
-                        for head in members:
-                            await self._companion.async_send_device_set(
-                                head.id, external_sensor_temp_c=temp
-                            )
-                            ext_writes += 1
-                        cache.last_ext_temp_c = temp
-                        cache.last_ext_sent_at = ts
-                elif cache.last_ext_temp_c is not None:
-                    # Sensor went offline: disable external temperature (-80.0 °C = -8000)
-                    for head in members:
-                        await self._companion.async_send_device_set(
-                            head.id,
-                            external_sensor_temp_c=EXTERNAL_SENSOR_DISABLED_RAW / 100.0,
-                        )
-                        ext_writes += 1
-                    cache.last_ext_temp_c = None
-                    cache.last_ext_sent_at = ts
+                    ext_writes += 1
+                    feed.value = temp
+                    feed.sent_at = ts
 
             # 2) Multi-head room load balancing (mean load_estimate -> load_room_mean)
-            if len(members) > 1:
+            if self.feed_load_mean and len(members) > 1 and self._load_balancing_on(cfg):
                 loads = [
                     m.load_estimate
                     for m in members
@@ -345,4 +404,4 @@ def _build_z2m_day_transitions(
             transitions.append({"transition_time": start_m, "heat_setpoint": float(comfort_c)})
         if end_m < 1440:
             transitions.append({"transition_time": end_m, "heat_setpoint": float(setback_c)})
-    return transitions[:6]
+    return transitions

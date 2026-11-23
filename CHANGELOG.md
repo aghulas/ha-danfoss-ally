@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased — Companion virtual-room feeds behind options (stage 0 of `docs/z2m-cloud-parity.md`)
+
+Nothing in this entry was validated on real hardware.
+
+**Changed**
+
+- **The Companion's two periodic feeds to Zigbee2MQTT heads are now options, closed by default**
+  (`config_flow.py`, `__init__.py`, `companion_rooms.py`): a Companion entry has an options form
+  with `companion_feed_external_sensor` (room sensor temperature →
+  `external_measured_room_sensor`) and `companion_feed_load_mean` (`load_room_mean`). A change
+  applies at the next tick, without a reload. Closing a feed sends nothing.
+  - **Upgrade, room sensor**: an entry that already stores a virtual room with a sensor keeps its
+    feed. The option is stored on at the first start, with a warning in the log. Every other
+    entry gets it stored off, so a room created later starts closed.
+  - **Upgrade, load mean**: off for everyone. An install with a virtual room of two heads or more
+    was writing `load_room_mean` and stops; its heads keep the last value received. Tick the
+    option to resume.
+- **`load_room_mean` is only written when every member of the room reports
+  `load_balancing_enable` on** (`api/z2m_contract.py`, `api/decode.py`: new
+  `DanfossDevice.load_balancing_enable`, decoded from the Zigbee2MQTT state). A member that is
+  unknown or has not reported the attribute counts as off.
+- **`async_set_room_schedule` refuses a day of more than six transitions** instead of silently
+  dropping the extra ones (rule R1), and validates the whole request before storing or sending
+  anything. The function is still not wired to any service.
+
+**Fixed**
+
+- **Room-sensor keep-alive past the head's deadline** (`companion_rooms.py`, `const.py`): the
+  refresh threshold was 30 min evaluated on a 15-min timer, so a keep-alive could land at 45 min,
+  after the head's own 35-min reset in room-sensor mode (per Zigbee2MQTT's documentation). The
+  threshold is now 20 min on a 6-min timer (lands at 24 to 26 min), tracked per head, and a head
+  is never written twice within 5 min, service-triggered syncs included. On the 6-min timer the
+  load mean's 15-min refresh lands at 15 to 18 min.
+
 ## 2.0.3 — Bridge connectivity diagnostic sensors (`danfoss2mqtt` & `zigbee2mqtt`)
 
 **Added**

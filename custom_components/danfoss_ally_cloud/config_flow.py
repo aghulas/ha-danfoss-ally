@@ -30,6 +30,8 @@ from .const import (
     CONF_CLOUD_MQTT_PROBE,
     CONF_CLOUD_MQTT_SUPERVISED_DPS,
     CONF_CLOUD_MQTT_SUPERVISED_HEAD,
+    CONF_COMPANION_FEED_EXTERNAL_SENSOR,
+    CONF_COMPANION_FEED_LOAD_MEAN,
     CONF_CONNECTION_MODE,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
@@ -53,6 +55,8 @@ from .const import (
     CONNECTION_MODE_MQTT_COMPANION,
     DATA_COORDINATOR,
     DEFAULT_CLOUD_MQTT_PROBE,
+    DEFAULT_COMPANION_FEED_EXTERNAL_SENSOR,
+    DEFAULT_COMPANION_FEED_LOAD_MEAN,
     DEFAULT_DISTINCT_DEVICE_ID,
     DEFAULT_ENABLE_CLOUD_MQTT,
     DEFAULT_ENABLE_HEAD_UNBIND,
@@ -371,14 +375,56 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
             choices[current] = "(head not available)"
         return choices
 
+    async def async_step_companion(self, user_input: dict[str, Any] | None = None) -> Any:
+        """Options of a v2.x MQTT Companion entry: the subscribed bridge prefixes and the two
+        virtual-room feeds (each closed unless ticked, docs/z2m-cloud-parity.md §4). The
+        direct-cloud / local-tunnel / cloud-MQTT options do not apply to a Companion and are not
+        shown here (docs/companion-contract.md §2.4). Other stored options are kept."""
+        o = self.config_entry.options
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            prefixes = _parse_mqtt_prefixes(
+                user_input.get(CONF_MQTT_PREFIXES, DEFAULT_MQTT_PREFIXES)
+            )
+            if not prefixes:
+                errors["base"] = "empty_prefixes"
+            else:
+                return self.async_create_entry(
+                    title="", data={**o, **user_input, CONF_MQTT_PREFIXES: prefixes}
+                )
+        current = (
+            o.get(CONF_MQTT_PREFIXES)
+            or self.config_entry.data.get(CONF_MQTT_PREFIXES)
+            or DEFAULT_MQTT_PREFIXES
+        )
+        default_prefixes = ",".join(current) if isinstance(current, list) else str(current)
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_MQTT_PREFIXES, default=default_prefixes): str,
+                vol.Optional(
+                    CONF_COMPANION_FEED_EXTERNAL_SENSOR,
+                    default=o.get(
+                        CONF_COMPANION_FEED_EXTERNAL_SENSOR,
+                        DEFAULT_COMPANION_FEED_EXTERNAL_SENSOR,
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_COMPANION_FEED_LOAD_MEAN,
+                    default=o.get(CONF_COMPANION_FEED_LOAD_MEAN, DEFAULT_COMPANION_FEED_LOAD_MEAN),
+                ): bool,
+            }
+        )
+        return self.async_show_form(step_id="companion", data_schema=_schema(schema), errors=errors)
+
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
         # An MQTT-companion entry wires NONE of the direct-cloud / local-tunnel / cloud-MQTT
         # machinery (docs/companion-contract.md §2.4): a Companion talks only to the bridges over
         # Mosquitto, so enable_local / enable_cloud_mqtt / the supervised-trial options would be
-        # inert here. Presenting them would be a lie, so a Companion gets its own options schema
-        # limited to what it actually uses (the subscribed bridge prefixes).
+        # inert here. Presenting them would be a lie, so a Companion gets its own options step,
+        # limited to what it actually uses: the subscribed bridge prefixes and the virtual-room
+        # feeds.
         if self.config_entry.data.get(CONF_CONNECTION_MODE) == CONNECTION_MODE_MQTT_COMPANION:
-            return await self._async_step_companion_options(user_input)
+            return await self.async_step_companion()
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
         o = self.config_entry.options
@@ -449,24 +495,3 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="init", data_schema=_schema(schema))
-
-    async def _async_step_companion_options(self, user_input: dict[str, Any] | None = None) -> Any:
-        """Options for an MQTT-companion entry: only the subscribed bridge prefixes. The
-        direct-cloud options do not apply to a Companion (docs/companion-contract.md §2.4)."""
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            prefixes = _parse_mqtt_prefixes(
-                user_input.get(CONF_MQTT_PREFIXES, DEFAULT_MQTT_PREFIXES)
-            )
-            if not prefixes:
-                errors["base"] = "empty_prefixes"
-            else:
-                return self.async_create_entry(title="", data={CONF_MQTT_PREFIXES: prefixes})
-        current = (
-            self.config_entry.options.get(CONF_MQTT_PREFIXES)
-            or self.config_entry.data.get(CONF_MQTT_PREFIXES)
-            or DEFAULT_MQTT_PREFIXES
-        )
-        default = ",".join(current) if isinstance(current, list) else str(current)
-        schema = vol.Schema({vol.Required(CONF_MQTT_PREFIXES, default=default): str})
-        return self.async_show_form(step_id="init", data_schema=_schema(schema), errors=errors)

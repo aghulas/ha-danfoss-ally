@@ -251,6 +251,7 @@ async def test_batches_2_3_to_2_5_unified_companion_z2m_and_danfoss2mqtt(
                 "occupied_heating_setpoint": 20.0,
                 "pi_heating_demand": 30,
                 "load_estimate": 450,
+                "load_balancing_enable": True,
                 "running_state": "heat",
                 "heat_required": True,
                 "battery": 85,
@@ -265,6 +266,7 @@ async def test_batches_2_3_to_2_5_unified_companion_z2m_and_danfoss2mqtt(
                 "occupied_heating_setpoint": 20.0,
                 "pi_heating_demand": 50,
                 "load_estimate": 550,
+                "load_balancing_enable": True,
                 "running_state": "heat",
                 "heat_required": True,
                 "battery": 82,
@@ -316,7 +318,7 @@ async def test_batches_2_3_to_2_5_unified_companion_z2m_and_danfoss2mqtt(
     assert companion.bridge_online == {"zigbee2mqtt": True, "danfoss2mqtt": True}
 
     # 3) Batch 2.4: CompanionRoomManager groups the 2 z2m heads + 1 z2m room sensor
-    room_mgr = CompanionRoomManager(companion)
+    room_mgr = CompanionRoomManager(companion, feed_external_sensor=True, feed_load_mean=True)
     room_mgr.add_virtual_room(
         CompanionRoomConfig(
             room_id="z2m-classe-1",
@@ -344,9 +346,11 @@ async def test_batches_2_3_to_2_5_unified_companion_z2m_and_danfoss2mqtt(
         "load_mean_writes": 0,
     }
 
-    # If the 014G2480 sensor goes offline, Companion disables external sensor (-8000)
+    # If the 014G2480 sensor goes offline, Companion disables external sensor (-8000), once the
+    # 5-min per-head floor since the last write (at 100 s) has cleared
     companion.process_mqtt_message("zigbee2mqtt/A-0 Sonde Classe 1/availability", "offline")
-    stats_off = await room_mgr.async_sync_telemetry(now=120.0)
+    assert (await room_mgr.async_sync_telemetry(now=120.0))["external_sensor_writes"] == 0
+    stats_off = await room_mgr.async_sync_telemetry(now=400.0)
     assert stats_off["external_sensor_writes"] == 2
     assert (
         "zigbee2mqtt/A-0 Classe 1 #1/set",
@@ -732,6 +736,7 @@ async def test_companion_switch_number_and_room_services(
             CONF_CONNECTION_MODE: CONNECTION_MODE_MQTT_COMPANION,
             CONF_MQTT_PREFIXES: ["zigbee2mqtt"],
         },
+        options={"companion_feed_external_sensor": True},
         unique_id="mqtt_companion:zigbee2mqtt",
     )
     entry.add_to_hass(hass)
@@ -909,19 +914,23 @@ async def test_virtual_room_load_balancing_uses_load_estimate(
         ),
     )
     comp.process_mqtt_message(
-        "zigbee2mqtt/Head-1", json.dumps({"load_estimate": 749, "pi_heating_demand": 24})
+        "zigbee2mqtt/Head-1",
+        json.dumps({"load_balancing_enable": True, "load_estimate": 749, "pi_heating_demand": 24}),
     )
     comp.process_mqtt_message(
-        "zigbee2mqtt/Head-2", json.dumps({"load_estimate": 616, "pi_heating_demand": 34})
+        "zigbee2mqtt/Head-2",
+        json.dumps({"load_balancing_enable": True, "load_estimate": 616, "pi_heating_demand": 34}),
     )
     comp.process_mqtt_message(
-        "zigbee2mqtt/Head-3", json.dumps({"load_estimate": 724, "pi_heating_demand": 8})
+        "zigbee2mqtt/Head-3",
+        json.dumps({"load_balancing_enable": True, "load_estimate": 724, "pi_heating_demand": 8}),
     )
     comp.process_mqtt_message(
-        "zigbee2mqtt/Head-4", json.dumps({"load_estimate": 750, "pi_heating_demand": 48})
+        "zigbee2mqtt/Head-4",
+        json.dumps({"load_balancing_enable": True, "load_estimate": 750, "pi_heating_demand": 48}),
     )
 
-    mgr = CompanionRoomManager(comp)
+    mgr = CompanionRoomManager(comp, feed_load_mean=True)
     mgr.add_virtual_room(
         CompanionRoomConfig(
             room_id="chapelle",

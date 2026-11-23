@@ -209,9 +209,12 @@ While `zigbee2mqtt` manages individual Zigbee devices, a Danfoss heating system 
    - Stored in Home Assistant storage (`danfoss_ally_companion_rooms`).
    - For a room grouping $N$ `zigbee2mqtt` heads and an optional `014G2480` sensor, the Companion:
      - aggregates room temperature (from the `014G2480` sensor if linked, else mean of head temperatures);
-     - pushes the `014G2480` temperature to each member head's `external_measured_room_sensor` every
-       30 minutes (and on ≥ 0.2 °C change);
-     - computes and pushes `load_room_mean` from the member heads' `pi_heating_demand`;
+     - when the option `companion_feed_external_sensor` is on, pushes the `014G2480` temperature
+       to each member head's `external_measured_room_sensor` on a ≥ 0.2 °C change or when that
+       head's last write is 20 minutes old, at most once every 5 minutes per head;
+     - when the option `companion_feed_load_mean` is on (off by default, not validated on real
+       hardware), computes and pushes `load_room_mean` from the member heads' `load_estimate`,
+       only if every member reports `load_balancing_enable` on;
      - fans out room setpoint and weekly schedule changes to `<prefix>/<head_name>/set`.
 
 ---

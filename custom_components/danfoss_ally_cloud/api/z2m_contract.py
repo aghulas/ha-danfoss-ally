@@ -290,6 +290,10 @@ def decode_z2m_state(
                 dev.load_estimate = None if le == -8000 else le
             except (ValueError, TypeError):
                 pass
+    if "load_balancing_enable" in payload:
+        # Strict: only a real boolean counts; anything else leaves the head "not reported".
+        lbe = payload["load_balancing_enable"]
+        dev.load_balancing_enable = lbe if isinstance(lbe, bool) else None
     if "running_state" in payload and isinstance(payload["running_state"], str):
         rs = payload["running_state"].strip().lower()
         dev.state = "Heat" if rs in ("heat", "heating") else "NoHeat"

@@ -35,6 +35,8 @@ from .const import (
     CONF_CLOUD_MQTT_PROBE,
     CONF_CLOUD_MQTT_SUPERVISED_DPS,
     CONF_CLOUD_MQTT_SUPERVISED_HEAD,
+    CONF_COMPANION_FEED_EXTERNAL_SENSOR,
+    CONF_COMPANION_FEED_LOAD_MEAN,
     CONF_CONNECTION_MODE,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
@@ -72,6 +74,8 @@ from .const import (
     DATA_SCHEDULES,
     DATA_VACATION_WRITE,
     DEFAULT_CLOUD_MQTT_PROBE,
+    DEFAULT_COMPANION_FEED_EXTERNAL_SENSOR,
+    DEFAULT_COMPANION_FEED_LOAD_MEAN,
     DEFAULT_DISTINCT_DEVICE_ID,
     DEFAULT_ENABLE_CLOUD_MQTT,
     DEFAULT_ENABLE_HEAD_UNBIND,
@@ -150,6 +154,18 @@ def _client_from_entry(entry: ConfigEntry) -> CloudClient:
     )
 
 
+def _apply_companion_feed_options(room_manager: Any, entry: ConfigEntry) -> None:
+    """Open or close the Companion's two virtual-room feeds from the entry's options."""
+    room_manager.feed_external_sensor = bool(
+        entry.options.get(
+            CONF_COMPANION_FEED_EXTERNAL_SENSOR, DEFAULT_COMPANION_FEED_EXTERNAL_SENSOR
+        )
+    )
+    room_manager.feed_load_mean = bool(
+        entry.options.get(CONF_COMPANION_FEED_LOAD_MEAN, DEFAULT_COMPANION_FEED_LOAD_MEAN)
+    )
+
+
 async def _async_setup_companion_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up a v2.x MQTT Companion entry (subscribing to zigbee2mqtt and/or danfoss2mqtt)."""
     from .companion_adapter import build_companion_store
@@ -171,6 +187,22 @@ async def _async_setup_companion_entry(hass: HomeAssistant, entry: ConfigEntry) 
     companion = MqttCompanionCoordinator(hass, prefixes=prefixes or DEFAULT_COMPANION_PREFIXES)
     room_manager = CompanionRoomManager(companion)
     await room_manager.async_load(hass, entry.entry_id)
+
+    # The two feeds are closed unless their option is on. One-time carry-over: an entry that has
+    # never stored the sensor option and already holds a virtual room with a room sensor was being
+    # fed before the option existed; cutting that silently on upgrade would drop its heads back to
+    # their own sensor. Store the decision either way, so a room created later starts closed.
+    if CONF_COMPANION_FEED_EXTERNAL_SENSOR not in entry.options:
+        carried = any(cfg.sensor_id for cfg in room_manager.virtual_rooms.values())
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, CONF_COMPANION_FEED_EXTERNAL_SENSOR: carried}
+        )
+        if carried:
+            _LOGGER.warning(
+                "Companion: the room-sensor feed to Zigbee2MQTT heads was already in use on this "
+                "entry and stays enabled; it is now an option of the integration"
+            )
+    _apply_companion_feed_options(room_manager, entry)
     await companion.async_start()
 
     store = build_companion_store(companion, room_manager)
@@ -199,14 +231,28 @@ async def _async_setup_companion_entry(hass: HomeAssistant, entry: ConfigEntry) 
     async def _periodic_telemetry(_now: object = None) -> None:
         await room_manager.async_sync_telemetry()
 
+    async def _on_options_update(_hass: HomeAssistant, updated: ConfigEntry) -> None:
+        # Editing the subscribed bridge prefixes needs a reload (subscriptions are set at start);
+        # a feed-only change applies live, no reload (the feeds read their flag at every tick).
+        new_raw = updated.options.get(CONF_MQTT_PREFIXES) or updated.data.get(CONF_MQTT_PREFIXES)
+        if new_raw is not None:
+            new_prefixes = (
+                tuple(str(p) for p in new_raw)
+                if isinstance(new_raw, list)
+                else tuple(p.strip() for p in str(new_raw).split(",") if p.strip())
+            )
+            if new_prefixes and new_prefixes != prefixes:
+                await hass.config_entries.async_reload(updated.entry_id)
+                return
+        _apply_companion_feed_options(room_manager, updated)
+
+    entry.async_on_unload(entry.add_update_listener(_on_options_update))
     entry.async_on_unload(companion.async_add_listener(_on_companion_update))
     entry.async_on_unload(
         async_track_time_interval(
             hass, _periodic_telemetry, timedelta(seconds=COMPANION_TELEMETRY_INTERVAL)
         )
     )
-    # Reload on options change (e.g. edited bridge prefixes), like the direct-cloud entry.
-    entry.async_on_unload(entry.add_update_listener(_async_update_options))
     return True
 
 

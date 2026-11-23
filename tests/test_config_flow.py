@@ -9,6 +9,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.danfoss_ally_cloud.api.client import CloudAuthError, CloudError
 from custom_components.danfoss_ally_cloud.const import (
+    CONF_COMPANION_FEED_EXTERNAL_SENSOR,
+    CONF_COMPANION_FEED_LOAD_MEAN,
     CONF_CONNECTION_MODE,
     CONF_ENABLE_CLOUD_MQTT,
     CONF_ENABLE_LOCAL,
@@ -110,9 +112,15 @@ async def test_options_flow_companion_shows_only_prefixes(hass: HomeAssistant):
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "init"
+    assert result["step_id"] == "companion"
     keys = {str(k) for k in result["data_schema"].schema}
-    assert keys == {CONF_MQTT_PREFIXES}
+    # Only companion-relevant options: the bridge prefixes and the two virtual-room feeds.
+    assert keys == {
+        CONF_MQTT_PREFIXES,
+        CONF_COMPANION_FEED_EXTERNAL_SENSOR,
+        CONF_COMPANION_FEED_LOAD_MEAN,
+    }
+    # None of the inert direct-cloud toggles.
     assert CONF_ENABLE_LOCAL not in keys
     assert CONF_ENABLE_CLOUD_MQTT not in keys
 
