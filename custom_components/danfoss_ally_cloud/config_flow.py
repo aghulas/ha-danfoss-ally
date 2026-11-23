@@ -30,6 +30,8 @@ from .const import (
     CONF_CLOUD_MQTT_PROBE,
     CONF_CLOUD_MQTT_SUPERVISED_DPS,
     CONF_CLOUD_MQTT_SUPERVISED_HEAD,
+    CONF_COMPANION_FEED_EXTERNAL_SENSOR,
+    CONF_COMPANION_FEED_LOAD_MEAN,
     CONF_CONNECTION_MODE,
     CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
@@ -53,6 +55,8 @@ from .const import (
     CONNECTION_MODE_MQTT_COMPANION,
     DATA_COORDINATOR,
     DEFAULT_CLOUD_MQTT_PROBE,
+    DEFAULT_COMPANION_FEED_EXTERNAL_SENSOR,
+    DEFAULT_COMPANION_FEED_LOAD_MEAN,
     DEFAULT_DISTINCT_DEVICE_ID,
     DEFAULT_ENABLE_CLOUD_MQTT,
     DEFAULT_ENABLE_HEAD_UNBIND,
@@ -367,7 +371,32 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
             choices[current] = "(head not available)"
         return choices
 
+    async def async_step_companion(self, user_input: dict[str, Any] | None = None) -> Any:
+        """Options of a v2.x MQTT Companion entry: the two virtual-room feeds, each closed unless
+        ticked (docs/z2m-cloud-parity.md §4). Other stored options are kept."""
+        o = self.config_entry.options
+        if user_input is not None:
+            return self.async_create_entry(title="", data={**o, **user_input})
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_COMPANION_FEED_EXTERNAL_SENSOR,
+                    default=o.get(
+                        CONF_COMPANION_FEED_EXTERNAL_SENSOR,
+                        DEFAULT_COMPANION_FEED_EXTERNAL_SENSOR,
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_COMPANION_FEED_LOAD_MEAN,
+                    default=o.get(CONF_COMPANION_FEED_LOAD_MEAN, DEFAULT_COMPANION_FEED_LOAD_MEAN),
+                ): bool,
+            }
+        )
+        return self.async_show_form(step_id="companion", data_schema=_schema(schema))
+
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
+        if self.config_entry.data.get(CONF_CONNECTION_MODE) == CONNECTION_MODE_MQTT_COMPANION:
+            return await self.async_step_companion()
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
         o = self.config_entry.options

@@ -87,6 +87,14 @@
      "mqtt_source": "Source des valeurs publiées : cloud ou local",
      "mqtt_base_topic": "Préfixe de topic MQTT"
     }
+   },
+   "companion": {
+    "title": "Options du Companion",
+    "description": "Écritures périodiques du Companion vers les têtes Zigbee2MQTT d'une pièce virtuelle. Chacune reste fermée tant qu'elle n'est pas cochée. En fermer une n'envoie rien : les têtes gardent la dernière valeur reçue (une tête abandonne d'elle-même une valeur de sonde d'ambiance après 35 minutes ou 3 heures).",
+    "data": {
+     "companion_feed_external_sensor": "Envoyer la température de la sonde de chaque pièce virtuelle à ses têtes (external_measured_room_sensor) : sur un écart de 0,2 °C ou toutes les 20 minutes, au plus une fois toutes les 5 minutes par tête",
+     "companion_feed_load_mean": "Écrire la charge moyenne de la pièce sur ses têtes (load_room_mean) — NON validé en réel. Seulement pour les pièces de deux têtes ou plus dont chaque tête indique load_balancing_enable actif"
+    }
    }
   }
  },
