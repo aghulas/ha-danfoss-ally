@@ -85,9 +85,13 @@
           "cloud_mqtt_probe": "Measure what the Tuya cloud MQTT broker pushes (listen-only, nothing is sent to the heads; aggregates in the diagnostics). Off by default — opens a broker connection on your account, closes itself after 48 h",
           "mqtt_mode": "MQTT publishing: off, discovery (auto HA entities), zigbee2mqtt (z2m-compatible topics)",
           "mqtt_source": "Source of published values: cloud or local",
-          "mqtt_base_topic": "MQTT topic prefix"
+          "mqtt_base_topic": "MQTT topic prefix",
+          "mqtt_prefixes": "MQTT bridge prefixes (comma-separated)"
         }
       }
+    },
+    "error": {
+      "empty_prefixes": "Specify at least one MQTT prefix (e.g. zigbee2mqtt)"
     }
   },
   "entity": {

@@ -122,6 +122,15 @@ def _candidate_dp_choices() -> dict[str, str]:
     return {str(dp): _CANDIDATE_DP_LABELS.get(dp, str(dp)) for dp in sorted(MQTT_CANDIDATE_DPS)}
 
 
+def _parse_mqtt_prefixes(raw: Any) -> list[str]:
+    """Normalize a companion prefixes input (list or comma string) to a de-duplicated list."""
+    if isinstance(raw, list):
+        prefixes = [str(p).strip().rstrip("/") for p in raw if str(p).strip().rstrip("/")]
+    else:
+        prefixes = [p.strip().rstrip("/") for p in str(raw).split(",") if p.strip().rstrip("/")]
+    return list(dict.fromkeys(prefixes))
+
+
 class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
     """First-time setup: one Danfoss Ally account."""
 
@@ -182,14 +191,9 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         """v2.x MQTT Companion setup: connect to zigbee2mqtt and/or danfoss2mqtt via Mosquitto."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            raw = user_input.get(CONF_MQTT_PREFIXES, DEFAULT_MQTT_PREFIXES)
-            if isinstance(raw, list):
-                prefixes = [str(p).strip().rstrip("/") for p in raw if str(p).strip().rstrip("/")]
-            else:
-                prefixes = [
-                    p.strip().rstrip("/") for p in str(raw).split(",") if p.strip().rstrip("/")
-                ]
-            prefixes = list(dict.fromkeys(prefixes))
+            prefixes = _parse_mqtt_prefixes(
+                user_input.get(CONF_MQTT_PREFIXES, DEFAULT_MQTT_PREFIXES)
+            )
             if not prefixes:
                 errors["base"] = "empty_prefixes"
             else:
@@ -368,6 +372,13 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
         return choices
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
+        # An MQTT-companion entry wires NONE of the direct-cloud / local-tunnel / cloud-MQTT
+        # machinery (docs/companion-contract.md §2.4): a Companion talks only to the bridges over
+        # Mosquitto, so enable_local / enable_cloud_mqtt / the supervised-trial options would be
+        # inert here. Presenting them would be a lie, so a Companion gets its own options schema
+        # limited to what it actually uses (the subscribed bridge prefixes).
+        if self.config_entry.data.get(CONF_CONNECTION_MODE) == CONNECTION_MODE_MQTT_COMPANION:
+            return await self._async_step_companion_options(user_input)
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
         o = self.config_entry.options
@@ -438,3 +449,24 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="init", data_schema=_schema(schema))
+
+    async def _async_step_companion_options(self, user_input: dict[str, Any] | None = None) -> Any:
+        """Options for an MQTT-companion entry: only the subscribed bridge prefixes. The
+        direct-cloud options do not apply to a Companion (docs/companion-contract.md §2.4)."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            prefixes = _parse_mqtt_prefixes(
+                user_input.get(CONF_MQTT_PREFIXES, DEFAULT_MQTT_PREFIXES)
+            )
+            if not prefixes:
+                errors["base"] = "empty_prefixes"
+            else:
+                return self.async_create_entry(title="", data={CONF_MQTT_PREFIXES: prefixes})
+        current = (
+            self.config_entry.options.get(CONF_MQTT_PREFIXES)
+            or self.config_entry.data.get(CONF_MQTT_PREFIXES)
+            or DEFAULT_MQTT_PREFIXES
+        )
+        default = ",".join(current) if isinstance(current, list) else str(current)
+        schema = vol.Schema({vol.Required(CONF_MQTT_PREFIXES, default=default): str})
+        return self.async_show_form(step_id="init", data_schema=_schema(schema), errors=errors)

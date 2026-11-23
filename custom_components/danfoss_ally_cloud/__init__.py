@@ -156,7 +156,13 @@ async def _async_setup_companion_entry(hass: HomeAssistant, entry: ConfigEntry) 
     from .companion_rooms import CompanionRoomManager
     from .mqtt_companion import DEFAULT_COMPANION_PREFIXES, MqttCompanionCoordinator
 
-    raw_prefixes = entry.data.get(CONF_MQTT_PREFIXES) or list(DEFAULT_COMPANION_PREFIXES)
+    # Prefer prefixes edited through the options flow (companion options), falling back to the
+    # ones chosen at config time, then the default pair.
+    raw_prefixes = (
+        entry.options.get(CONF_MQTT_PREFIXES)
+        or entry.data.get(CONF_MQTT_PREFIXES)
+        or list(DEFAULT_COMPANION_PREFIXES)
+    )
     prefixes = (
         tuple(str(p) for p in raw_prefixes)
         if isinstance(raw_prefixes, list)
@@ -199,6 +205,8 @@ async def _async_setup_companion_entry(hass: HomeAssistant, entry: ConfigEntry) 
             hass, _periodic_telemetry, timedelta(seconds=COMPANION_TELEMETRY_INTERVAL)
         )
     )
+    # Reload on options change (e.g. edited bridge prefixes), like the direct-cloud entry.
+    entry.async_on_unload(entry.add_update_listener(_async_update_options))
     return True
 
 

@@ -85,9 +85,13 @@
      "cloud_mqtt_probe": "Mesurer ce que le broker MQTT cloud Tuya pousse (écoute seule, rien n'est envoyé aux têtes ; agrégats dans les diagnostics). Désactivé par défaut — ouvre une connexion au broker sur votre compte, se ferme seul après 48 h",
      "mqtt_mode": "Publication MQTT : off, discovery (entités HA auto), zigbee2mqtt (topics compatibles z2m)",
      "mqtt_source": "Source des valeurs publiées : cloud ou local",
-     "mqtt_base_topic": "Préfixe de topic MQTT"
+     "mqtt_base_topic": "Préfixe de topic MQTT",
+     "mqtt_prefixes": "Préfixes MQTT des ponts (séparés par des virgules)"
     }
    }
+  },
+  "error": {
+   "empty_prefixes": "Indiquez au moins un préfixe MQTT (ex. zigbee2mqtt)"
   }
  },
  "entity": {
