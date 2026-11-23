@@ -84,8 +84,9 @@ One setting at a time, owner on site (`docs/first-write-procedure.md`):
 A head paired to Zigbee2MQTT loses what the gateway and the cloud did above it: the room, the
 room sensor feed, load balancing, holidays, the re-imposition of settings. Inventory, state of the
 Companion's first version and the proposal — a standalone room coordinator on MQTT, sibling of
-`danfoss2mqtt`, in stages each gated by a supervised trial: `docs/z2m-cloud-parity.md`. A proposal
-until the owner frames it.
+`danfoss2mqtt`, in stages each gated by a supervised trial: `docs/z2m-cloud-parity.md`. Direction
+approved on 2026-11-23; stage 0 (identify the existing sensor feed, gate the Companion's two
+periodic feeds, fix the sensor keep-alive) comes first.
 
 ### 6. Publication
 

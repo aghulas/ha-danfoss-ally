@@ -1,6 +1,8 @@
 # Zigbee2MQTT heads — parity with what the Danfoss cloud and gateway do
 
-**Status: design proposal (2026-11-23). Nothing here is implemented by this document.** It answers
+**Status: design, direction approved by the owner on 2026-11-23** — room coordination moves to a
+standalone coordinator on MQTT (§6). Nothing here is implemented by this document; each write
+stage of §7 still needs its own supervised trial. It answers
 three questions for heads paired to a Zigbee2MQTT coordinator, with no Danfoss gateway and no
 cloud: which functions did the cloud and the gateway provide *above* the head, how to provide each
 of them again, and where that logic should run.
@@ -229,7 +231,7 @@ Battery effect is unknown [H]: measure it on the pilot room over two weeks befor
 | Blast radius of a bug | Home Assistant | Its own process | **Zigbee2MQTT itself** | One room |
 | Cost | Lowest: the code exists | A new deliverable to build and operate | A second language and toolchain | Lowest to start, highest to maintain |
 
-**Recommendation: (ii).** The deciding points:
+**Decision: (ii)**, approved by the owner on 2026-11-23. The deciding points:
 
 1. **Home Assistant restarts are routine here** — every integration release needs one. With (i),
    each of them stops the sensor feed and the load mean; with a calendar function, it can miss a
