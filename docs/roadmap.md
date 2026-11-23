@@ -79,7 +79,15 @@ One setting at a time, owner on site (`docs/first-write-procedure.md`):
   note (verified product, override read-before-write, job verification through the tunnel) are
   not implemented.
 
-### 5. Publication
+### 5. Zigbee2MQTT heads: parity with the cloud's room functions
+
+A head paired to Zigbee2MQTT loses what the gateway and the cloud did above it: the room, the
+room sensor feed, load balancing, holidays, the re-imposition of settings. Inventory, state of the
+Companion's first version and the proposal — a standalone room coordinator on MQTT, sibling of
+`danfoss2mqtt`, in stages each gated by a supervised trial: `docs/z2m-cloud-parity.md`. A proposal
+until the owner frames it.
+
+### 6. Publication
 
 - Tagged releases are in place. Remaining: the **HACS inclusion pull request** (only the owner can
   submit it), once the cutover and the Companion write validation above are done.
