@@ -25,9 +25,11 @@ of a room, holidays, the boiler relay's heat demand, the re-imposition of settin
 
 **Where it stands.** The Companion already holds a first version of four of these for
 Zigbee2MQTT heads (`companion_rooms.py`): virtual rooms, setpoint fan-out, room sensor feed, load
-mean. Two more are written and not reachable (schedule fan-out, heat-demand list). None has a
-write-up under `docs/validation/`. The two periodic feeds are each behind a Companion option,
-closed by default (§4).
+mean. Two more are written and not reachable (schedule fan-out, heat-demand list). The 2026-11-22
+round-trip is written up under `docs/validation/`
+([`validation/2026-11-22-companion-v2-validation.md`](validation/2026-11-22-companion-v2-validation.md));
+the two periodic feeds have no supervised trial yet and are each behind a Companion option, closed
+by default (§4).
 
 **Recommendation.** Move room coordination out of Home Assistant into a **standalone room
 coordinator on MQTT**, a sibling of `danfoss2mqtt`: same package, same add-on repository, same
@@ -93,7 +95,7 @@ Code read at `main` (2.0.3): `companion_rooms.py`, `mqtt_companion.py`, `compani
 | # | Function | Zigbee2MQTT lever | Companion today [R] | Gap |
 |---|---|---|---|---|
 | 1 | Room | none; fan-out | Virtual rooms (`companion_set_room` / `companion_delete_room` services, admin only), stored in Home Assistant storage; a room `climate` | No UI; rooms exist only inside Home Assistant; `native_rooms` is one dictionary for all prefixes, so a second bridge publishing `bridge/rooms` would overwrite the first |
-| 2 | Room setpoint | `occupied_heating_setpoint` per head | Fan-out from the room `climate` (`async_set_room_setpoint`). Reported working on one four-head room on 2026-11-22, owner present; not recorded under `docs/validation/` | QoS 0 publish, no per-head verification, no retry, no write job; comfort and setback are stored but have no entity |
+| 2 | Room setpoint | `occupied_heating_setpoint` per head | Fan-out from the room `climate` (`async_set_room_setpoint`). Reported working on one four-head room on 2026-11-22, owner present ([`validation/2026-11-22-companion-v2-validation.md`](validation/2026-11-22-companion-v2-validation.md)) | QoS 0 publish, no per-head verification, no retry, no write job; comfort and setback are stored but have no entity |
 | 3 | Weekly schedule | `weekly_schedule` on `/set` | `async_set_room_schedule` exists, **called by nothing**. It refuses the whole request, before storing or sending anything, when a day needs more than six entries (the 00:00 entry included, so at least as strict as R1) | Never sets the programming mode; no read-back; never tried |
 | 4 | Modes | `programming_operation_mode` | Read only | No room mode |
 | 5 | Room-wide settings | per-head `/set` | Per-head switches and numbers only | No room-level setting, no drift detection |
@@ -120,8 +122,12 @@ Three points deserve attention before any new work:
    received (what they do with it is open, §8). Neither feed has a supervised trial yet.
 2. **A feed was already running before the Companion.** On 2026-11-21 the Zigbee2MQTT heads of
    the trial area regulated on an external room sensor (`external_measured_room_sensor` = 1403,
-   `docs/validation/2026-11-real-hardware-validation.md`). What wrote that value is not recorded
-   here. Two feeders on one head must not coexist; identify it before the next step.
+   `docs/validation/2026-11-real-hardware-validation.md`). Identified: a Home Assistant automation
+   of a separate on-site pilot project
+   ([`validation/2026-11-21-external-sensor-producer.md`](validation/2026-11-21-external-sensor-producer.md)).
+   The risk is resolved — that project's two feeds (sensor and load mean) were removed on
+   2026-11-23, so no second producer remains. Still check for one producer per head attribute
+   before turning either Companion feed on.
 3. **The other bridge is short of the contract too.** `docs/companion-contract.md` §3 lists
    `bridge/relays`, `bridge/alerts` and `bridge/request/<action>` for room, schedule and holiday
    operations; the standalone `danfoss2mqtt` daemon publishes `bridge/rooms` and
@@ -274,7 +280,7 @@ on one room, read back from the heads, recorded under `docs/validation/`
 
 | Stage | Content | Real hardware |
 |---|---|---|
-| 0 | Before anything: find what fed the external sensor on 2026-11-21; record the 2026-11-22 Companion validation under `docs/validation/`; put the Companion's two feeds behind an option and fix the sensor keep-alive (30 / 45 min against a 35-min reset). **Code part done** (options, keep-alive, load-balancing gate, schedule refusal; §4), not tried on real hardware; the two read-only items remain | Read-only check |
+| 0 | Before anything: find what fed the external sensor on 2026-11-21 (done: [`validation/2026-11-21-external-sensor-producer.md`](validation/2026-11-21-external-sensor-producer.md)); record the 2026-11-22 Companion validation under `docs/validation/` (done: [`validation/2026-11-22-companion-v2-validation.md`](validation/2026-11-22-companion-v2-validation.md)); put the Companion's two feeds behind an option and fix the sensor keep-alive (30 / 45 min against a 35-min reset). **Done** — code part (options, keep-alive, load-balancing gate, schedule refusal; §4), not tried on real hardware, and both read-only items closed | Read-only check |
 | 1 | Coordinator, **read only**: room store, `bridge/rooms` aggregates, heat demand, drift report. Companion reads it (rooms per prefix) | None (no write) |
 | 2 | Room setpoint fan-out with per-head verification and write jobs | Trial: one room, both setpoint properties |
 | 3 | Room sensor feed, event-driven, both `radiator_covered` modes | Trial, including the stop test: coordinator stopped, the head back to −8000 at 35 min |
