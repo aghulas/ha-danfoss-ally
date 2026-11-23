@@ -145,6 +145,53 @@ The Companion issues device-level writes by publishing a JSON object to `<prefix
 | Room load mean (`load_room_mean`) | `{"load_room_mean": 35}` |
 | Weekly schedule day (`weekly_schedule`) | `{"weekly_schedule": {"dayofweek": 1, "num_of_transitions": 3, "transitions": [...]}}` |
 
+### 2.4 Direct-cloud-only write paths are not part of the Companion (by design)
+
+A Companion entry is **channel-free** (Design Invariant §1): it speaks only to the bridges over
+Mosquitto and writes exclusively through the `<prefix>/<name>/set` and `<prefix>/bridge/request/*`
+topics. It deliberately does **not** own the direct-cloud / local-tunnel / Tuya-cloud-MQTT
+machinery of the frozen `1.4.x` line. In `__init__.py async_setup_entry`, an MQTT-companion entry
+`return`s from `_async_setup_companion_entry` **before** the direct-cloud branch that installs the
+local-tunnel coordinator (`_async_setup_local_and_keys`), the dedicated cloud-MQTT link
+(`_async_setup_mqtt_link`) and the supervised trials (`_supervised_trial` / `_local_trial`). So a
+Companion store holds **no `DATA_LOCAL`, no `DATA_MQTT_LINK`, no `DATA_CLOUD_MQTT`, and no
+supervised-trial keys**.
+
+Consequently these entities exist on **no** companion head — each platform already self-gates on the
+absent store keys, so they are **absent rather than lying**:
+
+| Not exposed on a Companion | Gate (direct-cloud only) | Why it belongs to the direct-cloud entry |
+|---|---|---|
+| Preheat switch (`DanfossPreheat`, Zigbee `0x0025`) | `switch.py`: `if local is not None` | Proven lever is the local tunnel; the cloud DP 1 route is a closed candidate (`docs/preheat.md`) |
+| Local-tunnel setting switches (radiator covered, external window, load balancing, adaptation run) | `switch.py`: `DATA_LOCAL` | Tunnel-only supervised writes |
+| Valve-exercise-day select, orientation select (DP 133) | `select.py`: `DATA_LOCAL` / `DATA_MQTT_LINK` | Local-tunnel / cloud-MQTT candidates |
+| Viewing-direction switch (DP 101) | `switch.py`: `trial_dp_armed` + `DATA_MQTT_LINK` | Cloud-MQTT candidate |
+| Cloud-MQTT head bounds / setpoints numbers, cloud-MQTT child-lock/window writes | `number.py` / `switch.py`: `DATA_CLOUD_MQTT` + `DATA_MQTT_LINK` | Dedicated Tuya cloud-MQTT link |
+| Local setpoint-offset / regulation-speed numbers | `number.py`: `DATA_LOCAL` | Tunnel-only |
+| `cloud_mqtt_link` connectivity sensor, cloud-MQTT coverage/probe | `binary_sensor.py` / diagnostics: `DATA_MQTT_LINK` | Dedicated cloud-MQTT link |
+| MQTT re-publishing (`mqtt_publisher`: discovery / zigbee2mqtt) | not wired in companion setup | The Companion consumes the Z2M dialect; re-publishing is the bridges' job |
+
+The companion-routed writes **are** present (setpoint, max/min bounds, `child_lock`,
+`window_detection` via `mqtt_companion`, plus rooms / schedules / holidays via
+`bridge/request`). Where a head's preheat is reachable over a bridge at all it is driven by the
+`programming_operation_mode` command (§2.3), handled by the bridge that owns the head; the
+autonomous `danfoss2mqtt` cloud bridge declines it for an isolated head today
+(`docs/z2m-cloud-parity.md`). `danfoss2mqtt` heads also carry no `mesh_id`, which independently
+rules out every tunnel/cloud-MQTT path.
+
+**A supervised DP 1 / DP 101 / DP 133 trial, a local-tunnel setting trial, preheat, head-unbind or
+the cloud-MQTT link can therefore only be armed from a direct-cloud (`1.4.x`-style) entry** on a
+head that entry reaches through its own tunnel / dedicated cloud-MQTT link — never through the
+Companion. The config-entry diagnostics carry a `preheat` block (`companion_mode`, `switch_exposed`,
+`reason`) so at least the preheat absence is explicit at runtime.
+
+Because none of the direct-cloud options (`enable_local`, `enable_cloud_mqtt`,
+`cloud_mqtt_supervised_dps` / `_head`, `local_supervised_settings` / `_head`, `cloud_mqtt_probe`,
+`enable_vacation_write`, `enable_head_unbind`, the `mqtt_publisher` settings) do anything on a
+Companion entry, the **options flow is mode-aware**: a Companion entry's options show only its
+subscribed bridge prefixes (`CONF_MQTT_PREFIXES`), not the inert direct-cloud toggles. Editing them
+reloads the entry. This keeps the UI honest — an option that does nothing is not shown.
+
 ---
 
 ## 3. Fleet & Room Extension Topics

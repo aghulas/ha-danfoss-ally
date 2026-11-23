@@ -377,7 +377,8 @@ async def test_new_companion_entry_starts_with_both_feeds_closed(
     # Options flow of a Companion entry: its own two-field step, applied without a reload
     form = await hass.config_entries.options.async_init(entry.entry_id)
     assert form["type"] is FlowResultType.FORM and form["step_id"] == "companion"
-    assert set(form["data_schema"].schema) == {
+    assert {str(k) for k in form["data_schema"].schema} == {
+        CONF_MQTT_PREFIXES,
         CONF_COMPANION_FEED_EXTERNAL_SENSOR,
         CONF_COMPANION_FEED_LOAD_MEAN,
     }
@@ -390,6 +391,33 @@ async def test_new_companion_entry_starts_with_both_feeds_closed(
     assert hass.data[DOMAIN][entry.entry_id]["room_manager"] is mgr
     assert (mgr.feed_external_sensor, mgr.feed_load_mean) == (True, True)
 
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_editing_bridge_prefixes_reloads_the_companion(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+):
+    """Editing the subscribed prefixes reloads the entry (subscriptions are set at start), unlike a
+    feed-only change which applies live."""
+    _patch_ha(monkeypatch)
+    entry = _entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    comp_before = hass.data[DOMAIN][entry.entry_id]["companion"]
+    assert comp_before.prefixes == ("zigbee2mqtt",)
+
+    form = await hass.config_entries.options.async_init(entry.entry_id)
+    done = await hass.config_entries.options.async_configure(
+        form["flow_id"], user_input={CONF_MQTT_PREFIXES: "zigbee2mqtt,danfoss2mqtt"}
+    )
+    assert done["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+
+    # A reload rebuilt the store with a fresh companion subscribing to both prefixes.
+    comp_after = hass.data[DOMAIN][entry.entry_id]["companion"]
+    assert comp_after is not comp_before
+    assert comp_after.prefixes == ("zigbee2mqtt", "danfoss2mqtt")
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 

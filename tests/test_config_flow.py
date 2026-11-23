@@ -9,9 +9,15 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.danfoss_ally_cloud.api.client import CloudAuthError, CloudError
 from custom_components.danfoss_ally_cloud.const import (
+    CONF_COMPANION_FEED_EXTERNAL_SENSOR,
+    CONF_COMPANION_FEED_LOAD_MEAN,
+    CONF_CONNECTION_MODE,
+    CONF_ENABLE_CLOUD_MQTT,
     CONF_ENABLE_LOCAL,
     CONF_MQTT_MODE,
+    CONF_MQTT_PREFIXES,
     CONF_SCAN_INTERVAL,
+    CONNECTION_MODE_MQTT_COMPANION,
     DOMAIN,
 )
 
@@ -88,6 +94,62 @@ async def test_options_flow(hass: HomeAssistant):
     assert entry.options[CONF_SCAN_INTERVAL] == 120
     assert entry.options[CONF_ENABLE_LOCAL] is True
     assert entry.options[CONF_MQTT_MODE] == "discovery"
+
+
+async def test_options_flow_companion_shows_only_prefixes(hass: HomeAssistant):
+    """A Companion entry's options expose only the bridge prefixes, never the inert direct-cloud
+    toggles (docs/companion-contract.md §2.4)."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_CONNECTION_MODE: CONNECTION_MODE_MQTT_COMPANION,
+            CONF_MQTT_PREFIXES: ["zigbee2mqtt"],
+        },
+        unique_id="mqtt_companion:zigbee2mqtt",
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "companion"
+    keys = {str(k) for k in result["data_schema"].schema}
+    # Only companion-relevant options: the bridge prefixes and the two virtual-room feeds.
+    assert keys == {
+        CONF_MQTT_PREFIXES,
+        CONF_COMPANION_FEED_EXTERNAL_SENSOR,
+        CONF_COMPANION_FEED_LOAD_MEAN,
+    }
+    # None of the inert direct-cloud toggles.
+    assert CONF_ENABLE_LOCAL not in keys
+    assert CONF_ENABLE_CLOUD_MQTT not in keys
+
+    # Empty prefixes is refused (form shown again with an error), nothing written.
+    again = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={CONF_MQTT_PREFIXES: ""}
+    )
+    assert again["type"] == FlowResultType.FORM
+    assert again["errors"] == {"base": "empty_prefixes"}
+
+    # A valid edit is stored as a normalized list.
+    done = await hass.config_entries.options.async_configure(
+        again["flow_id"], user_input={CONF_MQTT_PREFIXES: "zigbee2mqtt, danfoss2mqtt/"}
+    )
+    assert done["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_MQTT_PREFIXES] == ["zigbee2mqtt", "danfoss2mqtt"]
+
+
+async def test_options_flow_direct_cloud_still_shows_cloud_options(hass: HomeAssistant):
+    """Regression guard: a direct-cloud entry keeps the full options schema."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=ENTRY_DATA, unique_id="compte@exemple.fr", options={}
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    keys = {str(k) for k in result["data_schema"].schema}
+    assert CONF_ENABLE_LOCAL in keys
+    assert CONF_ENABLE_CLOUD_MQTT in keys
+    assert CONF_MQTT_PREFIXES not in keys
 
 
 # --- Re-authentication (the coordinator raises ConfigEntryAuthFailed on a refused login) ---------

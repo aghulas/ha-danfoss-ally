@@ -126,6 +126,15 @@ def _candidate_dp_choices() -> dict[str, str]:
     return {str(dp): _CANDIDATE_DP_LABELS.get(dp, str(dp)) for dp in sorted(MQTT_CANDIDATE_DPS)}
 
 
+def _parse_mqtt_prefixes(raw: Any) -> list[str]:
+    """Normalize a companion prefixes input (list or comma string) to a de-duplicated list."""
+    if isinstance(raw, list):
+        prefixes = [str(p).strip().rstrip("/") for p in raw if str(p).strip().rstrip("/")]
+    else:
+        prefixes = [p.strip().rstrip("/") for p in str(raw).split(",") if p.strip().rstrip("/")]
+    return list(dict.fromkeys(prefixes))
+
+
 class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
     """First-time setup: one Danfoss Ally account."""
 
@@ -186,14 +195,9 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         """v2.x MQTT Companion setup: connect to zigbee2mqtt and/or danfoss2mqtt via Mosquitto."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            raw = user_input.get(CONF_MQTT_PREFIXES, DEFAULT_MQTT_PREFIXES)
-            if isinstance(raw, list):
-                prefixes = [str(p).strip().rstrip("/") for p in raw if str(p).strip().rstrip("/")]
-            else:
-                prefixes = [
-                    p.strip().rstrip("/") for p in str(raw).split(",") if p.strip().rstrip("/")
-                ]
-            prefixes = list(dict.fromkeys(prefixes))
+            prefixes = _parse_mqtt_prefixes(
+                user_input.get(CONF_MQTT_PREFIXES, DEFAULT_MQTT_PREFIXES)
+            )
             if not prefixes:
                 errors["base"] = "empty_prefixes"
             else:
@@ -372,13 +376,31 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
         return choices
 
     async def async_step_companion(self, user_input: dict[str, Any] | None = None) -> Any:
-        """Options of a v2.x MQTT Companion entry: the two virtual-room feeds, each closed unless
-        ticked (docs/z2m-cloud-parity.md §4). Other stored options are kept."""
+        """Options of a v2.x MQTT Companion entry: the subscribed bridge prefixes and the two
+        virtual-room feeds (each closed unless ticked, docs/z2m-cloud-parity.md §4). The
+        direct-cloud / local-tunnel / cloud-MQTT options do not apply to a Companion and are not
+        shown here (docs/companion-contract.md §2.4). Other stored options are kept."""
         o = self.config_entry.options
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data={**o, **user_input})
+            prefixes = _parse_mqtt_prefixes(
+                user_input.get(CONF_MQTT_PREFIXES, DEFAULT_MQTT_PREFIXES)
+            )
+            if not prefixes:
+                errors["base"] = "empty_prefixes"
+            else:
+                return self.async_create_entry(
+                    title="", data={**o, **user_input, CONF_MQTT_PREFIXES: prefixes}
+                )
+        current = (
+            o.get(CONF_MQTT_PREFIXES)
+            or self.config_entry.data.get(CONF_MQTT_PREFIXES)
+            or DEFAULT_MQTT_PREFIXES
+        )
+        default_prefixes = ",".join(current) if isinstance(current, list) else str(current)
         schema = vol.Schema(
             {
+                vol.Required(CONF_MQTT_PREFIXES, default=default_prefixes): str,
                 vol.Optional(
                     CONF_COMPANION_FEED_EXTERNAL_SENSOR,
                     default=o.get(
@@ -392,9 +414,15 @@ class DanfossAllyCloudOptionsFlow(OptionsFlow):
                 ): bool,
             }
         )
-        return self.async_show_form(step_id="companion", data_schema=_schema(schema))
+        return self.async_show_form(step_id="companion", data_schema=_schema(schema), errors=errors)
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
+        # An MQTT-companion entry wires NONE of the direct-cloud / local-tunnel / cloud-MQTT
+        # machinery (docs/companion-contract.md §2.4): a Companion talks only to the bridges over
+        # Mosquitto, so enable_local / enable_cloud_mqtt / the supervised-trial options would be
+        # inert here. Presenting them would be a lie, so a Companion gets its own options step,
+        # limited to what it actually uses: the subscribed bridge prefixes and the virtual-room
+        # feeds.
         if self.config_entry.data.get(CONF_CONNECTION_MODE) == CONNECTION_MODE_MQTT_COMPANION:
             return await self.async_step_companion()
         if user_input is not None:

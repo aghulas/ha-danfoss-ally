@@ -172,7 +172,13 @@ async def _async_setup_companion_entry(hass: HomeAssistant, entry: ConfigEntry) 
     from .companion_rooms import CompanionRoomManager
     from .mqtt_companion import DEFAULT_COMPANION_PREFIXES, MqttCompanionCoordinator
 
-    raw_prefixes = entry.data.get(CONF_MQTT_PREFIXES) or list(DEFAULT_COMPANION_PREFIXES)
+    # Prefer prefixes edited through the options flow (companion options), falling back to the
+    # ones chosen at config time, then the default pair.
+    raw_prefixes = (
+        entry.options.get(CONF_MQTT_PREFIXES)
+        or entry.data.get(CONF_MQTT_PREFIXES)
+        or list(DEFAULT_COMPANION_PREFIXES)
+    )
     prefixes = (
         tuple(str(p) for p in raw_prefixes)
         if isinstance(raw_prefixes, list)
@@ -226,7 +232,18 @@ async def _async_setup_companion_entry(hass: HomeAssistant, entry: ConfigEntry) 
         await room_manager.async_sync_telemetry()
 
     async def _on_options_update(_hass: HomeAssistant, updated: ConfigEntry) -> None:
-        # No reload: the feeds read their flag at every tick.
+        # Editing the subscribed bridge prefixes needs a reload (subscriptions are set at start);
+        # a feed-only change applies live, no reload (the feeds read their flag at every tick).
+        new_raw = updated.options.get(CONF_MQTT_PREFIXES) or updated.data.get(CONF_MQTT_PREFIXES)
+        if new_raw is not None:
+            new_prefixes = (
+                tuple(str(p) for p in new_raw)
+                if isinstance(new_raw, list)
+                else tuple(p.strip() for p in str(new_raw).split(",") if p.strip())
+            )
+            if new_prefixes and new_prefixes != prefixes:
+                await hass.config_entries.async_reload(updated.entry_id)
+                return
         _apply_companion_feed_options(room_manager, updated)
 
     entry.async_on_unload(entry.add_update_listener(_on_options_update))
