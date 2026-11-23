@@ -282,7 +282,7 @@ on one room, read back from the heads, recorded under `docs/validation/`
 |---|---|---|
 | 0 | Before anything: find what fed the external sensor on 2026-11-21 (done: [`validation/2026-11-21-external-sensor-producer.md`](validation/2026-11-21-external-sensor-producer.md)); record the 2026-11-22 Companion validation under `docs/validation/` (done: [`validation/2026-11-22-companion-v2-validation.md`](validation/2026-11-22-companion-v2-validation.md)); put the Companion's two feeds behind an option and fix the sensor keep-alive (30 / 45 min against a 35-min reset). **Done** — code part (options, keep-alive, load-balancing gate, schedule refusal; §4), not tried on real hardware, and both read-only items closed | Read-only check |
 | 1 | Coordinator, **read only**: room store, `bridge/rooms` aggregates, heat demand, drift report. Companion reads it (rooms per prefix) | None (no write) |
-| 2 | Room setpoint fan-out with per-head verification and write jobs | Trial: one room, both setpoint properties |
+| 2 | Room setpoint fan-out with per-head verification and write jobs. **Code done** in `pydanfoss-cloud` 0.6.0 (`write_job.py` + `bridge/request/room/set-setpoint`), **closed by default** behind `armed_rooms`; synthetic tests only | Trial: one room, both setpoint properties — **pending** ([`validation/2026-11-23-setpoint-fanout-stage2.md`](validation/2026-11-23-setpoint-fanout-stage2.md)) |
 | 3 | Room sensor feed, event-driven, both `radiator_covered` modes | Trial, including the stop test: coordinator stopped, the head back to −8000 at 35 min |
 | 4 | Weekly schedule, comfort / setback, programming mode | Trial: write, read back, watch the next morning's transitions; **settle whether a mode change keeps the schedule** |
 | 5 | Room-wide settings, preheat, reconciliation | Trial: preheat held over one night with no cloud; a head changed by hand |
@@ -292,6 +292,29 @@ on one room, read back from the heads, recorded under `docs/validation/`
 
 The order follows what is already live (2, 3), then what a re-paired head has lost outright (4),
 then what only matters at scale (5, 6, 7).
+
+### Arming a write stage (closed by default)
+
+A write stage's code ships **closed**: it cannot touch a head until a room is explicitly armed, so
+merging the code never changes a running site. For the Stage 2 setpoint fan-out, arming is an
+**allowlist of room ids** on the coordinator — `armed_rooms`, empty by default. A
+`bridge/request/room/set-setpoint` for a room that is not listed is refused (`status: "closed"`) and
+nothing is sent; the coordinator keeps its Stage 1 read-only behaviour for every other room.
+
+For the supervised trial, arm **only the one test room**, by its `room_id`, and name no other:
+
+```bash
+danfoss-room-coordinator --armed-room <room_id>        # repeatable
+# add-on options.json:  {"armed_rooms": ["<room_id>"]}
+# environment:          DANFOSS_ARMED_ROOMS=<room_id>
+```
+
+A user change writes `occupied_heating_setpoint` (the aggressive property, §3); a change the
+coordinator makes on its own (holiday edge, reconciliation — later stages) writes
+`occupied_heating_setpoint_scheduled`. Each head is reported `applied` / `mismatch` / `unreachable`,
+and the coordinator's own last line logs a warning while any room is armed. After the trial, remove
+the room from `armed_rooms` again until the next supervised step. Procedure:
+[`first-write-procedure.md`](first-write-procedure.md).
 
 ## 8. Open questions
 
