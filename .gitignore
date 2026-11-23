@@ -16,3 +16,5 @@ htmlcov/
 secrets*.json
 session*.json
 captures/
+# macOS
+.DS_Store
