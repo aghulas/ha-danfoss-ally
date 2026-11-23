@@ -250,6 +250,7 @@ async def test_batches_2_3_to_2_5_unified_companion_z2m_and_danfoss2mqtt(
                 "local_temperature": 21.0,
                 "occupied_heating_setpoint": 20.0,
                 "pi_heating_demand": 30,
+                "load_estimate": 450,
                 "running_state": "heat",
                 "heat_required": True,
                 "battery": 85,
@@ -263,6 +264,7 @@ async def test_batches_2_3_to_2_5_unified_companion_z2m_and_danfoss2mqtt(
                 "local_temperature": 21.4,
                 "occupied_heating_setpoint": 20.0,
                 "pi_heating_demand": 50,
+                "load_estimate": 550,
                 "running_state": "heat",
                 "heat_required": True,
                 "battery": 82,
@@ -329,11 +331,11 @@ async def test_batches_2_3_to_2_5_unified_companion_z2m_and_danfoss2mqtt(
     # Virtual room temperature comes from linked 014G2480 sensor (19.6 °C), not head mean
     assert rooms["z2m-classe-1"].temperature == 19.6
 
-    # Sync telemetry pushes external_measured_room_sensor (1960) and load_room_mean (40)
+    # Sync telemetry pushes external_measured_room_sensor (1960) and load_room_mean (500)
     stats = await room_mgr.async_sync_telemetry(now=100.0)
     assert stats == {"external_sensor_writes": 2, "load_mean_writes": 2}
     assert ("zigbee2mqtt/A-0 Classe 1 #1/set", {"external_measured_room_sensor": 1960}) in sent_mqtt
-    assert ("zigbee2mqtt/A-0 Classe 1 #2/set", {"load_room_mean": 40}) in sent_mqtt
+    assert ("zigbee2mqtt/A-0 Classe 1 #2/set", {"load_room_mean": 500}) in sent_mqtt
 
     # Second sync 10s later with no change is a no-op
     sent_mqtt.clear()
@@ -860,3 +862,98 @@ async def test_companion_home_id_grouping_for_isolated_and_virtual_rooms(
     assert view.head_home("bf_iso_1") == "home_ab"
     assert view.home_of("b0_chapelle") == "home_ab"
     assert view.head_home("0x2222") == "home_ab"
+
+
+async def test_virtual_room_load_balancing_uses_load_estimate(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Multi-head virtual rooms balance based on mean load_estimate (not valve opening)."""
+    sent_mqtt: list[tuple[str, dict[str, Any]]] = []
+
+    async def _mock_publish(_hass: Any, topic: str, payload: str, **_kw: Any) -> None:
+        sent_mqtt.append((topic, json.loads(payload)))
+
+    from homeassistant.components import mqtt as mqtt_mod
+
+    monkeypatch.setattr(mqtt_mod, "async_wait_for_mqtt_client", AsyncMock(return_value=True))
+    monkeypatch.setattr(mqtt_mod, "async_subscribe", AsyncMock(return_value=lambda: None))
+    monkeypatch.setattr(mqtt_mod, "async_publish", _mock_publish)
+
+    comp = MqttCompanionCoordinator(hass, ("zigbee2mqtt",))
+    comp.process_mqtt_message("zigbee2mqtt/bridge/state", '{"state": "online"}')
+    comp.process_mqtt_message(
+        "zigbee2mqtt/bridge/devices",
+        json.dumps(
+            [
+                {
+                    "ieee_address": "0x11",
+                    "friendly_name": "Head-1",
+                    "definition": {"vendor": "Danfoss", "model": "014G2461"},
+                },
+                {
+                    "ieee_address": "0x22",
+                    "friendly_name": "Head-2",
+                    "definition": {"vendor": "Danfoss", "model": "014G2461"},
+                },
+                {
+                    "ieee_address": "0x33",
+                    "friendly_name": "Head-3",
+                    "definition": {"vendor": "Danfoss", "model": "014G2461"},
+                },
+                {
+                    "ieee_address": "0x44",
+                    "friendly_name": "Head-4",
+                    "definition": {"vendor": "Danfoss", "model": "014G2461"},
+                },
+            ]
+        ),
+    )
+    comp.process_mqtt_message(
+        "zigbee2mqtt/Head-1", json.dumps({"load_estimate": 749, "pi_heating_demand": 24})
+    )
+    comp.process_mqtt_message(
+        "zigbee2mqtt/Head-2", json.dumps({"load_estimate": 616, "pi_heating_demand": 34})
+    )
+    comp.process_mqtt_message(
+        "zigbee2mqtt/Head-3", json.dumps({"load_estimate": 724, "pi_heating_demand": 8})
+    )
+    comp.process_mqtt_message(
+        "zigbee2mqtt/Head-4", json.dumps({"load_estimate": 750, "pi_heating_demand": 48})
+    )
+
+    mgr = CompanionRoomManager(comp)
+    mgr.add_virtual_room(
+        CompanionRoomConfig(
+            room_id="chapelle",
+            name="B-0 Chapelle",
+            head_ids=["0x11", "0x22", "0x33", "0x44"],
+        )
+    )
+
+    # First sync calculates (749 + 616 + 724 + 750) / 4 = 709.75 -> 710
+    stats = await mgr.async_sync_telemetry(now=1000.0)
+    assert stats["load_mean_writes"] == 4
+    for h in ("Head-1", "Head-2", "Head-3", "Head-4"):
+        assert (f"zigbee2mqtt/{h}/set", {"load_room_mean": 710}) in sent_mqtt
+
+    # Minor shift within LOAD_MEAN_DELTA (25) and before 900s is a no-op
+    sent_mqtt.clear()
+    comp.process_mqtt_message("zigbee2mqtt/Head-1", json.dumps({"load_estimate": 759}))
+    assert await mgr.async_sync_telemetry(now=1100.0) == {
+        "external_sensor_writes": 0,
+        "load_mean_writes": 0,
+    }
+
+    # Periodic refresh after 900s fires even if change was small
+    stats_periodic = await mgr.async_sync_telemetry(now=1901.0)
+    assert stats_periodic["load_mean_writes"] == 4
+    assert ("zigbee2mqtt/Head-1/set", {"load_room_mean": 712}) in sent_mqtt
+
+    # -8000 is excluded; big shift >= 25 triggers immediate write
+    sent_mqtt.clear()
+    comp.process_mqtt_message("zigbee2mqtt/Head-1", json.dumps({"load_estimate": -8000}))
+    comp.process_mqtt_message("zigbee2mqtt/Head-2", json.dumps({"load_estimate": 400}))
+    # Remaining valid loads: 400, 724, 750 -> mean = 624.67 -> 625. Delta |625 - 712| = 87 >= 25
+    stats_shift = await mgr.async_sync_telemetry(now=1950.0)
+    assert stats_shift["load_mean_writes"] == 4
+    assert ("zigbee2mqtt/Head-2/set", {"load_room_mean": 625}) in sent_mqtt
