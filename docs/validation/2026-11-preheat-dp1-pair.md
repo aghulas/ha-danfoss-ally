@@ -8,13 +8,13 @@
 > proven preheat route stays the local Zigbee tunnel (`0x0025`). This note records a single
 > positive field observation so it is not lost — it is **not** a promotion of the route.
 
-Context: see `docs/cloud-mqtt-preheat-proposal.md` for the closed candidate, its stages A/B, and
-the assessment; and `docs/preheat-tunnel-durability.md` for the overnight-hold question.
+Context: `docs/preheat.md` (the closed candidate, its stages A and B, the overnight-hold question
+and the assessment).
 
 ## Supervised write of the pair: publish + settings block (2026-11-20, 1.2.1-rc1)
 
 Same isolated head as stages A and B, build 1.2.1-rc1, trial armed on that head only. Run by the
-session in charge of the durability check (`docs/preheat-tunnel-durability.md`); figures as it
+session in charge of the durability check (`docs/preheat.md`); figures as it
 reported them.
 
 | Instant | `0x0025` raw (tunnel) | weekly schedule, current setpoint | cloud DP 1 | switch in Home Assistant |
@@ -34,7 +34,7 @@ reported them.
 - Limits: one head, one gateway, one firmware, one direction (OFF to ON), a flat schedule. The
   restore (ON to OFF through the same write) and the overnight hold are still to be read.
 - DP 1 stays a closed candidate until those are in; promotion is a change of its own, and it
-  must also settle what `docs/preheat-tunnel-durability.md` raises: a preheat write through the
+  must also settle what `docs/preheat.md` raises: a preheat write through the
   tunnel alone was seen undone overnight, which the cloud-side block may be the remedy for.
 
 ## Status

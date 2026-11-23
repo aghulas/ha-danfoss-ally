@@ -50,7 +50,10 @@ fetched by the integration itself and serve both the local tunnel and the cloud-
   - platforms: `climate`, `sensor`, `binary_sensor`, `number`, `switch`.
   - `mqtt_publisher.py` — modes `discovery` / `zigbee2mqtt`, source `cloud` / `local`.
   - `config_flow.py`, `diagnostics.py`, `const.py`.
-- `docs/` — `architecture.md`, `roadmap.md`, `reuse.md`.
+- `docs/` — `architecture.md` (channels, routing), `interface-contract.md` (R1–R7, DPs),
+  `companion-contract.md` + `v2-cutover.md` (2.x), `cloud-mqtt-channel.md`, `preheat.md`,
+  `first-write-procedure.md` (supervised trials), `roadmap.md`, `reuse.md`; trial records in
+  `docs/validation/`.
 - `tests/` — pytest-homeassistant-custom-component.
 
 ## Reuse (do not rewrite)

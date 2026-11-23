@@ -8,7 +8,7 @@
 | Zigbee tunnel DP 198/199, pure frames | `~/dev/danfoss-ally-mcp` → `danfoss_ally_mcp/local.py` (`trame_*`, `decoder_*`, `Lien`, `releve`) |
 | Fault-code decoding E1..E15 | `~/dev/danfoss-ally-mcp` → `danfoss_ally_mcp/modeles.py` (`decoder_defaut`, `DEFAUTS_BITS`) |
 | Official DP names | `~/dev/danfoss-app-capture/dp_schema_officiel.md` |
-| Decoding the Zigbee frames pushed in DP 199 over Tuya cloud MQTT | this repo → `api/local/tunnel.py` (`decode_frame`, `decode_attributes`): same layout as the LAN tunnel (`docs/cloud-mqtt-interface.md` §7) |
+| Decoding the Zigbee frames pushed in DP 199 over Tuya cloud MQTT | this repo → `api/local/tunnel.py` (`decode_frame`, `decode_attributes`): same layout as the LAN tunnel (`docs/cloud-mqtt-channel.md` §7) |
 | Listen-only capture of the Tuya cloud MQTT push | `~/dev/danfoss-ally-mcp` → `danfoss_ally_mcp/tuya/mqtt_cloud.py` (`ecoute_lancer`, `resumer`) |
 | Write guard-rails (model) | `~/dev/danfoss-ally-mcp` → `ecritures.py` (value validation) |
 

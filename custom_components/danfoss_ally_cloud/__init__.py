@@ -365,7 +365,7 @@ def _local_trial(entry: ConfigEntry) -> dict[str, object]:
             _LOGGER.warning(
                 "Local-tunnel supervised trial open for setting(s) %s on the designated trial "
                 "head only: not validated on real hardware yet, each first write must be "
-                "supervised (docs/tunnel-settings-trial.md).",
+                "supervised (docs/first-write-procedure.md).",
                 names,
             )
     return {DATA_LOCAL_SUPERVISED_SETTINGS: opened, DATA_LOCAL_SUPERVISED_HEAD: head}
@@ -474,7 +474,7 @@ async def _async_setup_mqtt_link(
       ``publish_dp`` (and only when a user toggles one); the first such write must be supervised
       (docs/first-write-procedure.md).
     - ``cloud_mqtt_probe``: every decoded inbound frame feeds a ``CoverageStats`` (aggregates only,
-      docs/cloud-mqtt-coverage.md). Without ``enable_cloud_mqtt`` the link is LISTEN-ONLY (no send
+      docs/cloud-mqtt-channel.md). Without ``enable_cloud_mqtt`` the link is LISTEN-ONLY (no send
       path) and closes itself after ``CLOUD_MQTT_PROBE_MAX_SECONDS``.
 
     Kill switch: turning the option(s) off reloads the entry, and the link closes on unload.

@@ -21,7 +21,7 @@ keeps them all because their **`unique_id`s differ**, and only disambiguates the
 |---|---|---|---|---|
 | 1 | **v2 Companion** (keep) | `danfoss_ally_cloud`, title *“Danfoss Ally Companion (zigbee2mqtt, danfoss2mqtt)”* | Tuya `dev_id` for **danfoss2mqtt** heads; the **Zigbee IEEE address** for **zigbee2mqtt** heads (`api/z2m_contract.py`) | native `group_id` (danfoss2mqtt) / virtual `room_id` (z2m) |
 | 2 | **v1.x direct cloud** (remove) | `danfoss_ally_cloud`, title = account e-mail | Tuya `dev_id` | `group_<group_id>` |
-| 3 | **Local bridge MQTT discovery** (remove) | `mqtt` / Mosquitto, from the **“Pont Danfoss local”** add-on (repo `sainte-marie-pilote`, **outside this repo**) | its own `danfoss_l_<devId>` discovery ids | — |
+| 3 | **Local bridge MQTT discovery** (remove) | `mqtt` / Mosquitto, from the **“Pont Danfoss local”** add-on (a separate private repository, **outside this repo**) | its own `danfoss_l_<devId>` discovery ids | — |
 
 Plus MTrab's separate **`danfoss_ally`** integration — a *different domain*, unrelated to this
 project; it is **out of scope** here (see §6).
@@ -34,7 +34,7 @@ Consequences worth knowing before the switch:
   by provider 3.
 - For heads reached over **zigbee2mqtt**, the Companion keys on the **IEEE address**, which differs
   from the v1.x cloud `dev_id`, so those heads **are** duplicated (`…_2`) and then tripled (`…_3`).
-- Removing a provider frees the plain entity-id (`climate.b_0_chapelle`) but the Companion entity
+- Removing a provider frees the plain entity-id (`climate.<room>`) but the Companion entity
   that was pushed to `…_2` **keeps its suffixed entity-id and its own history** — Home Assistant
   does not rename it back by itself. Reclaiming the clean id is a manual, optional step (§5).
 
@@ -98,7 +98,7 @@ set of entities. **Stop the add-on** (Settings → Add-ons → *Pont Danfoss loc
 off *Start on boot*). Stopping it halts new/updated discovery, but Home Assistant keeps entities
 created from **retained** discovery topics until those topics are cleared — hence §4.3.
 
-> The add-on's source is in repo `sainte-marie-pilote`, not here. If you want it to stop publishing a
+> The add-on's source is in a separate private repository, not here. If you want it to stop publishing a
 > *subset* of heads rather than all, that is an edit there (an `EXCLUS`/exclusion set, as was done
 > for the chapel heads), not in this integration.
 
@@ -169,7 +169,7 @@ above. The Repairs warning in §3 does **not** look at it (different domain).
   (`ha_entite_registre` → `config_entry_id` = the Companion entry).
 - The *“duplicate provider active”* Repairs warning is gone.
 - A read and a supervised setpoint write on one head still behave as validated on 2026-11-22
-  (`docs/real-validation-plan.md`): z2m heads over the local broker, danfoss2mqtt heads over the
+  (`docs/validation/real-validation-plan.md`): z2m heads over the local broker, danfoss2mqtt heads over the
   gateway bridge.
 
 ## 8. Rollback
@@ -184,5 +184,5 @@ above. The Repairs warning in §3 does **not** look at it (different domain).
 
 ---
 
-*Related: `docs/companion-contract.md` (v2 architecture), `docs/real-validation-plan.md`
+*Related: `docs/companion-contract.md` (v2 architecture), `docs/validation/real-validation-plan.md`
 (coherence validation), `docs/roadmap.md`.*

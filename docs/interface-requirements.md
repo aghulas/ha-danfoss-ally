@@ -18,11 +18,11 @@ therefore **in place and compliant with the contract**.
 
 - **Batches 0, 1, 2 — done** (merged into `main`). The sections below serve as the reference
   specification and historical record.
-- **Batch 3 — in progress**: embedded frontend base (PR #11).
-- **Batch 4 — to rebase on `main`**: read-only Schedule card (PR #16, currently stacked on batch 3).
-- **Batch 5 — to do**: editable Schedule card.
+- **Batches 3, 4, 5 — done**: embedded frontend base, then the Schedule card, read and write
+  (in releases since 0.2.0; the room card and the side panel followed in 0.6.0, contract §8).
 
-Only batches 3 to 5 remain; they share no file with the already-merged backend.
+Nothing of this document remains to be built. It is kept as the specification the contract and
+the frontend were written against.
 
 ## Scope
 

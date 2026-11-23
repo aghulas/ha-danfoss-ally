@@ -3,7 +3,7 @@
 **Dates:** 2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-21.
 Real-hardware validation on a large real install (~99 heads, two homes). Anonymised: room names,
 identifiers and site details replaced by neutral labels.
-Plan: [`../real-validation-plan.md`](../real-validation-plan.md). Preheat curve reading (§3):
+Plan: [`real-validation-plan.md`](real-validation-plan.md). Preheat curve reading (§3):
 [`2026-11-preheat-curves.md`](2026-11-preheat-curves.md).
 
 ## Labels used in this report
@@ -37,7 +37,7 @@ Entity ids are written with placeholders, e.g. `switch.<room_a>_child_lock`.
 ---
 
 Interactive session of 2026-11-18. The owner was present; the Danfoss iPhone app is the reference
-view. Follows `../real-validation-plan.md`. Claude reads HA (through the HA admin and Danfoss
+view. Follows `real-validation-plan.md`. Claude reads HA (through the HA admin and Danfoss
 connectors) and MQTT (through an MQTT connector); the owner reads the app. Pass = the three views
 agree.
 
@@ -869,7 +869,7 @@ Read only (HA history of `danfoss_ally_cloud`, then a tunnel read of both heads 
 - **Likely cause**: the tunnel write of 0x0025 did not touch the cloud's DP 1, which kept its
   original value (also seen on the official `danfoss_ally` integration's switches, unchanged all
   night). The gateway may re-impose its cached value at a night-time resync. To confirm; if so, a
-  tunnel-only preheat write does not hold (`../preheat-tunnel-durability.md`).
+  tunnel-only preheat write does not hold (`../preheat.md`).
 
 ## Deployment of `1.3.0-rc3` (`015fdf5`, #121 → #124) and tunnel settings trial, 2026-11-20 ~14:20–15:07 ✅
 
@@ -994,3 +994,37 @@ the hash matching the copied bundle (one entry). Card on Area X, mounted in memo
 an external room sensor (14 °C)", its own reading 15.2 / 16.4 °C underneath, setpoint 14 °C;
 `external_measured_room_sensor` = 1403 on the heads. Read only. Released as `1.3.1` the same morning
 (same component code).
+
+## Setpoint offset scale, Head V, 2026-11-21 ~10:31–14:20 — interrupted, scale still not measured
+
+Goal: settle the scale of `setpoint_offset` (attribute `0x404B`) by forcing an override through the
+tunnel (DP 171), so the valve is readable on a Saturday (whole site in setback, no comfort slot).
+Sequence approved by the owner.
+
+- 10:31:32 — trial armed (`local_supervised_settings = [setpoint_offset]`, Head V). The offset
+  number appeared at 0.0 (raw 0), range −2.5…+2.5 by 0.1, `write_path: local`, `write_scope: head`.
+- 10:31:53 — `set_override` 17 °C (tunnel, DP 171). Tunnel read ~10:35: current setpoint 17,
+  source external, offset 0, schedule unchanged.
+- Baseline 10:35–10:55, offset 0: temperature 16.9 °C, valve 1 %, no heat demand.
+- 10:55:12 — offset **−2.5** (raw −25, `confirmed_by_tunnel`). Theoretical target 14.5 < room 16.9:
+  the valve stayed closed (consistent with a negative shift, not distinguishable from the baseline).
+- 11:09:55 — offset **+2.5** (raw +25, `confirmed_by_tunnel`). Theoretical target 19.5 > room 16.9.
+  At 11:18 the valve was at 20 % with heat demand: positive direction confirmed.
+
+**Interrupted.** The trial reached no measurable plateau: the cloud temperature stayed frozen at
+16.9 °C (last update 10:31) and the session ended around 11:30 before the Home Assistant history was
+read. The +2.5 offset and the 17 °C override therefore stayed in place for about 2.5 h and the room
+heated (valve seen at 99 % by another session). **The scale is still not measured**: direction
+confirmed, raw value in tenths (−25 / +25 written and read back through the tunnel).
+
+**Clean-up (owner's explicit go-ahead).** A Home Assistant restart by another session held the
+write lock at 14:07; waited for, not cancelled.
+
+- 14:15:50 — `clear_override`: back to the schedule's setpoint (14 °C), no heat demand.
+- 14:18:17 — offset → **0** (`confirmed_by_tunnel`, raw 0).
+- 14:18:34 — trial closed (no supervised setting, no trial head).
+
+Final state, read at 14:20 (tunnel and per-device cloud route): setpoint 14, offset 0, no heat
+demand, Saturday schedule intact, `OccupiedSetpoint` 1400. The cloud route still showed the valve at
+94 % (stale cache); every fresh signal said no heat. **To redo on a weekday, in a comfort slot, to
+measure the plateau** (the cloud temperature does not follow on a setback Saturday).

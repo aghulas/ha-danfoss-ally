@@ -1,7 +1,7 @@
 """Async Tuya-cloud MQTT link for isolated-head DP publish (EXPERIMENTAL, gated OFF by default).
 
 Builds on :mod:`mqtt_publish` (frame codec + credential derivation, reverse-engineered and validated
-on real frames — see docs/cloud-mqtt-publish.md). This module adds the live layer: credentials for a
+on real frames — see docs/cloud-mqtt-channel.md). This module adds the live layer: credentials for a
 **dedicated R&D deviceId** (so it never shares the Tuya session with the Danfoss app, the iPhone app
 or the MCP connector), one connection per config entry, a per-gateway ``SeqOrigin`` kept for the
 whole session, subscription to ``smart/mb/in/<gw>`` and inbound-frame decoding, and a gated publish.

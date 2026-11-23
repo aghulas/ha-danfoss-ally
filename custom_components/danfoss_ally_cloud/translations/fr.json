@@ -74,7 +74,7 @@
      "scan_interval": "Intervalle d'interrogation du cloud (secondes)",
      "distinct_device_id": "Utiliser un identifiant d'appareil dédié (cohabiter avec l'app Danfoss / le connecteur MCP sans se déconnecter mutuellement)",
      "enable_local": "Activer le tunnel Zigbee local (passerelles) pour les écritures que le cloud rate",
-     "local_supervised_settings": "Essai supervisé — réglages de tête écrits par le TUNNEL LOCAL, PAS encore validés sur matériel réel, ouverts pour une première écriture faite en personne sur une tête de test (voir docs/tunnel-settings-trial.md). Nécessite le tunnel local. Laisser vide sinon",
+     "local_supervised_settings": "Essai supervisé — réglages de tête écrits par le TUNNEL LOCAL, PAS encore validés sur matériel réel, ouverts pour une première écriture faite en personne sur une tête de test (voir docs/first-write-procedure.md). Nécessite le tunnel local. Laisser vide sinon",
      "local_supervised_head": "Essai supervisé — la SEULE tête de test sur laquelle s'ouvrent les réglages du tunnel local cochés ci-dessus. Aucune autre tête n'a d'entité d'écriture. Laisser sur — hors essai : rien n'est alors ouvert",
      "post_command_refresh": "Rafraîchir les têtes qui viennent d'être commandées via la route individuelle (R-3 : la liste groupée retarde de plusieurs minutes après un changement). Désactivé par défaut — activez-le pour une session de validation réelle",
      "enable_vacation_write": "Activer les écritures de vacances (pose/annulation). Désactivé par défaut — n'activez que pour une validation réelle supervisée",

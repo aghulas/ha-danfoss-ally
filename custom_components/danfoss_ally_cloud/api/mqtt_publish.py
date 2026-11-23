@@ -4,7 +4,7 @@ The path the Danfoss app uses to write an **isolated** head's settings:
 ``tuya.m.custom.wkf.settings.change`` is accepted by the cloud but never applied (W-3,
 docs/interface-contract.md §4.2), whereas publishing the DP on ``smart/mb/out/<gateway devId>``
 is. This module builds/parses that frame and derives the broker credentials. Full wire
-specification: docs/cloud-mqtt-publish.md.
+specification: docs/cloud-mqtt-channel.md.
 
 Frame 2.3 (bytes)::
 
@@ -212,7 +212,7 @@ def build_dp_publish(
     return PublishPlan(topic=topic_out(gateway_id), payload=payload, seq=seq, origin=origin)
 
 
-# --- Broker credentials (see docs/cloud-mqtt-publish.md) ---
+# --- Broker credentials (see docs/cloud-mqtt-channel.md) ---
 
 
 def _md5_hex(s: str) -> str:

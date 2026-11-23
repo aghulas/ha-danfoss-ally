@@ -124,7 +124,7 @@ CONF_POST_COMMAND_REFRESH = "post_command_refresh"
 # Cloud-MQTT isolated-head WRITE path (EXPERIMENTAL, R&D). The Danfoss app writes an isolated head's
 # settings by publishing the DP over Tuya cloud MQTT (not `settings.change`, which the cloud accepts
 # but never applies — W-3). The frame codec and credential derivation are reverse-engineered and
-# validated (decoder on 6/6 real frames, credentials byte-exact vs the app; docs/cloud-mqtt-publish
+# validated (decoder on 6/6 real frames, credentials byte-exact vs the app; docs/cloud-mqtt-channel
 # .md), but NO publish to a real head has been validated yet. OFF by default: when ON, an isolated
 # head's child-lock / window-detection switch may route through a dedicated-session MQTT link
 # instead of being unavailable. Enable only for a supervised validation session (Rémi present).
@@ -135,7 +135,7 @@ CONF_ENABLE_CLOUD_MQTT = "enable_cloud_mqtt"
 # and per DP: counts, first and last instant, intervals. Aggregates only, served by the diagnostics
 # with no identifier. It settles whether the push could become a read source (stage 4). A link that
 # is listen-only closes itself after CLOUD_MQTT_PROBE_MAX_SECONDS, so a forgotten option does not
-# keep a broker connection open on the user's account. See docs/cloud-mqtt-coverage.md.
+# keep a broker connection open on the user's account. See docs/cloud-mqtt-channel.md.
 CONF_CLOUD_MQTT_PROBE = "cloud_mqtt_probe"
 
 # Conservative defaults: the account's quota and security come first.
@@ -162,7 +162,7 @@ CONF_CLOUD_MQTT_SUPERVISED_HEAD = "cloud_mqtt_supervised_head"
 # setpoint offset (0x404B), regulation speed (0x4020), valve exercise day / time (0x4010 / 0x4011),
 # external measured room sensor (0x4015), external window open (0x4003), load balancing (0x4032).
 # None is proven on real hardware: each write entity exists only while its setting is listed here,
-# ``enable_local`` is on, and only for the ONE head chosen below (docs/tunnel-settings-trial.md).
+# ``enable_local`` is on, and only for the ONE head chosen below (docs/first-write-procedure.md).
 CONF_LOCAL_SUPERVISED_SETTINGS = "local_supervised_settings"
 # The ONE head that local-tunnel trial applies to (its device id; EMPTY by default). With no head
 # designated nothing opens, whatever is listed. A real device identifier: redacted in the

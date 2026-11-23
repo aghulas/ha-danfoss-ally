@@ -58,7 +58,7 @@ optimistic state.
 **Not validated on real hardware.** Every new tunnel write in this release (external measured room
 sensor, external window open, load balancing, and automatic-adaptation on/off) is closed by default
 and opens only for a supervised trial, like the batch C2 settings
-(`docs/tunnel-settings-trial.md`). The new read-only entities and the message-center sensor only
+(`docs/first-write-procedure.md`). The new read-only entities and the message-center sensor only
 read.
 
 **Added**
@@ -86,7 +86,7 @@ read.
     refreshed periodically — the integration exposes the setting only, with a ready-made Home
     Assistant **blueprint** to feed it from any temperature sensor on a timer
     (`blueprints/automation/danfoss_ally_cloud/external_room_sensor_feed.yaml`; import and configure
-    it, see `docs/tunnel-settings-trial.md`).
+    it, see `docs/first-write-procedure.md`).
   - **External window open** (`window_open_external`, attribute `0x4003`, boolean): a config
     `switch`.
   - **Load balancing** (`load_balancing_enable`, attribute `0x4032`, boolean): a config `switch`.
@@ -110,7 +110,7 @@ external window contact, load balancing, and the room sensor).
   `device_id` and the message type). Login and system messages are filtered out; new-message
   detection uses a high-water mark saved in Home Assistant storage; a dedicated, conservative
   30-minute poll. `docs/message-center.md` documents the interface, and
-  `docs/cloud-mqtt-interface.md` maps the Tuya cloud MQTT channel from a real listen-only capture.
+  `docs/cloud-mqtt-channel.md` maps the Tuya cloud MQTT channel from a real listen-only capture.
 
 ## 1.3.1 — Room sensor in the room card by area
 
@@ -181,7 +181,7 @@ except for the refusals listed under "Changed", which are deliberate.
 **Known issue, not fixed in this release.** A preheat change written by the preheat switch (local
 tunnel only) does not survive the night: on 2026-11-19/20, heads whose preheat differed from the
 cloud's value were back to the cloud's value by about 05:00, with no write from the integration
-(docs/preheat-tunnel-durability.md). The switch is unchanged here.
+(docs/preheat.md). The switch is unchanged here.
 
 ### Added
 
@@ -266,7 +266,7 @@ cloud's value were back to the cloud's value by about 05:00, with no write from 
   gateway's echo is never taken as confirmation: orientation is read back through the local
   tunnel (attribute `0x4014`, also the select's state), viewing direction through the per-device
   cloud route. Each attempt is reported in `trial_result`. **Not validated on real hardware**;
-  procedure in `docs/viewing-orientation-trial.md`.
+  procedure in `docs/first-write-procedure.md`.
 - **Supervised trial of four head settings through the local tunnel, closed by default**: radiator
   covered (`0x4016`), setpoint offset (`0x404B`, −2.5 to 2.5 °C in tenths: Zigbee2MQTT's scale,
   not confirmed here), regulation speed (`0x4020`, 1 to 10) and valve exercise day / time
@@ -277,7 +277,7 @@ cloud's value were back to the cloud's value by about 05:00, with no write from 
   is disarmed. Values are checked before sending; after each write the head is read back through
   the tunnel and the entity shows what it says, with a clear error on a rejection, a disagreeing
   read-back or no read-back (the entity then stays unavailable until the head is read again).
-  **Not validated on real hardware**; procedure in `docs/tunnel-settings-trial.md`.
+  **Not validated on real hardware**; procedure in `docs/first-write-procedure.md`.
 
 ### Changed
 
@@ -309,7 +309,7 @@ cloud's value were back to the cloud's value by about 05:00, with no write from 
   through the Zigbee tunnel. The candidate write therefore publishes DP 1 and then posts the whole
   settings block through `settings.change`, as the app does for the settings of that block; the
   tunnel confirmation window goes from 60 to 120 s. Nothing changes for an install that has not
-  armed the trial (docs/cloud-mqtt-preheat-proposal.md).
+  armed the trial (docs/preheat.md).
 - **Polling backs off on repeated cloud errors**: the interval doubles on consecutive transient
   failures, up to 15 minutes, and returns to the configured value at the first success. A refused
   sign-in still triggers re-authentication at once.
@@ -355,7 +355,7 @@ cloud's value were back to the cloud's value by about 05:00, with no write from 
 
 - `docs/isolated-head-schedule-writes.md`: what the schedule services send to an isolated head,
   what happened on 2026-11-19, and the trials still to run.
-- `docs/preheat-tunnel-durability.md`: a tunnel-only preheat write does not survive the night.
+- `docs/preheat.md`: a tunnel-only preheat write does not survive the night.
 - `docs/architecture.md`, `docs/interface-contract.md`: isolated-head thermostat write and its
   behaviour outside a comfort slot, runtime topology sync and `DanfossCoordinator.room_retired`,
   account resolution of the WebSocket commands, schedule-write guards.
@@ -371,7 +371,7 @@ re-authentication step, single-head rooms in the building panel). Every new opti
 Adds the write path the Danfoss app uses for **isolated** heads (those not grouped into a room),
 which `tuya.m.custom.wkf.settings.change` does not reach (W-3): a DP publish over Tuya cloud MQTT.
 Reverse-engineered from the app and **validated on real hardware (2026-11-19)** — see
-docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
+docs/cloud-mqtt-channel.md. **Off by default**; existing installs are unchanged.
 
 ### Added
 
@@ -405,7 +405,7 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   longest interval, heads never seen), and serves the aggregates in the diagnostics with no device
   identifier and no DP value. Without `enable_cloud_mqtt` the link has no send path and closes
   itself after 48 h. Tooling for roadmap stage 3; the 24 h run on a real install is still to do
-  (docs/cloud-mqtt-coverage.md).
+  (docs/cloud-mqtt-channel.md).
 
 - **Candidate DPs and the supervised-trial options.** A DP ships first as a candidate
   (`MQTT_CANDIDATE_DPS`) that only the option `cloud_mqtt_supervised_dps` (empty by default) opens,
@@ -432,7 +432,7 @@ docs/cloud-mqtt-publish.md. **Off by default**; existing installs are unchanged.
   `write_path` / `write_trial`. **Tried on real hardware (2026-11-20), not passed**: the app's
   own toggle reaches the head, the integration's publish only changed the cloud's DP 1, and the
   write was reported "not confirmed" as designed. DP 1 stays closed; the tunnel remains the only
-  preheat route (docs/cloud-mqtt-preheat-proposal.md).
+  preheat route (docs/preheat.md).
 
 ### Changed (cloud-MQTT link hardening)
 

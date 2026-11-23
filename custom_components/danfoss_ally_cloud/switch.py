@@ -25,13 +25,13 @@ Preheat: writing DP 1 over cloud HTTP only changes the gateway cache; the real l
 attribute 0x0025, via the LOCAL TUNNEL. The preheat switch therefore exists only if the
 `enable_local` option is on and the gateway reachable; otherwise it is absent (rather than lying).
 Its state always comes from the tunnel. DP 1 over cloud MQTT is a CANDIDATE, closed: whether that
-publish reaches the head at all is not established (docs/cloud-mqtt-preheat-proposal.md). Armed for
+publish reaches the head at all is not established (docs/preheat.md). Armed for
 a supervised trial on the designated isolated head, the write goes out over cloud MQTT and is
 confirmed by the tunnel alone; everywhere else, and always by default, the tunnel writes.
 
 Viewing direction (DP 101, Zigbee2MQTT ``viewing_direction``): a CANDIDATE on cloud MQTT, closed.
 The switch exists only while its supervised trial is armed for the designated isolated head
-(docs/viewing-orientation-trial.md). Its state is the cloud's DP 101 (unavailable when the cloud
+(docs/first-write-procedure.md). Its state is the cloud's DP 101 (unavailable when the cloud
 does not carry it); a write is confirmed by the per-device cloud route, never by the echo.
 """
 

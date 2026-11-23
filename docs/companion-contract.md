@@ -48,7 +48,7 @@ integration (`ha-danfoss-ally` v2) connects solely to Mosquitto:
 1. **Zero optimistic state:** `<prefix>/<friendly_name>` state topics are only updated after the
    underlying channel confirms the write (gateway echo, tunnel read-back, or verified HTTP route).
 2. **Hardware-proven routing (R1–R7):** `danfoss2mqtt` enforces the exact same routing and safety
-   gates (`docs/interface-contract.md`, `docs/mqtt-routing-target.md`) as `1.4.x`.
+   gates (`docs/interface-contract.md`, `docs/cloud-mqtt-channel.md`) as `1.4.x`.
 3. **Seamless migration between bridges:** moving a radiator head (`014G2461`) or room sensor
    (`014G2480`) from a Danfoss Ally gateway (`danfoss2mqtt`) to a Zigbee2MQTT coordinator
    (`zigbee2mqtt`) requires zero UI or automation rework in the Companion.
@@ -169,7 +169,7 @@ While `zigbee2mqtt` manages individual Zigbee devices, a Danfoss heating system 
 
 ---
 
-## 4. Staged Implementation Plan (v2.0 Roadmap)
+## 4. Implementation batches (all shipped in 2.0.0)
 
 Each batch is a self-contained PR with ≥ 95 % test coverage and zero regression on existing suites.
 

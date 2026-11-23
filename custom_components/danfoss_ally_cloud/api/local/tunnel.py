@@ -342,7 +342,7 @@ SETPOINT_OFFSET_MIN, SETPOINT_OFFSET_MAX = -2.5, 2.5
 # ``external_measured_room_sensor``). The sentinel raw -8000 (= -80 °C) DISABLES the external
 # sensor: the head then regulates on its own internal measurement. The head also resets the value
 # to -8000 by itself after 30 min to 3 h without an update (radiator_covered mode dependent), so a
-# live feed must be refreshed periodically (docs/tunnel-settings-trial.md).
+# live feed must be refreshed periodically (docs/first-write-procedure.md).
 EXTERNAL_ROOM_SENSOR_DISABLED = -8000  # raw hundredths, -80.0 °C
 EXTERNAL_ROOM_SENSOR_MIN, EXTERNAL_ROOM_SENSOR_MAX = -80.0, 35.0  # °C (raw -8000..3500)
 
