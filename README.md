@@ -244,7 +244,7 @@ integration can do the same, **gated behind the `enable_cloud_mqtt` option (off 
   offset, regulation speed and valve exercise day / time can be written as Zigbee attributes
   through the local tunnel, as Zigbee2MQTT does. The options `local_supervised_settings` (empty by
   default) and `local_supervised_head` (none by default) open them on one test head only, for a
-  first write done in person (`docs/tunnel-settings-trial.md`). Leave both empty in normal use.
+  first write done in person (`docs/first-write-procedure.md`). Leave both empty in normal use.
 - **Requirement**: the path uses `paho-mqtt` (declared in `manifest.json` as `>=1.6.1,<3`, the MQTT client Home Assistant's own MQTT integration already ships — HA pins the exact version); Home Assistant installs it automatically. No manual step.
 - **Unofficial and optional.** Nothing in the integration needs this channel: with the option off
   (the default) no connection to the Tuya broker is ever opened, and an isolated head's child lock
@@ -275,7 +275,7 @@ the heads) and counts, per head and per DP, the reports the broker pushes. The a
 entry's diagnostics, with no device identifier. It exists to decide whether those pushed reports
 could later replace part of the polling; it is not needed for normal use. It opens a long-lived
 connection on your account (same caveat as above) and closes itself after 48 h. How to run and read
-it: `docs/cloud-mqtt-coverage.md`.
+it: `docs/cloud-mqtt-channel.md`.
 
 ## Status
 

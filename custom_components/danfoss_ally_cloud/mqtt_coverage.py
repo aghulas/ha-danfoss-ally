@@ -9,7 +9,7 @@ The identifiers it indexes on (gateway devId, head node id) stay in memory only.
 to the diagnostics names a head by its position in the diagnostics ``devices`` list and its display
 name, never by an identifier. Nothing here is logged.
 
-How to run the measure and read it: docs/cloud-mqtt-coverage.md.
+How to run the measure and read it: docs/cloud-mqtt-channel.md.
 """
 
 from __future__ import annotations

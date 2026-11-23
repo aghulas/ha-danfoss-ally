@@ -455,7 +455,7 @@ Head settings (DP 30 child lock, DP 116 window detection) — **real-hardware re
   DP 116, 18, 27 and 120, then DP 118 + 16 and DP 119 (2026-11-19/20), each by its own supervised
   write (table below).** When the
   echo does not come, the write is confirmed by one read of the head through the per-device route,
-  else it fails. (Protocol details: docs/cloud-mqtt-publish.md.)
+  else it fails. (Protocol details: docs/cloud-mqtt-channel.md.)
 
   Status of each DP on this path (`api/writes.py`):
 
@@ -570,7 +570,7 @@ reference, over the published product schema.
 manufacturer attributes of the thermostat cluster (`0x0201`, code `0x1246`), written with one
 manufacturer-specific Write Attributes frame, as Zigbee2MQTT does, then read back through the
 tunnel (`api/local/tunnel.py` `TUNNEL_SETTINGS`, `local_write.py`). Closed by default, on one
-designated head only (§5.1, `docs/tunnel-settings-trial.md`).
+designated head only (§5.1, `docs/first-write-procedure.md`).
 
 | Attribute | Meaning | ZCL type | Value over the tunnel |
 |---|---|---|---|
@@ -756,7 +756,7 @@ by the MCP connector (`smartlife.m.*` family; the APK also exposes the `thing.m.
   unavailable after a write that was sent and not confirmed, until the head is read again).
   Attributes `write_path`, `write_scope`, `write_trial`, and the last attempt's `trial_result`,
   `trial_at`, `trial_error`. Removed from the registry when the trial is disarmed. Writes and
-  their confirmation: §4.2; procedure: docs/viewing-orientation-trial.md.
+  their confirmation: §4.2; procedure: docs/first-write-procedure.md.
 - Only on the head designated in `local_supervised_head`, for the settings ticked in
   `local_supervised_settings`, with `enable_local` on, a verified model and a head the tunnel can
   address (grouped or isolated), config category: `switch` "radiator covered setting"
@@ -770,7 +770,7 @@ by the MCP connector (`smartlife.m.*` family; the APK also exposes the `thing.m.
   the head back and raises on a rejection, a disagreeing read-back or no read-back. Attributes
   `write_path: local`, `write_scope: head`, `write_trial: true`, `raw`, `read_at`, and the last
   attempt's `trial_result`, `trial_at`, `trial_error`. Removed from the registry when the trial
-  is disarmed. Procedure: docs/tunnel-settings-trial.md.
+  is disarmed. Procedure: docs/first-write-procedure.md.
   Three further settings share this gate (batch C3, same channel, not proven): `number` "external
   room sensor setting" (−80 to 35 °C by 0.1, `0x4015`, hundredths of °C; **−80 °C disables it**;
   must be refreshed periodically on a real head), `switch` "external window open setting"

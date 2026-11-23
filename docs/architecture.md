@@ -1,5 +1,11 @@
 # Architecture
 
+> **Where this applies (2.x).** Since 2.0.0 Home Assistant reads the heads through the **Companion**:
+> Zigbee2MQTT and `danfoss2mqtt` publish to the local Mosquitto broker and the integration talks to
+> the broker only (`docs/companion-contract.md`; switching an install over: `docs/v2-cutover.md`).
+> The three channels and the routing rules below are unchanged: they are enforced by
+> `danfoss2mqtt` (the same `api/` layer) and by the direct-cloud mode of the frozen 1.x line.
+
 ## Principle: three channels, one router
 
 A head can be reached through **three channels**. None of them covers everything, and each has
@@ -19,8 +25,8 @@ Status of the cloud-MQTT channel: validated on real hardware and on `main`, behi
 the setpoint bounds and the pause, comfort and setback setpoints of an isolated head
 (`api.writes.MQTT_WRITE_DPS`, each proven by its own supervised write, on 2026-11-19 and
 2026-11-20); preheat (DP 1, confirmed by the tunnel only) is implemented as a candidate, closed
-until its supervised write; a diagnostic entity reports the link state. Wire format: `docs/cloud-mqtt-publish.md`; procedure for a first
-write of a new DP: `docs/first-write-procedure.md`. With the option off, an isolated head's child
+(`docs/preheat.md`); a diagnostic entity reports the link state. The channel itself:
+`docs/cloud-mqtt-channel.md`; procedure for a first write of a new DP: `docs/first-write-procedure.md`. With the option off, an isolated head's child
 lock, bounds and setpoints have no path (the switch is unavailable, the numbers are absent, and
 the head's thermostat is read-only).
 
@@ -39,9 +45,9 @@ Established on real hardware; these cases are why a single channel is not enough
   R1–R7 and calls: `docs/interface-contract.md`.
 - Preheat: writing DP 1 on the cloud side only changes the gateway cache. The real lever is the
   Zigbee attribute **0x0025** (bit 0 schedule, bit 1 preheat), reachable only through the local
-  tunnel. **That write alone is not durable** (2026-11-20): four heads whose bit differed from the
+  tunnel. **That write alone is not durable** (2026-11-20): heads whose bit differed from the
   cloud's DP 1 were back at the cloud's value within one night. Finding and change plan:
-  `docs/preheat-tunnel-durability.md`.
+  `docs/preheat.md`.
 - `update_time` is an event-driven registration timestamp: never infer freshness from it. `online`
   is authoritative for connectivity.
 - Head settings of an **isolated** head (child lock, window detection): the HTTP `settings.change`
@@ -78,7 +84,7 @@ frames, so neither channel asks anything more of the user.
 | Window detection | Cloud HTTP: room publish (whole room) | Local tunnel when the head answers locally; otherwise cloud MQTT when enabled and connected (proven 2026-11-19); otherwise unavailable |
 | Setpoint bounds (upper, lower) | No path yet | Cloud MQTT when enabled and connected (proven 2026-11-19); otherwise no entity |
 | Preheat | Local tunnel (0x0025) | Local tunnel (0x0025). Cloud MQTT (DP 1) is a **candidate**, closed: on the trial head only, written over cloud MQTT and confirmed by the tunnel read alone; the state always comes from the tunnel |
-| Viewing direction (DP 101), orientation (DP 133) | No path | **Candidates**, closed: on the trial head only, cloud MQTT; orientation confirmed by the tunnel flag 0x4014 and shown from it, viewing direction confirmed by the per-device route (`docs/viewing-orientation-trial.md`); no entity otherwise |
+| Viewing direction (DP 101), orientation (DP 133) | No path | **Candidates**, closed: on the trial head only, cloud MQTT; orientation confirmed by the tunnel flag 0x4014 and shown from it, viewing direction confirmed by the per-device route (`docs/first-write-procedure.md`); no entity otherwise |
 | Radiator covered (0x4016), setpoint offset (0x404B), regulation speed (0x4020), valve exercise day / time (0x4010 / 0x4011) | **Not proven**, closed: local tunnel on the trial head only (grouped or isolated) | Same |
 | Setpoint override until the next schedule change | Local tunnel (DP 171) | Local tunnel (DP 171) |
 | Valve exercise day and time | Local tunnel | Local tunnel |
@@ -125,21 +131,22 @@ for a DP proven on it; (4) otherwise unavailable.
   closed candidate with that rule built in (`api.writes.MQTT_TUNNEL_CONFIRMED_DPS`: the echo and
   the cloud read are refused as confirmation). Supervised write of 2026-11-20: **not passed** —
   the publish changed the cloud's DP 1 and not the head, although the app's own toggle does reach
-  it. The tunnel stays the only preheat route: `docs/cloud-mqtt-preheat-proposal.md`. It is an
-  incomplete one: the head takes the value, then goes back overnight to the value the cloud holds
-  (`docs/preheat-tunnel-durability.md`).
+  it. The tunnel stays the only preheat route, and an incomplete one: the head takes the value,
+  then goes back overnight to the value the cloud holds (`docs/preheat.md`).
 - Viewing direction (DP 101) and orientation (DP 133), batch C of the Zigbee2MQTT alignment, are
   closed candidates with their own confirmation and never the echo: DP 133 is in
   `MQTT_TUNNEL_CONFIRMED_DPS` (the head's flag 0x4014 read through the tunnel); DP 101, which the
   tunnel cannot read, is in `MQTT_CLOUD_CONFIRMED_DPS` (the per-device route, the head's display
   being the trial's proof). Their entities exist only while their trial is armed
-  (`docs/viewing-orientation-trial.md`).
+  (`docs/first-write-procedure.md`). DP 133 passed its trial on 2026-11-20 (not promoted yet);
+  DP 101 is still to run.
 - Radiator covered, setpoint offset, regulation speed and valve exercise (batch C2) are written
   through the **local tunnel**, as Zigbee2MQTT writes the same attributes. Each is closed unless
   ticked in `local_supervised_settings`, and then only on the one head of
   `local_supervised_head` (`local_write.py`). The head is read back through the tunnel after each
   write; that read is the head's own answer but uses the channel written, so the trial adds the
-  app and the head as independent sources (`docs/tunnel-settings-trial.md`).
+  app and the head as independent sources (`docs/first-write-procedure.md`). Written and read
+  back on one head on 2026-11-20; still closed (no independent source, offset scale unproven).
 - After a successful write, the entity shows what the channel returns (echo or re-read), with a
   timeout and a clear error. No optimistic state.
 
@@ -148,7 +155,7 @@ for a DP proven on it; (4) otherwise unavailable.
 - **Cloud MQTT as a read source.** If the pushed DP reports cover the whole fleet, they could
   replace the post-command per-device read and allow a longer polling period. To measure first:
   which heads and DPs are reported, and how often. The listen-only option `cloud_mqtt_probe` does
-  that measure (`docs/cloud-mqtt-coverage.md`); its 24 h run on a real install is pending.
+  that measure (`docs/cloud-mqtt-channel.md`); its 24 h run on a real install is pending.
 - **Account exposure.** A long-lived broker connection from a client that is not the app is more
   visible than spaced HTTP polling. The channel stays opt-in, with backoff and a clean shutdown.
 - **Isolated-head comfort and setback setpoints on a head in manual mode.** Proven on a head

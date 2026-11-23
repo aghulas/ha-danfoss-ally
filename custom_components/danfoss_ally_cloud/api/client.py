@@ -146,7 +146,7 @@ class CloudClient:
     @property
     def mqtt_identity(self) -> dict[str, str | None]:
         """uid + partnerIdentity from the last login, for the Tuya cloud MQTT username/user-topic
-        (docs/cloud-mqtt-publish.md §5). Populated by ``async_login``; None before first login."""
+        (docs/cloud-mqtt-channel.md §12). Populated by ``async_login``; None before first login."""
         return {"uid": self._uid, "partner_identity": self._partner_identity}
 
     def _build_client(self) -> TuyaHttpClient:

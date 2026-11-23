@@ -4,7 +4,7 @@ MQTT) and the valve exercise day of a head (attribute 0x4010, local tunnel).
 Orientation (Zigbee2MQTT ``thermostat_orientation``, the app's "mounting vertical / horizontal")
 is a CANDIDATE on Tuya cloud MQTT, closed by default. The select exists only while its supervised
 trial is armed for the designated isolated head of a verified model, with the local tunnel on
-(docs/viewing-orientation-trial.md):
+(docs/first-write-procedure.md):
 
 - state: the head's own flag (Danfoss attribute 0x4014), read through the local tunnel by the
   daily settings pass or by the read-back after a write; never the cloud's DP 133, which is only

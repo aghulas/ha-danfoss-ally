@@ -153,30 +153,31 @@ done (entities `heat_required` and `mounting_mode`); item 4 was settled by keepi
 **C — new writes**, one at a time, each with a supervised write read back from an independent
 source (`docs/architecture.md`, rules for adding a route).
 
-- **C1, implemented, not tried on real hardware.** Viewing direction (DP 101) and orientation
+- **C1, implemented; orientation tried, viewing direction not yet.** Viewing direction (DP 101) and orientation
   (DP 133) over cloud MQTT, as the app's captured frames: closed candidates, selectable for a
   supervised trial like DP 1, with entities on the designated isolated head only (a config
   `switch` and a config `select`). Orientation is confirmed by the tunnel flag `0x4014` and shown
   from it; viewing direction is confirmed by the per-device cloud route (the tunnel does not read
   the user-interface cluster, so the head's display is the trial's proof). The cloud does carry
   both DPs in its device list (`"101": false`, `"133": "Horizontal"` on every head of a capture of
-  the app's fleet), so DP 101 has a state to show. Procedure: `docs/viewing-orientation-trial.md`.
-- **Open question: does `false` of attribute `0x4014` mean horizontal?** It is Zigbee2MQTT's
-  reading, not observed here. Until it is settled the orientation write refuses to send when the
-  tunnel's flag and the cloud's DP 133 disagree under that reading, and the trial starts by
-  comparing the head, the flag and the cloud (read only). The answer also fixes the read-only
-  "orientation" sensor of B2.
+  the app's fleet), so DP 101 has a state to show. Procedure: `docs/first-write-procedure.md`.
+- **Settled (2026-11-20): `false` of attribute `0x4014` means horizontal**, as Zigbee2MQTT reads
+  it (one head: mounted horizontally, app horizontal, flag false, cloud `Horizontal`; then written
+  both ways and read back). The orientation write still refuses to send when the tunnel's flag
+  and the cloud's DP 133 disagree under that reading. DP 133 remains a candidate until promoted.
 
-- **C2, implemented, not tried on real hardware.** Radiator covered (`0x4016`), setpoint offset
+- **C2, implemented, written and read back on one head (2026-11-20), still closed.** Radiator covered (`0x4016`), setpoint offset
   (`0x404B`), regulation speed (`0x4020`) and valve exercise day / time (`0x4010` / `0x4011`)
   through the local tunnel, as Zigbee2MQTT writes the same manufacturer attributes (types:
   boolean, int8, uint8; enum8 / uint16). Closed by default; options `local_supervised_settings`
   and `local_supervised_head` open them on one head (grouped or isolated), with config entities
   on that head only. Each write is validated, then read back through the tunnel and shown from
-  the read-back. Procedure: `docs/tunnel-settings-trial.md`.
+  the read-back. Procedure: `docs/first-write-procedure.md`.
 - **Open question: the scale of the setpoint offset.** Tenths of °C (raw −25…25) is Zigbee2MQTT's
-  reading; the read-only sensor of B2 and the C2 write both assume it. The trial writes the
-  smallest step first and needs a source that shows the offset in °C to settle it.
+  reading; the read-only sensor of B2 and the C2 write both assume it. Established on 2026-11-20
+  and 21: the raw value is written and read back in tenths, and a positive offset raises the
+  regulation target without shifting the measured temperature. That raw 25 is 2.5 °C is not
+  proven (no plateau reached); to redo on a weekday in a comfort slot.
 - **C3, implemented, not tried on real hardware.** External measured room sensor (`0x4015`,
   int16, hundredths of °C), external window open (`0x4003`, boolean) and load balancing (`0x4032`,
   boolean) through the local tunnel, as Zigbee2MQTT writes the same Danfoss manufacturer attributes
@@ -186,7 +187,7 @@ source (`docs/architecture.md`, rules for adding a route).
   one head, with config entities on that head only, read back through the tunnel after each write.
   Entities: a `number` "External room sensor setting" (°C, −80 to 35; **−80 °C disables it**, raw
   −8000), a `switch` "External window open setting", a `switch` "Load balancing setting".
-  Procedure: `docs/tunnel-settings-trial.md`.
+  Procedure: `docs/first-write-procedure.md`.
   - **External room sensor must be refreshed periodically.** Zigbee2MQTT's own documentation: the
     head resets the value to −8000 (disabled) after 30 min (room-sensor mode, `radiator_covered`
     true) to 3 h (auto-offset mode, `radiator_covered` false) without an update, and the value
@@ -194,7 +195,7 @@ source (`docs/architecture.md`, rules for adding a route).
     setting only; feeding it live from a Home Assistant sensor is an automation on the user's side.
     A ready-made **blueprint** ships it with a UI
     (`blueprints/automation/danfoss_ally_cloud/external_room_sensor_feed.yaml`; import and configure
-    it, see `docs/tunnel-settings-trial.md`), and a raw example is in that doc too.
+    it, see `docs/first-write-procedure.md`), and a raw example is in that doc too.
   - **Load balancing is gateway/room business on an Ally gateway.** It stays closed by default and
     is exposed for completeness; its real effect needs `load_room_mean` updates the gateway owns.
 
@@ -205,7 +206,7 @@ source (`docs/architecture.md`, rules for adding a route).
   `[false, 0]` — "automatic adaptation run enabled"). It is a **boolean**, hence a `switch`
   "Automatic adaptation run", not a `select`. Closed by default; the same options
   (`local_supervised_settings` / `local_supervised_head`) open it on one head, read back through
-  the tunnel after each write. Procedure: `docs/tunnel-settings-trial.md`.
+  the tunnel after each write. Procedure: `docs/first-write-procedure.md`.
   - **Not the run launch/cancel command.** The multi-value enum that triggers or cancels an
     adaptation run is a **separate** attribute, `0x404C` `adaptation_run_control`
     (`idle` / `initiate_adaptation` / `cancel_adaptation`). It is not read back by `0x404E`, so it

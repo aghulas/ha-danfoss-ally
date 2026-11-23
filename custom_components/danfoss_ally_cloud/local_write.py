@@ -3,7 +3,7 @@
 Zigbee2MQTT writes these manufacturer attributes of the thermostat cluster (0x0201, code 0x1246);
 the local tunnel speaks the same Zigbee attributes, so it can write them too. None of these writes
 is proven on real hardware: each is CLOSED by default and opens only for a supervised trial
-(docs/tunnel-settings-trial.md), on ONE designated head, while ``enable_local`` is on:
+(docs/first-write-procedure.md), on ONE designated head, while ``enable_local`` is on:
 
 ======================  =================  =====================================================
 Trial key               Attribute          Value

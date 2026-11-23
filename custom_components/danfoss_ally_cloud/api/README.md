@@ -22,7 +22,7 @@ It provides:
   inbound report decoding, DP publish, confirmation by the gateway's echo. One connection per Tuya
   session; the write path carries the DPs proven on real hardware only (`writes.MQTT_WRITE_DPS`).
 
-Wire format and derivations: `docs/cloud-mqtt-publish.md` in the repository.
+Wire format and derivations: `docs/cloud-mqtt-channel.md` in the repository.
 
 ## Packaging
 

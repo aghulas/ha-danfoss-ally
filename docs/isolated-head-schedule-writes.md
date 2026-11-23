@@ -3,12 +3,12 @@
 Status: **read-only investigation of 2026-11-20.** Nothing was written, read or changed on the real
 install for this note: it rests on the code at `a89e590`, on the validation records of this repo and
 on the local write journal of the Home Assistant admin connector. Guards 1 and 2 of the proposals
-were then implemented on the owner's decision (see "Implemented"); the tables below describe the
-code **before** them. The other proposals and the trials are still open.
+were then implemented on the owner's decision and shipped in 1.3.0 (see "Implemented"); the tables
+below describe the code **before** them. The other proposals and the trials are still open.
 
 The question: what do `set_schedule`, `copy_schedule`, `restore_schedule`, `set_override` and
 `clear_override` really do to an **isolated** head (a head in no schedule-group, target
-`{type: "device"}`), and can they stay as they are in 1.3.0?
+`{type: "device"}`), and can they stay as they are?
 
 ## Short answer
 
@@ -141,7 +141,7 @@ What this does and does not establish:
   showed OFF while the head was in manual. That is a change of mode, not a preheat write, and the
   schedule payloads carry nothing that could write preheat. The head's own return overnight
   (manual at X, then mode 3 with a flat schedule at X and preheat on) is already recorded.
-- **The two heads of `docs/preheat-tunnel-durability.md`** (P3 and P4). One of them shows
+- **Heads P3 and P4 of `docs/preheat.md`.** One of them shows
   ON 21:56 and OFF 22:04, which is the trial head's sequence (mode 3 after the override, manual
   after the app). If P4 is the trial head — inferred from the times, not checked by identifier —
   its "revert" that night is the manual-to-flat-schedule settling above, **not** evidence that the
@@ -176,7 +176,7 @@ Rooms are not concerned by any of this.
 6. Whether the 2026-11-17 proof holds for several days at once, for an emptied day, and on another
    gateway.
 
-## Proposals for 1.3.0 (none implemented)
+## Proposals (1 and 2 implemented, see below)
 
 ### Guards
 
@@ -200,8 +200,8 @@ Rooms are not concerned by any of this.
    and `0x0025` from the head (`applied` / `mismatch`), with a second pass at 15 min; without it,
    `unverified` as today. `restore` stops trusting the cloud's DP 172 when the tunnel can answer.
 
-Guards 1 and 2 are the ones needed before 1.3.0 offers a schedule editor or a climate write on
-isolated heads; 4 and 5 can follow.
+Guards 1 and 2 were the ones needed before a schedule editor or a climate write was offered on
+isolated heads; 3, 4 and 5 are still open.
 
 ### Implemented (guards 1 and 2)
 
@@ -228,8 +228,6 @@ isolated heads; 4 and 5 can follow.
   timeline.
 - `docs/first-write-procedure.md`: the warning on preparing a trial with a schedule write names the
   three calls and their times.
-- `docs/preheat-tunnel-durability.md`: P4 is probably a change of mode, so the evidence for the
-  overnight revert rests on P1, P2 and, unexplained, P3.
 - `services.yaml` and translations: say that an isolated head must follow a schedule.
 
 ### Supervised trials

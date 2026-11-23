@@ -21,7 +21,7 @@ docs/zigbee2mqtt-alignment.md), each with its own confirmation and never the ech
 ``async_mqtt_write_orientation`` reads the head's flag 0x4014 back through the tunnel;
 ``async_mqtt_write_viewing_direction`` reads the per-device cloud route (the tunnel does not read
 the user-interface cluster), the trial's proof being the head's display
-(docs/viewing-orientation-trial.md).
+(docs/first-write-procedure.md).
 """
 
 from __future__ import annotations
@@ -216,7 +216,7 @@ async def async_mqtt_write_preheat(
     write of 2026-11-20), while the app's toggle is followed by a reprogramming of the head through
     the Zigbee tunnel. The settings block is what the app posts next to the publish for the
     settings of that block; whether that pair is what triggers the reprogramming is NOT proven —
-    this function is the trial of it (docs/cloud-mqtt-preheat-proposal.md).
+    this function is the trial of it (docs/preheat.md).
 
     The gateway's echo and the cloud's DP 1 are deliberately ignored: they showed the new value
     while the head had not moved. So:
@@ -386,7 +386,7 @@ async def async_mqtt_write_orientation(
             f"cloud-MQTT orientation write refused: the head's flag 0x4014 is {flag} and the "
             f"cloud's DP 133 is {cloud!r}, which disagree if false means horizontal (Zigbee2MQTT's "
             "reading, not established here). Nothing was sent: settle that first "
-            "(docs/viewing-orientation-trial.md)"
+            "(docs/first-write-procedure.md)"
         )
     if flag == expected:
         return UNCHANGED

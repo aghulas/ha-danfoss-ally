@@ -37,20 +37,20 @@ def write_allowed(dev: DanfossDevice) -> bool:
 MQTT_WRITE_DPS = frozenset({30, 116, 18, 27, 120, 118, 16, 119})
 # 1 preheat (see below), 101 viewing direction and 133 orientation (mounting vertical /
 # horizontal), the three as the app publishes them for an isolated head (contract §4.2). None of
-# their supervised trials has passed yet (101 and 133: docs/viewing-orientation-trial.md).
+# their supervised trials has passed yet (101 and 133: docs/first-write-procedure.md).
 MQTT_CANDIDATE_DPS = frozenset({1, 101, 133})
 # DPs whose write the gateway's echo and the cloud read CANNOT confirm: both may answer from the
 # gateway's cache while the head has not changed. DP 1 (preheat) is the known case: over HTTP it
 # only ever changed that cache; the head's real preheat is bit 1 of Zigbee attribute 0x0025. A
 # write of such a DP is confirmed only by reading the head through the local tunnel, so a caller
-# without a tunnel read must not send it (docs/cloud-mqtt-preheat-proposal.md). DP 133 is in the
+# without a tunnel read must not send it (docs/preheat.md). DP 133 is in the
 # same case by caution: the head's orientation flag (Danfoss attribute 0x4014) is read through
 # the tunnel, so that read, not the cloud's echo of the label, is what confirms it.
 MQTT_TUNNEL_CONFIRMED_DPS = frozenset({1, 133})
 # DPs whose write the gateway's ECHO cannot confirm, and that have no tunnel read: confirmed only
 # by the per-device cloud route, read until it shows the value. DP 101 (viewing direction) lives
 # in the user-interface cluster, which the tunnel does not read. The cloud's value is still the
-# gateway's view: the trial's proof is the head's display (docs/viewing-orientation-trial.md).
+# gateway's view: the trial's proof is the head's display (docs/first-write-procedure.md).
 MQTT_CLOUD_CONFIRMED_DPS = frozenset({101})
 # Exact string values of the enum DPs of this path (the app's frame, product schema 03wvrwpv).
 MQTT_ENUM_VALUES: dict[int, tuple[str, ...]] = {133: ORIENTATION_VALUES}

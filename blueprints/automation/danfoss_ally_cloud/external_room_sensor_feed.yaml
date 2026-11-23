@@ -19,7 +19,7 @@ blueprint:
     Prerequisite: the "External room sensor setting" number exists only while the
     integration's supervised trial is armed for that head
     (local_supervised_settings / local_supervised_head). The write is NOT validated
-    on real hardware — see docs/tunnel-settings-trial.md.
+    on real hardware — see docs/first-write-procedure.md.
   domain: automation
   author: ha-danfoss-ally
   input:

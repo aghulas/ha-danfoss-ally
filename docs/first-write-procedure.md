@@ -1,4 +1,8 @@
-# First real cloud-MQTT write of a DP — supervised procedure
+# Supervised first writes — procedure and sheets
+
+One procedure and its sheets for every write that is not yet proven: DPs over Tuya cloud MQTT
+(generic procedure and per-DP sheets), viewing direction and orientation, and head settings
+through the local tunnel. Trial records: `docs/validation/2026-11-real-hardware-validation.md`.
 
 A DP is **proven** on the Tuya cloud MQTT channel only after one supervised write on real hardware,
 read back from a source that does not depend on that channel (`docs/architecture.md`, "Rules for
@@ -31,13 +35,12 @@ report, 15 s) or, failing that, by one read of the head through the per-device c
 Otherwise the call raises a clear error. Nothing is ever shown that was not read back.
 One exception, preheat (DP 1): the echo and the cloud read prove nothing for it, so its write is
 confirmed by a read of the head through the local tunnel only (its sheet below). Viewing direction
-(DP 101) and orientation (DP 133) do not accept the echo either; they have a sheet of their own,
-`docs/viewing-orientation-trial.md`.
+(DP 101) and orientation (DP 133) do not accept the echo either; they have a sheet of their own
+below.
 
 Head settings written through the **local tunnel** rather than cloud MQTT (radiator covered,
 setpoint offset, regulation speed, valve exercise) follow the same discipline with their own
-options (`local_supervised_settings`, `local_supervised_head`) and sheet:
-`docs/tunnel-settings-trial.md`.
+options (`local_supervised_settings`, `local_supervised_head`) and their own sheet, below.
 
 ## Generic procedure
 
@@ -216,24 +219,25 @@ Home Assistant and in the app.
 - **Not covered**: the same write during a comfort slot (the value is then not in force; the
   schedule read above is what establishes it), and a head in manual mode.
 
-### DP 101 — viewing direction, DP 133 — orientation (candidates, not tried)
+### DP 101 — viewing direction, DP 133 — orientation (candidates)
 
-Sheet of its own: `docs/viewing-orientation-trial.md` (DP 133 confirmed by the tunnel flag
-`0x4014`, DP 101 by the per-device route and the head's display).
+Sheet of their own, below (DP 133 confirmed by the tunnel flag `0x4014`, DP 101 by the per-device
+route and the head's display). DP 133 passed its trial on 2026-11-20; DP 101 is still to run.
 
 ### DP 1 — preheat (candidate; stage A positive, stage B failed, 2026-11-20)
 
 The known trap: over HTTP, DP 1 only changed the gateway cache while the head's real preheat (bit 1
 of Zigbee attribute `0x0025`) did not move. The gateway's echo and the cloud read therefore confirm
 nothing here; **only `0x0025` read through the local tunnel does**. Background and assessment:
-`docs/cloud-mqtt-preheat-proposal.md`. Two stages; stage B is run only if stage A is positive.
+`docs/preheat.md`. Two stages; stage B is run only if stage A is positive.
 
-Result on 2026-11-20 (tables in the proposal): stage A positive — the app's toggle reached the head
+Result on 2026-11-20 (tables in `docs/preheat.md`): stage A positive — the app's toggle reached the head
 within a minute; stage B **not passed** — the integration's `{"1": true}` changed the cloud's DP 1
 and not the head, 15 minutes later still. DP 1 stays a closed candidate. A listen the same day
 showed that the app's toggle is followed by a reprogramming of the head through the Zigbee tunnel,
-which the bare publish does not trigger. The write was changed accordingly (below): **stage B is
-to be run again with it; the earlier result says nothing about the new write.**
+which the bare publish does not trigger. The write was changed accordingly (below) and passed
+once with it, OFF to ON on one head (`docs/validation/2026-11-preheat-dp1-pair.md`); the restore
+and the overnight hold are still to be read.
 
 Preconditions for both, on top of the generic ones: the local tunnel answers **this head** right
 before starting (its preheat switch has a value, not "unavailable"), and a raw read of `0x0025`
@@ -314,6 +318,306 @@ Reading the result:
      equal `V0`. Record both reads. These are two real writes to the head: the owner's to do.
 - **Passed** means only: this publish reaches the head. Promotion is a change of its own, which
   must say when cloud MQTT would be preferred to the tunnel that confirms it.
+
+## Sheet — viewing direction (DP 101) and orientation (DP 133)
+
+Batch C of `docs/zigbee2mqtt-alignment.md`: the first new head-setting writes of the Zigbee2MQTT
+alignment. Both are written over Tuya cloud MQTT exactly as the Danfoss app does for an isolated
+head (`docs/interface-contract.md` §4.2: `{"101": bool}`, `{"133": "Vertical" | "Horizontal"}`).
+Both are **closed candidates** (`api.writes.MQTT_CANDIDATE_DPS`): nothing exists and nothing can
+be sent until the trial is armed for one head. This sheet completes the generic procedure above;
+its preconditions and stop rules apply unchanged. **Rémi present, on site, for every write.**
+
+Status after the trial of 2026-11-20 (one isolated head):
+
+- **DP 133 passed, both ways** (horizontal → vertical → horizontal, `confirmed_by_tunnel` in 22 s
+  and 17 s; the cloud's DP 133 followed). The mapping is settled: flag `0x4014` false =
+  horizontal, as Zigbee2MQTT reads it. Still a candidate in the code: promotion is a change of
+  its own.
+- **DP 101 was refused before anything was sent**: the per-device route gave no DP 101 (it
+  carries the DPs under `dataPointInfo.dps`, fixed since). To be run again with the owner at the
+  head's display.
+
+### What the code does
+
+| | Viewing direction (DP 101) | Orientation (DP 133) |
+|---|---|---|
+| Entity (trial head only) | `switch` "Viewing direction", config category | `select` "Mounting orientation" (`horizontal` / `vertical`), config category |
+| Exists when | `enable_cloud_mqtt` on, DP 101 ticked, head designated, head isolated, verified model | same with DP 133, **and** `enable_local` on with the head addressable by the tunnel |
+| State shown | the cloud's DP 101 (bulk list, then the per-device route after a write); unavailable when absent | the head's flag `0x4014` read through the tunnel (daily pass or read-back); the cloud's DP 133 only as attribute `cloud_value` |
+| Checked before sending | value is a boolean; the per-device route gives DP 101; equal to the value → `unchanged`, nothing sent | value is exactly `"Vertical"` or `"Horizontal"`; the tunnel gives the flag; flag and cloud's DP 133 agree under false = horizontal; equal to the value → `unchanged`, nothing sent |
+| Confirmation | per-device cloud route shows the value, read every 15 s for 60 s | tunnel flag shows the value, read every 15 s for 120 s |
+| Never accepted | the gateway's echo | the gateway's echo, the cloud's DP 133 |
+| After "not confirmed" | error raised | error raised, and the select is **unavailable** until the head is read again |
+
+Every attempt is recorded on the entity: `trial_result` (`confirmed_by_cloud`,
+`confirmed_by_tunnel`, `unchanged`, `refused`, `not_confirmed`), `trial_at`, `trial_error`. The
+entities also show `write_path: cloud_mqtt`, `write_scope: head`, `write_trial: true`.
+
+Two limits, by construction:
+
+- **DP 101 has no source independent of the gateway.** The tunnel reads the thermostat cluster
+  only; viewing direction lives in the user-interface cluster. The per-device route is the
+  gateway's view, as the echo is. The proof that the head applied it is **its display**, looked
+  at by Rémi. A cloud confirmation without the display turning is the "accepted but not applied"
+  failure.
+- **The meaning of the flag `0x4014`** (false horizontal, true vertical) was Zigbee2MQTT's reading
+  and was confirmed on one head on 2026-11-20. The write still refuses to send when the flag and
+  the cloud disagree under that reading, and step 1 below stays as a check on any new head.
+
+### Arming (options of the integration)
+
+1. `enable_cloud_mqtt` on; `enable_local` on (for DP 133).
+2. `cloud_mqtt_supervised_head`: the test head, **isolated**, verified model, online, nobody
+   relying on it. Rémi chooses it on site.
+3. `cloud_mqtt_supervised_dps`: tick `101` **or** `133`, one per session (one DP at a time).
+4. Optional, for DP 101: `post_command_refresh` on, so the switch follows the per-device route
+   right after the write instead of waiting for the bulk list (it lags for minutes).
+5. The entry reloads. Check: "Cloud MQTT link" sensor on; the new entity exists on the test head
+   only, with `write_trial: true`; no such entity on any other head.
+
+### DP 133 — orientation
+
+1. **Settle the mapping first (read only).** On the test head, look at the head itself (how it is
+   mounted), the select's `raw` (the flag) and its `cloud_value`, and the app's mounting screen.
+   Record the three. If the select is unavailable, wait for the daily pass or restart the
+   integration (a pass runs after each start). Expected under Zigbee2MQTT's reading: `raw: false`
+   with a horizontal head and `cloud_value: Horizontal`. Anything else: **stop**, record it in the
+   alignment doc (open question), write nothing.
+2. **Write** the other orientation from the select, once. The call takes up to two minutes (tunnel
+   reads). Outcomes:
+   - returns, `trial_result: confirmed_by_tunnel`: the flag moved;
+   - `refused`: nothing was sent (the error says why);
+   - `not_confirmed`: the frame went out and the flag did not move; the select goes unavailable.
+     Read the head (local survey service) before anything else.
+3. **Read back** the app's mounting screen and the cloud's DP 133 (`cloud_value`, after the next
+   poll). Watch the head for a minute: does it react (display, motor, adaptation run)? Note it.
+4. **Restore** the original orientation the same way and read it back the same way.
+
+### DP 101 — viewing direction
+
+1. **Baseline.** Look at the head's display and note which way it reads; note the switch's state
+   and the app's viewing-direction toggle. They must agree; if the switch is unavailable, the
+   cloud does not carry DP 101 for this head: stop.
+2. **Write** the other value from the switch, once (up to a minute). `confirmed_by_cloud` means the
+   per-device route shows it; it does not mean the head applied it.
+3. **Look at the display.** It must have turned. If the cloud and the app changed and the display
+   did not: the "accepted but not applied" failure, stop and restore from the app.
+4. **Restore** the original value from the switch, look at the display again.
+
+### Rolling back
+
+- Untick the DP in `cloud_mqtt_supervised_dps` and set `cloud_mqtt_supervised_head` back to none
+  (and `enable_cloud_mqtt` off unless a proven DP needs it). The entry reloads, the entity and its
+  registry entry are removed; nothing else changes.
+- A head left in the wrong orientation or viewing direction: set it back from the Danfoss app on
+  that head's page (the reference publisher), then read it again (tunnel for 133, display for 101).
+
+### After the trial
+
+Record in the local validation notes (never real identifiers in the repository): model, firmware,
+what step 1 showed, confirmation delays, what the head did. Then:
+
+- the answer to the mapping question goes into `docs/zigbee2mqtt-alignment.md` §6 and the comment
+  of `mqtt_write.ORIENTATION_FLAG` (and the read-only "orientation" sensor if inverted);
+- a DP that passed moves from `MQTT_CANDIDATE_DPS` to `MQTT_WRITE_DPS` in a change of its own,
+  which also decides how its entity exists outside a trial.
+
+## Sheet — head settings through the local tunnel
+
+Batch C2 of `docs/zigbee2mqtt-alignment.md`: four head settings that Zigbee2MQTT writes as
+Danfoss manufacturer attributes of the thermostat cluster (`0x0201`, manufacturer code `0x1246`),
+written here the same way through the local Zigbee tunnel of the Ally gateway. Batch C3 added the
+**external measured room sensor** (`0x4015`, int16, hundredths of °C), the **external window
+open** flag (`0x4003`, boolean) and **load balancing** (`0x4032`, boolean); batch C4 the
+**automatic adaptation run** on/off (`0x404E` `adaptation_run_settings`, boolean) — the
+enable/disable of the nightly run, **not** the launch/cancel command `0x404C`
+`adaptation_run_control`, which is not implemented. All are closed by default: nothing exists and
+nothing can be sent until the trial is armed for one head. This sheet completes the generic
+procedure above; its preconditions and stop rules apply unchanged. **Rémi present, on site, for
+every write.**
+
+Status after the trials of 2026-11-20 and 21 (one isolated head):
+
+- **Radiator covered, setpoint offset, regulation speed, valve exercise day and time**: each
+  written and restored, `confirmed_by_tunnel`, nothing else changed on the head. No independent
+  source showed them (the app has no screen for the offset; the public API's "radiator covered"
+  did not follow).
+- **Setpoint offset**: the raw value is in tenths (±25 written and read back) and a positive
+  offset **raises the regulation target** without shifting the measured temperature. That raw 25
+  means 2.5 °C is not proven: no plateau was reached in two attempts. To redo on a weekday, in a
+  comfort slot.
+- **Hold over time**: a valve exercise day written through the tunnel alone held one night. One
+  setting, one head; nothing is established for the others (a tunnel-only preheat write does not
+  hold, `docs/preheat.md`).
+- **Not tried**: external room sensor, external window open, load balancing, automatic
+  adaptation run.
+- All stay closed in the code: a setting becomes proven in a change of its own.
+
+### What the code does
+
+| Trial key | Entity (trial head only) | Attribute, ZCL type | Values accepted |
+|---|---|---|---|
+| `radiator_covered` | `switch` "Radiator covered setting" | `0x4016`, boolean | on / off |
+| `setpoint_offset` | `number` "Setpoint offset setting", °C | `0x404B`, int8 | −2.5 to 2.5 by 0.1, sent in tenths (raw −25 to 25) |
+| `regulation_speed` | `number` "Regulation speed setting" | `0x4020`, uint8 | integer 1 to 10 |
+| `valve_exercise` | `select` "Valve exercise day setting" and `time` "Valve exercise time setting" | `0x4010` enum8 / `0x4011` uint16 (minutes) | a weekday; a time HH:MM |
+| `external_room_sensor` | `number` "External room sensor setting", °C | `0x4015`, int16 | −80 to 35 °C by 0.1, sent in hundredths (raw −8000 to 3500); **−80 °C (raw −8000) disables it** |
+| `window_open_external` | `switch` "External window open setting" | `0x4003`, boolean | on / off |
+| `load_balancing` | `switch` "Load balancing setting" | `0x4032`, boolean | on / off |
+| `adaptation_run_settings` | `switch` "Automatic adaptation run" | `0x404E`, bitmap8 | on / off |
+
+- **Exists when**: `enable_local` on, the key ticked in `local_supervised_settings`, the head chosen
+  in `local_supervised_head`, a verified model, and the tunnel can address the head (node id,
+  gateway key fetched). Grouped or isolated heads alike: the tunnel writes one head. Every other
+  head has no such entity; disarming removes the entities and their registry entries.
+- **Before sending**: the value is checked (type, range, step). A refused value sends nothing.
+- **Write**: one manufacturer-specific Write Attributes frame. The valve exercise day and time
+  are written together, as the existing `set_descaling` service does: the half not being changed
+  is first read from the head itself, on the same link, never taken from a stored value (a head
+  whose day is undefined must get a day before a time).
+- **After the write**: the head's settings are read back through the tunnel (the same single-head
+  read as the orientation trial, `async_refresh_settings`). The entity shows what the head said,
+  never the value written. Errors raised:
+  - `refused`: nothing was sent (invalid value, gateway unknown or unreachable);
+  - `rejected`: the head answered the write with an error status, or the read-back holds another
+    value — the entity shows the read-back;
+  - `not_confirmed`: the head did not answer the read-back. The entity goes **unavailable** until
+    the head is read again (the value shown before can no longer be trusted).
+- Every attempt is recorded on the entity: `trial_result` (`confirmed_by_tunnel`, `refused`,
+  `rejected`, `not_confirmed`), `trial_at`, `trial_error`, with `write_path: local`,
+  `write_scope: head`, `write_trial: true`, and `raw` / `read_at` of the read shown.
+
+Two limits, by construction:
+
+- **The read-back uses the channel written.** The tunnel read is the head's own answer, which is
+  better than a gateway cache, but it is not an independent source in the sense of
+  `docs/architecture.md`. The Danfoss app (where it shows the setting) and the head itself are
+  the independent sources of this trial.
+- **The scale of the setpoint offset is not confirmed** (tenths of °C is Zigbee2MQTT's reading).
+  The read-back proves the raw value only. Step 2 below bounds the risk.
+
+### Before arming
+
+1. Enable the read-only diagnostic sensors of the test head that are disabled by default:
+   "Regulation speed", "Setpoint offset", "Valve exercise day", "Valve exercise time" (the
+   "Radiator covered" binary sensor is on by default). They show the daily read, with `read_at`.
+2. Restart the integration so that a settings pass runs (one runs after each start); wait until
+   the sensors are available with a fresh `read_at`.
+3. **Record `V0` for every setting**: the sensors' values and `raw` attributes, and the app's
+   screen for the same settings when it has one. These are the restore values.
+
+### Arming (options of the integration)
+
+1. `enable_local` on.
+2. `local_supervised_head`: the test head — online, nobody relying on it. The isolated head used
+   for the earlier trials is the natural choice.
+3. `local_supervised_settings`: tick **one** setting per session (one write at a time).
+4. The entry reloads. Check: one log warning naming the setting under trial; the new entity exists
+   on the test head only, with `write_trial: true`, and shows `V0`.
+
+### Per setting
+
+Each time: write once, read the outcome (`trial_result`), check the app and the head, then
+restore `V0` from the same entity and read it back the same way.
+
+1. **Radiator covered.** Flip it. Expected: `confirmed_by_tunnel`, the switch shows the new value.
+   Check the app's setting if it shows one. No immediate thermal effect is expected (it changes
+   how the head estimates the room temperature). Restore `V0`.
+2. **Setpoint offset.** The tenths-of-°C scale is **not confirmed**, so the first write is
+   `V0 + 0.1` (raw +1), never a large value: if the head read the raw value in whole degrees
+   instead of tenths, the error stays at 1 °C. **Check it at once in the app**: if the app shows
+   anything other than `V0 + 0.1 °C`, restore `V0` immediately and stop the offset trial. The
+   offset shifts the temperature the head regulates to, not the one it measures, so the valve is
+   no check: the scale is settled only by a source that shows the offset in °C. Without one (the
+   app has no such setting), the scale stays unconfirmed after the trial: say so in the notes.
+   Restore `V0`.
+3. **Regulation speed.** Write `V0 ± 1`. No visible effect is expected in the short term. Check
+   the app if it shows it. Restore `V0`.
+4. **Valve exercise.** Change the day first (another weekday), check it reads back with the time
+   unchanged; then change the time the same way. Optional independent check: put the exercise a
+   few minutes ahead on today's weekday and watch or listen to the head at that time (the valve
+   should run its exercise stroke) — not observed here so far. Restore day and time `V0`.
+5. **External window open.** Flip it on, then off. Expected: `confirmed_by_tunnel`, the switch
+   showing the new value. The head should treat the room as window-open while on (the internal
+   window state and heat demand change); check the app/head if it shows one. Restore `V0` (off).
+6. **Load balancing.** Only if you mean to: on an Ally gateway the room drives this, so a lone
+   write may be ignored or re-driven by the gateway. If you try it, flip it, read the outcome,
+   check nothing changed on another head of the room, and restore `V0` at once.
+7. **External room sensor.** Write a plausible room temperature (e.g. `V0`'s room temp, or 20.0),
+   and **check the app/head at once**: the head should regulate on the external value (its reading
+   follows it; with `radiator_covered` false it applies an auto-offset). Then write **−80.0 °C**
+   and confirm it reads back as −80.0 (disabled): the head returns to its own internal sensor.
+   Note that a real live feed must be refreshed periodically — the head resets the value to −8000
+   by itself after 30 min to 3 h (see below). Restore `V0` (−80.0 disables it if there was none).
+8. **Automatic adaptation run.** Flip the "Automatic adaptation run" switch and read the outcome:
+   `confirmed_by_tunnel`, the switch showing the new value. This only enables or disables the
+   nightly adaptation (`0x404E`); it does **not** launch a run now — that is a separate command
+   (`0x404C`, not implemented). No immediate visible effect is expected; the "adaptation run"
+   status sensor (`0x404D`) will only change when a run actually occurs. Restore `V0`.
+
+#### Feeding the external sensor live (user-side automation)
+
+The integration exposes the setting only; it does not push a sensor's value on a timer. On a real
+head the value must be refreshed every few minutes or the head disables it (Zigbee2MQTT docs: reset
+to −8000 after 30 min in room-sensor mode, 3 h in auto-offset mode). Feed it from a Home Assistant
+temperature sensor with a small automation, writing the `number` entity periodically, for example:
+
+```yaml
+alias: Room X — feed the external room sensor to the head
+mode: single
+triggers:
+  - trigger: time_pattern
+    minutes: "/5"
+  - trigger: state
+    entity_id: sensor.room_x_temperature
+conditions:
+  - condition: template
+    value_template: "{{ states('sensor.room_x_temperature') | float(default=none) is not none }}"
+  - condition: template  # do not feed a stale reading
+    value_template: "{{ (now() - states.sensor.room_x_temperature.last_reported).total_seconds() < 1200 }}"
+actions:
+  - action: number.set_value
+    target:
+      entity_id: number.room_x_external_room_sensor_setting  # the trial head's entity
+    data:
+      value: "{{ states('sensor.room_x_temperature') | float }}"  # °C; the integration sends hundredths
+```
+
+To stop feeding it, set the `number` to −80 (disabled) or disarm the trial.
+
+A packaged blueprint ships the same automation with a UI:
+`blueprints/automation/danfoss_ally_cloud/external_room_sensor_feed.yaml`. Import it in Home
+Assistant (Settings → Automations → Blueprints → Import, or **My Home Assistant** import of the raw
+file URL), then create an automation from it, choosing the source temperature sensor and the trial
+head's "External room sensor setting" number. It resends on a timer (default every 5 min, below the
+head's reset window) and on each new reading, skips stale or implausible values, and never writes
+the −80 °C disable value by accident. It remains closed-by-default in spirit: it does nothing until
+the trial number exists (the trial is armed) and you create an automation from it.
+
+Stop and restore at once if: a write raises `rejected` with a value nobody wrote; the app shows a
+change on another head or another setting; the head reports a fault; or anything changes on
+another head.
+
+### Rolling back
+
+- **A setting to its previous value**: write `V0` back from the same entity; it is confirmed by
+  the same read-back. If the entity is unavailable after `not_confirmed`, restart the integration
+  (the settings pass after start reads the head again), then write `V0`. The valve exercise can
+  also be restored with the existing `set_descaling` service (day and time in one call).
+- **Disarm**: untick every setting in `local_supervised_settings` and set `local_supervised_head`
+  back to none. The entry reloads; the entities and their registry entries are removed; nothing
+  else changes (the read-only sensors stay).
+
+### After the trial
+
+Record in the local validation notes (never real identifiers in the repository): model, firmware,
+`V0`, each value written, `trial_result`, what the app and the head showed, delays. Then:
+
+- the offset scale answer goes into `docs/zigbee2mqtt-alignment.md` §6 and the comment of
+  `tunnel.TUNNEL_SETTINGS` (and the read-only "Setpoint offset" sensor if it is not tenths);
+- a setting that passed becomes proven in a change of its own, which also decides how its entity
+  exists outside a trial (today: trial head only).
 
 ## Returning to the released build
 

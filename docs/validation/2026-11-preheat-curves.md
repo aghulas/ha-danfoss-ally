@@ -4,7 +4,7 @@
 Real-hardware validation on a large real install (~99 heads, two homes). Anonymised: room names,
 identifiers and site details replaced by neutral labels.
 Main report: [`2026-11-real-hardware-validation.md`](2026-11-real-hardware-validation.md) (labels
-are shared with it). Plan: [`../real-validation-plan.md`](../real-validation-plan.md), §3.
+are shared with it). Plan: [`real-validation-plan.md`](real-validation-plan.md), §3.
 
 ## Labels used in this report
 
