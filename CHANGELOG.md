@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.3 — Bridge connectivity diagnostic sensors (`danfoss2mqtt` & `zigbee2mqtt`)
+
+**Added**
+
+- **Bridge connectivity binary sensors** (`binary_sensor.py`): the v2.x Companion now exposes one
+  diagnostic `connectivity` binary sensor per configured MQTT bridge prefix (e.g.
+  `binary_sensor.danfoss2mqtt_bridge`, `binary_sensor.zigbee2mqtt_bridge`), tracking
+  `<prefix>/bridge/state` (`online`/`offline`) and reporting the number of discovered devices.
+
 ## 2.0.2 — Fix virtual-room load balancing (`load_estimate` instead of valve opening)
 
 **Fixed**
