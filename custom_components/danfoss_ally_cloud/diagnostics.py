@@ -16,7 +16,14 @@ from homeassistant.core import HomeAssistant
 
 from .api.messages import CATEGORIES
 from .api.mqtt_client import CloudMqttLink
-from .const import DATA_COORDINATOR, DATA_MESSAGES, DATA_MQTT_COVERAGE, DATA_MQTT_LINK, DOMAIN
+from .const import (
+    DATA_COORDINATOR,
+    DATA_LOCAL,
+    DATA_MESSAGES,
+    DATA_MQTT_COVERAGE,
+    DATA_MQTT_LINK,
+    DOMAIN,
+)
 from .coordinator import DanfossCoordinator, DanfossMessageCoordinator
 from .mqtt_coverage import CoverageStats
 
@@ -57,6 +64,32 @@ async def async_get_config_entry_diagnostics(
         "options": async_redact_data(dict(entry.options), TO_REDACT),
         "device_count": len(coordinator.data),
         "devices": devices,
+    }
+    # Preheat availability, surfaced here so its ABSENCE on a head is explicit rather than silent
+    # (docs/preheat.md). The only proven preheat lever is the Zigbee attribute 0x0025 through the
+    # LOCAL TUNNEL; the cloud DP 1 route is a closed candidate. In MQTT-companion mode the
+    # integration holds no local tunnel (and danfoss2mqtt heads carry no mesh_id), so the preheat
+    # switch is created on no head there; a supervised DP 1 trial can only run from a direct-cloud
+    # entry. No identifier is exposed.
+    companion = getattr(coordinator, "companion", None)
+    local = data.get(DATA_LOCAL)
+    if companion is not None:
+        preheat_reason = (
+            "MQTT-companion mode: no local tunnel reaches these heads, so no preheat switch is "
+            "created (the cloud DP 1 route is a closed candidate and danfoss2mqtt heads carry no "
+            "mesh_id); a supervised DP 1 preheat trial can only be armed from a direct-cloud entry"
+        )
+    elif local is not None:
+        preheat_reason = (
+            "local tunnel enabled: a preheat switch exists for each tunnel-reachable head"
+        )
+    else:
+        preheat_reason = "local tunnel disabled (enable_local off): no preheat switch"
+    diag["preheat"] = {
+        "lever": "local tunnel (Zigbee attribute 0x0025)",
+        "companion_mode": companion is not None,
+        "switch_exposed": local is not None,
+        "reason": preheat_reason,
     }
     # Cloud-MQTT link (only when enable_cloud_mqtt or cloud_mqtt_probe opened one): state and
     # counters, no credential and no identifier.

@@ -145,6 +145,24 @@ The Companion issues device-level writes by publishing a JSON object to `<prefix
 | Room load mean (`load_room_mean`) | `{"load_room_mean": 35}` |
 | Weekly schedule day (`weekly_schedule`) | `{"weekly_schedule": {"dayofweek": 1, "num_of_transitions": 3, "transitions": [...]}}` |
 
+### 2.4 Controls the Companion does not expose as switches
+
+The Companion exposes **no preheat switch** on any head it serves (`zigbee2mqtt` or `danfoss2mqtt`).
+The only proven preheat lever is the Zigbee attribute `0x0025` through the **local tunnel**
+(`docs/preheat.md`), which a Companion entry does not own: `_async_setup_companion_entry` builds its
+store from the MQTT bridges alone, with no local-tunnel coordinator and no dedicated cloud-MQTT
+link. The cloud DP 1 route is a **closed candidate**, and its supervised trial can only be armed
+from a **direct-cloud (1.4.x-style) entry** on a tunnel-reachable isolated head — never through the
+Companion. `danfoss2mqtt` heads also carry no `mesh_id`, which rules out the cloud-MQTT path even in
+principle. This is **by design**, not a gap: with no proven write path behind it, no switch is
+offered (the "absent rather than lying" invariant). The config-entry diagnostics carry a `preheat`
+block (`companion_mode`, `switch_exposed`, `reason`) so the absence is explicit.
+
+Where a head's preheat is reachable at all over a bridge, it is driven by the
+`programming_operation_mode` command (§2.3), handled by the bridge that owns the head; the
+autonomous `danfoss2mqtt` cloud bridge declines it for an isolated head today
+(`docs/z2m-cloud-parity.md`).
+
 ---
 
 ## 3. Fleet & Room Extension Topics

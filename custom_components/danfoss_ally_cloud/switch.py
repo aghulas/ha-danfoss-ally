@@ -177,6 +177,12 @@ async def async_setup_entry(
                 async_add_entities(added)
 
         entry.async_on_unload(coordinator.async_add_listener(_sync_companion_switches))
+    # Preheat exists only through the LOCAL TUNNEL (attribute 0x0025). In MQTT-companion mode the
+    # integration holds no local tunnel (``local`` is None), so NO preheat switch is created there,
+    # for any head — zigbee2mqtt or danfoss2mqtt (the latter also carry no ``mesh_id``). This is by
+    # design, not a missing feature: the cloud DP 1 route is a closed candidate and a supervised
+    # DP 1 trial can only be armed from a direct-cloud entry (docs/preheat.md, docs/companion-
+    # contract.md §2.4). Diagnostics report the reason so the absence is explicit.
     if local is not None:
         gws = local.manager.gateway_ids
         entities += [

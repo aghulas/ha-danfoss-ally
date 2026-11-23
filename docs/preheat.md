@@ -129,6 +129,37 @@ Heads whose `0x0025` bit 1 differed from the cloud's DP 1 on the evening of 2026
 - If possible during A1, a cloud-MQTT listen on the control head's gateway around 03:30–05:30, to
   see what is sent when it reverts.
 
+## Preheat on MQTT-companion / danfoss2mqtt heads — unavailable, and why (2026-11-23)
+
+A head reached through the v2.x **Companion** (subscribing to `zigbee2mqtt` / `danfoss2mqtt`) has
+**no preheat switch**, and this is **by design**, not a missing feature. Confirmed in code:
+
+- The preheat switch (`switch.DanfossPreheat`) is created only when the entry owns a **local
+  tunnel** coordinator (`async_setup_entry`: `if local is not None`, then `dev.mesh_id in gws`). A
+  Companion entry (`_async_setup_companion_entry`) builds its store from the MQTT bridges alone
+  (`companion_adapter.build_companion_store`): it holds **no `DATA_LOCAL`**, no `DATA_MQTT_LINK`,
+  and no supervised-trial options. So the preheat block is skipped for **every** companion head,
+  `zigbee2mqtt` and `danfoss2mqtt` alike.
+- `danfoss2mqtt` heads additionally carry **no `mesh_id`** (`z2m_contract.decode_z2m_descriptor`
+  leaves it `None` unless the bridge metadata sets it), so even the `mesh_id in gws` guard would
+  exclude them — but the `local is None` check already settles it.
+- The supervised **DP 1 cloud-MQTT trial** cannot run on such a head: it publishes over the
+  integration's **own** `CloudMqttLink` (`can_publish(mesh_id)` — needs a `mesh_id`) and is
+  confirmed by the **local-tunnel** read-back alone (`MQTT_TUNNEL_CONFIRMED_DPS`, `mqtt_write`).
+  A companion head has neither link nor tunnel, so arming the trial there would be unroutable and
+  unconfirmable. **A DP 1 preheat trial can only be armed from a direct-cloud (1.4.x-style)
+  entry** on an isolated head the integration reaches through its own tunnel + dedicated cloud
+  MQTT — exactly the P-series heads above.
+
+This respects the project rule "the entity is absent rather than lying": with no proven write path
+behind it, no preheat switch is offered. The absence is made **explicit** (not silent) through the
+`preheat` block of the config-entry diagnostics (`companion_mode`, `switch_exposed`, `reason`).
+
+Preheat on a companion head, where a lever exists at all, is the bridge's business: the
+`programming_operation_mode` command of the per-device contract (`companion-contract.md` §2.3),
+honoured by the bridge that owns the head. The autonomous `danfoss2mqtt` cloud bridge declines it
+for an isolated head today (see `docs/z2m-cloud-parity.md`).
+
 ## Assessment of the cloud-MQTT route
 
 The tunnel is needed to confirm a DP 1 write, and the tunnel already writes preheat directly: a

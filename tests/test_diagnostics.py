@@ -49,3 +49,7 @@ async def test_diagnostics_redacts_secrets_and_ids(hass: HomeAssistant):
     assert diag["device_count"] == 1
     # Non-secret options pass through (the coexistence toggle is not a secret).
     assert diag["options"] == {"mqtt_mode": "off", "distinct_device_id": True}
+    # Preheat: a direct entry with no local tunnel exposes no preheat switch, stated explicitly.
+    assert diag["preheat"]["companion_mode"] is False
+    assert diag["preheat"]["switch_exposed"] is False
+    assert "enable_local" in diag["preheat"]["reason"]
