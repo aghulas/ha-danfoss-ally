@@ -9,8 +9,8 @@ virtual rooms (grouping ``zigbee2mqtt`` heads ``014G2461`` + an optional ``014G2
    - Pushes the linked ``014G2480`` temperature to each member head's
      ``external_measured_room_sensor`` (in 0.01 °C) when temperature shifts by >= 0.2 °C or
      >= 30 min have elapsed (and sends ``-8000`` if the sensor goes offline).
-   - Computes the room's mean ``pi_heating_demand`` across online member heads and pushes
-     ``load_room_mean`` when it shifts by >= 5 %.
+   - Computes the room's mean ``load_estimate`` across member heads reporting a valid load
+     (excluding -8000) and pushes ``load_room_mean`` when it shifts by >= 25 or >= 15 min.
 3. **Boiler Demand Aggregation** (``rooms_calling_for_heat``): lists all rooms across both
    ``zigbee2mqtt`` and ``danfoss2mqtt`` calling for heat.
 4. **Setpoint & Weekly Schedule Fan-Out**: dispatches room setpoints and weekly schedules to all
@@ -34,8 +34,10 @@ _ROOMS_STORE_VERSION = 1
 
 EXTERNAL_SENSOR_REFRESH_SECONDS = 1800.0
 EXTERNAL_SENSOR_DELTA_C = 0.2
-LOAD_MEAN_DELTA_PCT = 5
 EXTERNAL_SENSOR_DISABLED_RAW = -8000
+LOAD_MEAN_REFRESH_SECONDS = 900.0  # 15 minutes (Danfoss gateway cadence)
+LOAD_MEAN_DELTA = 25  # load estimate delta to trigger update
+LOAD_ESTIMATE_DISABLED_RAW = -8000
 
 _Z2M_DAY_BITS: dict[str, int] = {
     "sunday": 0x01,
@@ -67,6 +69,7 @@ class _TelemetryCache:
     last_ext_temp_c: float | None = None
     last_ext_sent_at: float = 0.0
     last_load_mean: int | None = None
+    last_load_sent_at: float = 0.0
 
 
 class CompanionRoomManager:
@@ -291,21 +294,29 @@ class CompanionRoomManager:
                     cache.last_ext_temp_c = None
                     cache.last_ext_sent_at = ts
 
-            # 2) Multi-head room load balancing (mean pi_heating_demand -> load_room_mean)
+            # 2) Multi-head room load balancing (mean load_estimate -> load_room_mean)
             if len(members) > 1:
-                openings = [m.valve_opening for m in members if m.valve_opening is not None]
-                if len(openings) == len(members):
-                    mean_load = int(round(sum(openings) / len(openings)))
-                    if (
+                loads = [
+                    m.load_estimate
+                    for m in members
+                    if m.load_estimate is not None and m.load_estimate != LOAD_ESTIMATE_DISABLED_RAW
+                ]
+                # Only balance when at least 2 member heads report a valid load estimate
+                if len(loads) >= 2:
+                    mean_load = int(round(sum(loads) / len(loads)))
+                    due = (
                         cache.last_load_mean is None
-                        or abs(mean_load - cache.last_load_mean) >= LOAD_MEAN_DELTA_PCT
-                    ):
+                        or abs(mean_load - cache.last_load_mean) >= LOAD_MEAN_DELTA
+                        or (ts - cache.last_load_sent_at) >= LOAD_MEAN_REFRESH_SECONDS
+                    )
+                    if due:
                         for head in members:
                             await self._companion.async_send_device_set(
                                 head.id, load_room_mean=mean_load
                             )
                             load_writes += 1
                         cache.last_load_mean = mean_load
+                        cache.last_load_sent_at = ts
 
         return {
             "external_sensor_writes": ext_writes,

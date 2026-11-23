@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.2 — Fix virtual-room load balancing (`load_estimate` instead of valve opening)
+
+**Fixed**
+
+- **Multi-head virtual room load balancing** (`companion_rooms.py`, `api/z2m_contract.py`,
+  `api/decode.py`): `async_sync_telemetry` now computes `load_room_mean` from each head's raw
+  `load_estimate` (Zigbee attribute `0x404A`, excluding `-8000` invalid values, requiring at least
+  2 valid heads, pushing on delta ≥ 25 or every 15 min) instead of `pi_heating_demand` (0–100 %).
+  Sending a 0–100 percentage as `load_room_mean` caused Danfoss Ally TRVs to see themselves far
+  above the room mean and close their valves.
+
 ## 2.0.0 — Bridge + Companion architecture (Zigbee2MQTT + danfoss2mqtt over Mosquitto)
 
 Major release. Home Assistant no longer speaks Tuya HTTP, Tuya cloud MQTT or `tinytuya` LAN
