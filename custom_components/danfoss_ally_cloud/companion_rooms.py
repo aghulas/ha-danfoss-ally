@@ -50,15 +50,35 @@ LOAD_MEAN_REFRESH_SECONDS = 900.0  # 15 min; on the telemetry tick this lands at
 LOAD_MEAN_DELTA = 25  # load estimate delta to trigger update
 LOAD_ESTIMATE_DISABLED_RAW = -8000
 
+# ZCL/Z2M day-of-week bit per canonical (cloud, 3-letter) day key.
 _Z2M_DAY_BITS: dict[str, int] = {
-    "sunday": 0x01,
-    "monday": 0x02,
-    "tuesday": 0x04,
-    "wednesday": 0x08,
-    "thursday": 0x10,
-    "friday": 0x20,
-    "saturday": 0x40,
+    "sun": 0x01,
+    "mon": 0x02,
+    "tue": 0x04,
+    "wed": 0x08,
+    "thu": 0x10,
+    "fri": 0x20,
+    "sat": 0x40,
 }
+
+# Accept both the cloud 3-letter day keys used by the schedule services (``api.schedule.DAYS``:
+# ``mon``…``sun``) and the full English names used by the z2m-oriented callers, mapping both to the
+# canonical 3-letter key. The schedule service path (``operations.set_schedule``) passes the cloud
+# keys; existing virtual-room callers pass full names — both must fan out the same weekly schedule.
+_DAY_ALIASES: dict[str, str] = {
+    "sun": "sun", "sunday": "sun",
+    "mon": "mon", "monday": "mon",
+    "tue": "tue", "tues": "tue", "tuesday": "tue",
+    "wed": "wed", "wednesday": "wed",
+    "thu": "thu", "thur": "thu", "thurs": "thu", "thursday": "thu",
+    "fri": "fri", "friday": "fri",
+    "sat": "sat", "saturday": "sat",
+}  # fmt: skip
+
+
+def normalize_day(name: str) -> str | None:
+    """Canonical 3-letter day key for ``name`` (cloud key or full name), or ``None`` if unknown."""
+    return _DAY_ALIASES.get(name.strip().lower())
 
 
 @dataclass(slots=True)
@@ -101,6 +121,11 @@ class CompanionRoomManager:
     ) -> None:
         self._companion = companion
         self.virtual_rooms: dict[str, CompanionRoomConfig] = {}
+        # Last weekly schedule fanned out per room_id (raw day keys as passed). The Companion has no
+        # read-back channel from the heads, so this is the authoritative source for ``get_schedule``
+        # / ``restore_schedule`` — for native (danfoss2mqtt) rooms as well as virtual ones, which
+        # also persist it on their ``CompanionRoomConfig``. In-memory only (lost on restart).
+        self._room_schedules: dict[str, dict[str, list[dict[str, str]]]] = {}
         self._telemetry: dict[str, _TelemetryCache] = {}
         self._sensor_feed: dict[str, _HeadSensorFeed] = {}
         # The two periodic feeds, closed unless opened (Companion options, read at every sync).
@@ -257,7 +282,8 @@ class CompanionRoomManager:
         # leave the heads with half a week.
         payloads: list[dict[str, Any]] = []
         for day_name, windows in days.items():
-            day_bit = _Z2M_DAY_BITS.get(day_name.strip().lower())
+            canon = normalize_day(day_name)
+            day_bit = _Z2M_DAY_BITS.get(canon) if canon else None
             if day_bit is None:
                 raise ValueError(f"Invalid day name: {day_name}")
             transitions = _build_z2m_day_transitions(windows, comfort, setback)
@@ -277,6 +303,8 @@ class CompanionRoomManager:
                 }
             )
 
+        # Record the schedule as the source for get_schedule / restore_schedule (all validated).
+        self._room_schedules[room_id] = {day: list(windows) for day, windows in days.items()}
         if cfg is not None:
             cfg.schedule.update(days)
             cfg.comfort_setpoint = comfort
@@ -289,6 +317,21 @@ class CompanionRoomManager:
                     await self._companion.async_send_raw_device_set(head_id, payload)
                     sent += 1
         return sent
+
+    def get_room_schedule(self, room_id: str) -> dict[str, list[dict[str, str]]]:
+        """Last weekly schedule fanned out to ``room_id`` (raw day keys), or ``{}`` if none.
+
+        The Companion has no schedule read-back from the heads: this returns what the integration
+        last wrote (via ``async_set_room_schedule``), preferring the in-memory record and falling
+        back to the room config's persisted schedule for virtual rooms.
+        """
+        recorded = self._room_schedules.get(room_id)
+        if recorded:
+            return {day: list(windows) for day, windows in recorded.items()}
+        cfg = self.virtual_rooms.get(room_id)
+        if cfg is not None and cfg.schedule:
+            return {day: list(windows) for day, windows in cfg.schedule.items()}
+        return {}
 
     def _load_balancing_on(self, cfg: CompanionRoomConfig) -> bool:
         """True when every configured member of the room reports ``load_balancing_enable`` on.

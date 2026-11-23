@@ -98,6 +98,18 @@ class CompanionCoordinatorView:
     ) -> CALLBACK_TYPE:
         return self.companion.async_add_listener(update_callback, context)
 
+    def note_commanded(self, head_ids: Any) -> None:
+        """No-op: the R-3 "freshen on next poll" hint has no meaning for a push-based coordinator.
+
+        The cloud ``DanfossCoordinator`` uses this to shorten the next poll of just-commanded heads;
+        the Companion state is pushed over MQTT, so there is nothing to schedule. Provided so the
+        shared write path (``operations.set_schedule`` / ``restore_schedule``, entity platforms)
+        runs unchanged against this view.
+        """
+
+    async def async_request_refresh(self) -> None:
+        """No-op: Companion device/room state is already current from MQTT (no poll to trigger)."""
+
 
 def build_companion_store(
     companion: MqttCompanionCoordinator,
