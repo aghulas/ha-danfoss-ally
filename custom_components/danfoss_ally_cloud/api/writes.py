@@ -36,8 +36,9 @@ def write_allowed(dev: DanfossDevice) -> bool:
 # value by itself within five minutes (contract §4.2).
 MQTT_WRITE_DPS = frozenset({30, 116, 18, 27, 120, 118, 16, 119})
 # 1 preheat (see below), 101 viewing direction and 133 orientation (mounting vertical /
-# horizontal), the three as the app publishes them for an isolated head (contract §4.2). None of
-# their supervised trials has passed yet (101 and 133: docs/first-write-procedure.md).
+# horizontal), the three as the app publishes them for an isolated head (contract §4.2). DP 133's
+# supervised trial passed on 2026-11-20 over cloud MQTT (false = horizontal); DP 101 (viewing
+# direction) is still pending (docs/first-write-procedure.md).
 MQTT_CANDIDATE_DPS = frozenset({1, 101, 133})
 # DPs whose write the gateway's echo and the cloud read CANNOT confirm: both may answer from the
 # gateway's cache while the head has not changed. DP 1 (preheat) is the known case: over HTTP it
