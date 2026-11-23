@@ -37,6 +37,14 @@ Consequences worth knowing before the switch:
 - Removing a provider frees the plain entity-id (`climate.<room>`) but the Companion entity
   that was pushed to `…_2` **keeps its suffixed entity-id and its own history** — Home Assistant
   does not rename it back by itself. Reclaiming the clean id is a manual, optional step (§5).
+- **Granularity differs by provider, and that is by design — not lost heads.** The Companion
+  exposes one `climate` per *room* (the native `group_id` for danfoss2mqtt, the virtual `room_id`
+  for zigbee2mqtt), while the v1.x cloud entry and the local bridge expose one per *physical head*.
+  So the Companion's entity count can be **lower** than a per-head provider's for the same install;
+  the Companion still tracks each head (per-head sensors and the supervised-head selectors), it just
+  groups the `climate` control at room level. Before removing a per-head provider, decide whether you
+  still need a per-head `climate` view (if so, keep one per-head provider, e.g. MTrab's separate
+  domain, see §6) rather than assuming the heads disappeared.
 
 ## 2. Order of operations (overview)
 
@@ -98,6 +106,18 @@ set of entities. **Stop the add-on** (Settings → Add-ons → *Pont Danfoss loc
 off *Start on boot*). Stopping it halts new/updated discovery, but Home Assistant keeps entities
 created from **retained** discovery topics until those topics are cleared — hence §4.3.
 
+> **Do not confuse the local discovery bridge with the add-ons that feed the Companion.** The
+> Companion's two inputs — the **Zigbee2MQTT** add-on and the **danfoss2mqtt** add-on — are *separate*
+> add-ons that must stay running; only the **“Pont Danfoss local”** discovery bridge (provider 3) is
+> stopped here. Check the slugs before stopping anything: the discovery bridge is its own add-on,
+> distinct from `zigbee2mqtt` and from `danfoss2mqtt`.
+>
+> **If the discovery bridge also emits a Zigbee2MQTT-format stream** (some versions have a
+> `z2m_output` option publishing under a separate base topic), confirm nothing consumes that stream
+> before stopping the add-on — in particular that it is **not** the Companion's zigbee2mqtt input
+> (that input should be the real Zigbee2MQTT add-on, not the bridge). If something does consume it,
+> stopping the add-on would remove more than the duplicate discovery entities.
+>
 > The add-on's source is in a separate private repository, not here. If you want it to stop publishing a
 > *subset* of heads rather than all, that is an edit there (an `EXCLUS`/exclusion set, as was done
 > for the chapel heads), not in this integration.
@@ -140,13 +160,23 @@ actually being retired before clearing it (on this install the chapel sonde was 
 ## 5. Reclaim the clean entity-ids (optional, recommended)
 
 After §4 the Companion is the only provider, but on the **zigbee2mqtt** heads it still owns the
-`…_2` entity-ids, and the clean ids (freed from the disabled v1.x entry) sit *restored /
-unavailable*. To put the Companion back on the clean ids and keep automations/dashboards working:
+`…_2` entity-ids, and the clean id sits *restored / unavailable*. To put the Companion back on the
+clean ids and keep automations/dashboards working:
+
+> **Who holds the clean id depends on the install's topology — it is not always the v1.x entry.**
+> The plain `climate.<room>` id belongs to whichever provider registered it *first*. On an install
+> where the local discovery bridge was the first provider, the clean ids are held by the **bridge
+> (`mqtt` platform)**, not by the v1.x cloud entry — so they are not freed by disabling v1.x (§4.1),
+> only once the bridge's entities are gone (after the §4.3 purge). Check each clean id's owner first
+> (`ha_entite_registre` → the `config_entry_id` / platform of the entity holding the plain id), then
+> free it from that owner. The step below is written for the common case; substitute the actual
+> owner.
 
 1. **Delete** the freed *restored / unavailable* entity that holds the clean id (it belongs to the
-   now-disabled v1.x entry): entity page → **⋮ → Delete**, or connector
-   `ha_entite_supprimer_preparer` → confirm. (If you *deleted* the v1.x entry in §4.1 rather than
-   disabling it, this is already done.)
+   provider you removed — the now-disabled v1.x entry, or the stopped local bridge once its retained
+   topics are purged): entity page → **⋮ → Delete**, or connector `ha_entite_supprimer_preparer` →
+   confirm. (If you *deleted* the v1.x entry in §4.1 rather than disabling it, and it was the owner,
+   this is already done.)
 2. **Rename** the Companion's `…_2` entity to the clean id: entity settings → *Entity ID*, or
    `ha_entite_renommer_preparer` → confirm. History follows the entity, so the Companion keeps its
    own recorded history under the clean id.
