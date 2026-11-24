@@ -8,7 +8,7 @@ only keeps what still decides future work.
 - **2.0.x — Bridge + Companion, stable since 2.0.0 (2026-11-22).** Home Assistant reads Zigbee2MQTT
   (heads on a Zigbee coordinator) and `danfoss2mqtt` (heads on Danfoss gateways, cloud path)
   through the local Mosquitto broker; the integration talks to the broker only
-  (`docs/companion-contract.md`). Current: 2.0.3.
+  (`docs/companion-contract.md`). Current: 2.0.4.
 - **1.4.x — frozen.** The direct-cloud line (cloud HTTP + Tuya cloud MQTT + local tunnel inside the
   integration) gets no new feature. Its routing rules live on in `danfoss2mqtt`
   (`docs/architecture.md`).
@@ -33,8 +33,6 @@ Ordered by what blocks what, not by date. No version number is attached until th
 - **Isolated heads over `danfoss2mqtt`** are read-only by design today. Decide whether the proven
   cloud-MQTT writes of the 1.x line (child lock, window detection, bounds, setpoints) are exposed
   through the bridge.
-- **Test harness debts**: `via_device_id` (before Home Assistant 2027.8) and the `native_*`
-  climate attributes.
 
 ### 2. Preheat that lasts
 
