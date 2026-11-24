@@ -1,23 +1,29 @@
-# Danfoss Ally (Cloud) — Home Assistant integration
+# Danfoss Ally (Cloud & MQTT Companion) — Home Assistant integration
 
-An **unofficial** community integration for Danfoss Ally thermostatic heads, which talks to the
-**same cloud API as the mobile app** — with no developer app, no API key, no shared quota.
+An **unofficial** community integration for Danfoss Ally thermostatic heads (`014G2461`), room
+sensors (`014G2480`), and boiler relays (`014G2400`).
 
-Goals:
-- simple setup (the app's credentials);
-- all cloud features, including those absent from the public API (weekly schedule, window detection,
-  child lock…);
-- automatic fetching of the **gateways' local keys** for direct Zigbee access, with no emulator or
-  Frida;
-- **MQTT publishing** of the devices, in two configurable modes: HA MQTT Discovery, or a
-  zigbee2mqtt-compatible topic structure.
+It supports **two connection modes**:
+
+1. **MQTT Companion (v2.x, recommended)** — connects solely to Home Assistant's local Mosquitto
+   broker and unifies Danfoss devices coming from **Zigbee2MQTT** (heads paired to a Zigbee
+   coordinator) and/or **`danfoss2mqtt`** (standalone bridge for Danfoss Ally gateways, using the
+   mobile app's cloud API). Both bridges speak the same Zigbee2MQTT dialect
+   ([`docs/companion-contract.md`](docs/companion-contract.md)), so heads can move between a
+   Danfoss gateway and Zigbee2MQTT without reworking dashboards or automations.
+2. **Direct Cloud (v1.4.x, frozen)** — connects directly from Home Assistant to the mobile app's
+   cloud API (path 1a) with no developer app and no shared quota, with optional gateway local-key
+   fetching, local Zigbee tunnel, Tuya cloud MQTT, and MQTT publishing. Kept for standalone
+   installs; new architectural work goes into the v2 Bridge + Companion line
+   ([`docs/v2-cutover.md`](docs/v2-cutover.md)).
 
 ## Disclaimer
 
-An independent project, **not affiliated with Danfoss or Tuya**. The cloud API is undocumented and
-obtained by observing the app's network protocol. It can change or be cut off at any time, which
-would break the integration. Use at your own risk. Passwords are never requested by Home Assistant
-outside the integration's sign-in screen.
+An independent project, **not affiliated with Danfoss or Tuya**. The cloud API used by
+`danfoss2mqtt` and the legacy direct-cloud mode is undocumented and obtained by observing the app's
+network protocol. It can change or be cut off at any time, which would break cloud-backed setups.
+Use at your own risk. Passwords are never requested by Home Assistant outside the integration's
+sign-in screen.
 
 ## Installation (custom repository)
 
@@ -27,6 +33,24 @@ outside the integration's sign-in screen.
 3. Settings → Devices & services → Add integration.
 
 ## Configuration
+
+The setup wizard lets you choose between the two modes:
+
+### Mode 1: MQTT Companion (v2.x, recommended)
+
+Requires Home Assistant's MQTT integration (Mosquitto) and at least one bridge publishing
+Zigbee2MQTT-format topics (`zigbee2mqtt` and/or `danfoss2mqtt`).
+
+- **MQTT bridge prefixes**: comma-separated list of topic prefixes to subscribe to (default:
+  `zigbee2mqtt, danfoss2mqtt`).
+- **Virtual rooms & feeds**: group `zigbee2mqtt` heads with an optional `014G2480` room sensor;
+  periodic external-sensor and load-balancing feeds are opt-in in the entry options
+  ([`docs/z2m-cloud-parity.md`](docs/z2m-cloud-parity.md)).
+- Do not keep a legacy direct-cloud entry enabled at the same time as a Companion entry for the
+  same fleet — the integration raises a Repairs warning until the old entry is disabled
+  ([`docs/v2-cutover.md`](docs/v2-cutover.md)).
+
+### Mode 2: Direct Cloud (v1.4.x, frozen)
 
 The configuration screen asks for:
 
