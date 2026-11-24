@@ -1,18 +1,17 @@
-"""End-to-end tests for the v2.x Bridge + Companion architecture (Batches 2.2 -> 2.6)."""
+"""End-to-end tests for the v2.x Bridge + Companion architecture (Batches 2.3 -> 2.6)."""
 
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.components import mqtt as mqtt_mod
 from homeassistant.core import HomeAssistant
 
 from custom_components.danfoss_ally_cloud import ops_views
-from custom_components.danfoss_ally_cloud.api import DanfossDevice
+from custom_components.danfoss_ally_cloud.api import DanfossDevice, encode_z2m_descriptor
 from custom_components.danfoss_ally_cloud.api.bridge_daemon import (
     StandaloneDanfoss2MqttDaemon,
 )
@@ -20,7 +19,6 @@ from custom_components.danfoss_ally_cloud.api.bridge_daemon import (
     main as daemon_main,
 )
 from custom_components.danfoss_ally_cloud.api.rooms import Room, aggregate_room
-from custom_components.danfoss_ally_cloud.bridge_mqtt import Danfoss2MqttBridge
 from custom_components.danfoss_ally_cloud.companion_adapter import build_companion_store
 from custom_components.danfoss_ally_cloud.companion_rooms import (
     CompanionRoomConfig,
@@ -83,111 +81,6 @@ def _relay(dev_id: str = "r-1", name: str = "Boiler Relay", on: bool = True) -> 
         online=True,
         relay_on=on,
     )
-
-
-# --- Batch 2.2: Danfoss2MqttBridge -------------------------------------------------------------
-
-
-async def test_batch_2_2_danfoss2mqtt_bridge_publish_and_commands(
-    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Danfoss2MqttBridge publishes fleet + rooms and handles +/set and bridge/request/+."""
-    published: dict[str, str] = {}
-    subscriptions: dict[str, Any] = {}
-
-    async def fake_publish(_hass: Any, topic: str, payload: str, **kw: Any) -> None:
-        published[topic] = payload
-
-    async def fake_subscribe(_hass: Any, topic: str, cb: Any, **kw: Any) -> Any:
-        subscriptions[topic] = cb
-        return lambda: subscriptions.pop(topic, None)
-
-    monkeypatch.setattr(mqtt_mod, "async_wait_for_mqtt_client", AsyncMock(return_value=True))
-    monkeypatch.setattr(mqtt_mod, "async_publish", fake_publish)
-    monkeypatch.setattr(mqtt_mod, "async_subscribe", fake_subscribe)
-
-    h1 = _head()
-    s1 = _sensor()
-    r1 = _relay()
-    topo_room = Room(
-        group_id="g1", name="B-0 Chapelle", pid="03wvrwpv", home_gid="home-1", members=(h1.id,)
-    )
-    room_state = aggregate_room(topo_room, [h1])
-    coordinator = MagicMock()
-    coordinator.data = {h1.id: h1, s1.id: s1, r1.id: r1}
-    coordinator.rooms = {"g1": room_state}
-    coordinator._rooms_topology = {"g1": topo_room}
-    coordinator.device_home = {h1.id: "home-1"}
-    coordinator.holidays = {"home-1": {"active": False}}
-    coordinator.async_add_listener = MagicMock(return_value=lambda: None)
-
-    local_coord = SimpleNamespace(settings={h1.id: {"regulation_speed": 5}})
-    set_calls: list[tuple[str, dict[str, Any]]] = []
-
-    async def on_set(dev: DanfossDevice, payload: dict[str, Any]) -> None:
-        set_calls.append((dev.id, payload))
-        if "occupied_heating_setpoint" in payload:
-            dev.setpoint = float(payload["occupied_heating_setpoint"])
-
-    async def on_req(action: str, payload: dict[str, Any]) -> dict[str, Any]:
-        if action == "fail":
-            raise RuntimeError("refused")
-        return {"action": action, "received": payload.get("value")}
-
-    bridge = Danfoss2MqttBridge(
-        hass,
-        coordinator,
-        "danfoss2mqtt",
-        local_coordinator=local_coord,
-        on_device_set=on_set,
-        on_bridge_request=on_req,
-    )
-    assert bridge.base_topic == "danfoss2mqtt"
-    await bridge.async_start()
-
-    assert published["danfoss2mqtt/bridge/state"] == "online"
-    devs = json.loads(published["danfoss2mqtt/bridge/devices"])
-    assert len(devs) == 3
-    rooms = json.loads(published["danfoss2mqtt/bridge/rooms"])
-    assert rooms[0]["group_id"] == "g1" and rooms[0]["home_id"] == "home-1"
-    h1_state = json.loads(published["danfoss2mqtt/B-0 Chapelle 1"])
-    assert h1_state["algorithm_scale_factor"] == 5
-
-    # Command on <base>/<friendly_name>/set -> updates after handler completes
-    await bridge._async_process_device_set(
-        "danfoss2mqtt/B-0 Chapelle 1/set",
-        json.dumps({"occupied_heating_setpoint": 21.5}),
-    )
-    assert set_calls == [(h1.id, {"occupied_heating_setpoint": 21.5})]
-    assert json.loads(published["danfoss2mqtt/B-0 Chapelle 1"])["occupied_heating_setpoint"] == 21.5
-
-    # Unknown target & invalid JSON on /set are ignored safely
-    await bridge._async_process_device_set("danfoss2mqtt/Unknown/set", "{}")
-    await bridge._async_process_device_set("danfoss2mqtt/B-0 Chapelle 1/set", "not-json")
-    assert len(set_calls) == 1
-
-    # Bridge RPC request -> response with transaction correlation
-    await bridge._async_process_bridge_request(
-        "danfoss2mqtt/bridge/request/room_set",
-        json.dumps({"value": 42, "transaction": "tx-1"}),
-    )
-    resp = json.loads(published["danfoss2mqtt/bridge/response/room_set"])
-    assert resp == {
-        "status": "ok",
-        "data": {"action": "room_set", "received": 42},
-        "transaction": "tx-1",
-    }
-
-    # Failing RPC request & invalid JSON RPC request
-    await bridge._async_process_bridge_request(
-        "danfoss2mqtt/bridge/request/fail", json.dumps({"transaction": "tx-2"})
-    )
-    assert json.loads(published["danfoss2mqtt/bridge/response/fail"])["status"] == "error"
-    await bridge._async_process_bridge_request("danfoss2mqtt/bridge/request/bad", "{bad")
-    assert json.loads(published["danfoss2mqtt/bridge/response/bad"])["status"] == "error"
-
-    await bridge.async_stop()
-    assert published["danfoss2mqtt/bridge/state"] == "offline"
 
 
 # --- Batches 2.3, 2.4 & 2.5: Unified Companion + Rooms + Lovelace Adapter ----------------------
@@ -280,10 +173,9 @@ async def test_batches_2_3_to_2_5_unified_companion_z2m_and_danfoss2mqtt(
 
     # 2) danfoss2mqtt announces 1 head + 1 native room
     d2m_head = _head("d2m-h1", "B-0 Chapelle 1", temp=18.5, setpoint=19.0, valve=0.0)
-    bridge = Danfoss2MqttBridge(hass, SimpleNamespace(data={d2m_head.id: d2m_head}, rooms={}))
     companion.process_mqtt_message("danfoss2mqtt/bridge/state", '{"state": "online"}')
     companion.process_mqtt_message(
-        "danfoss2mqtt/bridge/devices", json.dumps(bridge.bridge_devices_payload())
+        "danfoss2mqtt/bridge/devices", json.dumps([encode_z2m_descriptor(d2m_head)])
     )
     companion.process_mqtt_message(
         "danfoss2mqtt/B-0 Chapelle 1",
@@ -440,13 +332,10 @@ def test_batch_2_6_standalone_daemon_and_cli() -> None:
 async def test_v2_edge_cases_and_migration(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Covers device migration (stale cleanup), view helpers, and daemon/bridge error branches."""
+    """Covers device migration (stale cleanup), view helpers, and daemon error branches."""
     monkeypatch.setattr(mqtt_mod, "async_wait_for_mqtt_client", AsyncMock(return_value=False))
 
-    # Broker unavailable at start is a safe no-op for both bridge and companion
-    bridge_no_mqtt = Danfoss2MqttBridge(hass, SimpleNamespace(data={}, rooms={}))
-    await bridge_no_mqtt.async_start()
-
+    # Broker unavailable at start is a safe no-op for the companion
     companion = MqttCompanionCoordinator(hass, prefixes=("zigbee2mqtt", "danfoss2mqtt"))
     await companion.async_start()
 

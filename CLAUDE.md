@@ -1,27 +1,35 @@
-# ha-danfoss-ally — Home Assistant Danfoss Ally integration via the cloud API (the non-public one, the app's)
+# ha-danfoss-ally — Home Assistant Danfoss Ally integration (v2 Bridge + Companion & v1.x Direct Cloud)
 
-Guide for Claude Code sessions on this repo. Goal: a community HA integration that drives the
-Danfoss Ally heads via the **cloud API** (path 1a), with no developer app and no shared quota, with
-gateway-key fetching and MQTT publishing of the devices.
+Guide for agent sessions on this repo. Goal: a community HA integration for Danfoss Ally heads,
+room sensors (`014G2480`), and boiler relays (`014G2400`) — running in **v2.x Bridge + Companion**
+mode over Mosquitto (`zigbee2mqtt` + `danfoss2mqtt`, `docs/companion-contract.md`), while keeping
+the **1.4.x direct-cloud** line (path 1a + local tunnel + Tuya cloud MQTT) frozen for backward
+compatibility.
 
 ## What we are building
 
 - **HA domain**: `danfoss_ally_cloud` (distinct from MTrab's `danfoss_ally`, to coexist; its brand
   icons ship in `custom_components/danfoss_ally_cloud/brand/`).
 - **Repo**: `aghulas/ha-danfoss-ally` (private at first, intended for the HACS Marketplace once
-  hardened).
+  hardened). Also packages `custom_components/danfoss_ally_cloud/api/` as `pydanfoss-cloud`
+  (`pyproject.toml`, including the standalone `danfoss2mqtt` CLI daemon).
 - Public release is intended: bring features to the community **and** exercise the code on other
   installs to make the assumptions more reliable.
 
-## Guiding principle: three channels, one router
+## Guiding principle: proven routes only, zero optimistic state
 
-A head is reachable through three channels: **cloud HTTP** (path 1a), **Tuya cloud MQTT** (the app's
-broker; validated on real hardware, opt-in via `enable_cloud_mqtt`) and the **local tunnel**. Each
-operation goes to the channel **proven for it on real hardware**; with no proven channel up, the
-entity is unavailable. Routing tables and the rules for adding a route: `docs/architecture.md`.
+In **v2.x**, Home Assistant connects solely to Mosquitto (`mqtt_companion.py`) and merges
+`zigbee2mqtt` and `danfoss2mqtt` devices under a single model (`api/z2m_contract.py`). In
+**1.4.x** (and inside `danfoss2mqtt`), a head is reachable through three channels: **cloud HTTP**
+(path 1a), **Tuya cloud MQTT** (the app's broker; validated on real hardware, opt-in via
+`enable_cloud_mqtt`) and the **local tunnel**. Each operation goes to the channel **proven for it
+on real hardware**; with no proven channel up, the entity is unavailable. Routing tables and the
+rules for adding a route: `docs/architecture.md` and `docs/companion-contract.md`.
 
-"MQTT" means two things here: **Tuya cloud MQTT** is a channel to the heads; **MQTT publishing**
-(`mqtt_publisher.py`) sends our state to the user's own broker. Always say which.
+"MQTT" means three distinct things here: **local Mosquitto Companion** (`mqtt_companion.py`, v2
+integration ↔ `zigbee2mqtt`/`danfoss2mqtt`), **Tuya cloud MQTT** (`api/mqtt_client.py`, channel to
+heads on Danfoss gateways), and legacy **MQTT publishing** (`mqtt_publisher.py`, v1 state export).
+Always say which.
 
 Cases established on real hardware where the cloud **lies or does not act**:
 
@@ -43,17 +51,22 @@ fetched by the integration itself and serve both the local tunnel and the cloud-
 ## Code map
 
 - `custom_components/danfoss_ally_cloud/` — the integration.
-  - `api/` — Danfoss access: `client.py` (cloud API), `keys.py` (gateway keys), `local/tunnel.py`
-    (Zigbee DP 198→199), `mqtt_publish.py` + `mqtt_client.py` (Tuya cloud MQTT). To extract
-    eventually into a library shared with the MCP connector (`manifest.json` → requirements).
-  - `coordinator.py` — conservative cloud polling + local overlay.
-  - platforms: `climate`, `sensor`, `binary_sensor`, `number`, `switch`.
-  - `mqtt_publisher.py` — modes `discovery` / `zigbee2mqtt`, source `cloud` / `local`.
-  - `config_flow.py`, `diagnostics.py`, `const.py`.
+  - `api/` — `pydanfoss-cloud` library (`pyproject.toml`): `client.py` (cloud API), `keys.py`
+    (gateway keys), `local/tunnel.py` (Zigbee DP 198→199), `mqtt_publish.py` + `mqtt_client.py`
+    (Tuya cloud MQTT), `z2m_contract.py` (bidirectional Z2M codec), `bridge_daemon.py`
+    (standalone `danfoss2mqtt` daemon).
+  - v2 Companion: `mqtt_companion.py`, `companion_rooms.py`, `companion_adapter.py`.
+  - v1 Direct Cloud (frozen): `coordinator.py` (cloud polling + local overlay),
+    `mqtt_publisher.py`, `mqtt_write.py`, `local_write.py`.
+  - shared platforms & ops: `climate`, `sensor`, `binary_sensor`, `number`, `switch`, `select`,
+    `time`, `operations.py`, `ops_rooms.py`, `ops_views.py`, `ops_local.py`, `services.py`,
+    `websocket_api.py`, `config_flow.py`, `diagnostics.py`, `const.py`.
+- `frontend/` — TypeScript + Lit Lovelace cards and panel (compiled bundle in
+  `custom_components/danfoss_ally_cloud/frontend/danfoss-ally-cloud.js`).
 - `docs/` — `architecture.md` (channels, routing), `interface-contract.md` (R1–R7, DPs),
-  `companion-contract.md` + `v2-cutover.md` (2.x), `cloud-mqtt-channel.md`, `preheat.md`,
-  `first-write-procedure.md` (supervised trials), `roadmap.md`, `reuse.md`; trial records in
-  `docs/validation/`.
+  `companion-contract.md` + `v2-cutover.md` + `z2m-cloud-parity.md` (2.x), `cloud-mqtt-channel.md`,
+  `preheat.md`, `first-write-procedure.md` (supervised trials), `roadmap.md`, `reuse.md`; trial
+  records in `docs/validation/`.
 - `tests/` — pytest-homeassistant-custom-component.
 
 ## Reuse (do not rewrite)
