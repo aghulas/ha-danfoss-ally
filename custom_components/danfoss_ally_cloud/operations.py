@@ -18,7 +18,7 @@ import logging
 import re
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_call_later
@@ -42,6 +42,7 @@ from .const import (
     SETPOINT_MAX,
     SETPOINT_MIN,
 )
+from .mqtt_companion import CompanionBridgeError
 from .ops_common import (  # noqa: F401
     _HHMM,
     OperationError,
@@ -411,17 +412,57 @@ def _companion_schedule_payload(store: dict, room_manager, target: dict) -> dict
     ).to_dict()
 
 
+def _companion_cloud_bridge(store: dict, group_id: str) -> tuple[Any, str] | None:
+    """Return ``(companion, prefix)`` if ``group_id`` is a native room on a cloud bridge."""
+    coordinator = store[DATA_COORDINATOR]
+    companion = getattr(coordinator, "companion", None)
+    if companion is None:
+        return None
+    prefix = companion.prefix_of_room(group_id)
+    if prefix is None:
+        return None
+    room_manager = _companion_room_manager(store)
+    members = room_manager.room_members().get(group_id, ()) if room_manager is not None else ()
+    if prefix == "danfoss2mqtt" or any(companion.is_cloud_bridge_device(m) for m in members):
+        return companion, prefix
+    return None
+
+
+async def _run_bridge_rpc(companion: Any, prefix: str, action: str, payload: dict) -> dict:
+    """Invoke ``<prefix>/bridge/request/<action>`` and map bridge errors to ``OperationError``."""
+    try:
+        return await companion.async_bridge_request(prefix, action, payload)
+    except CompanionBridgeError as err:
+        raise OperationError(err.code, str(err), err.errors, err.day) from err
+
+
 async def get_schedule(store: dict, target: dict, refresh: bool = False) -> dict:
     """A target's schedule: cache (<= 1 h) or cloud if `refresh` / cache stale.
 
-    On a Companion (ponts) entry the schedule is served from the room manager's recorded fan-out,
-    not the cloud client (which the Companion store has no ``.client`` for).
+    On a Companion entry:
+    - a native cloud-bridge room (``danfoss2mqtt``) reads the real cloud schedule via
+      ``<prefix>/bridge/request/get_schedule`` (cached like direct cloud);
+    - a Zigbee2MQTT virtual room serves the room manager's recorded fan-out.
     """
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     room_manager = _companion_room_manager(store)
     if room_manager is not None:
-        return _companion_schedule_payload(store, room_manager, target)
-    cache: dict = store[DATA_SCHEDULES]
+        group_id = _room_target(target)
+        cloud_bridge = _companion_cloud_bridge(store, group_id)
+        if cloud_bridge is None:
+            return _companion_schedule_payload(store, room_manager, target)
+        companion, prefix = cloud_bridge
+        cache: dict = store[DATA_SCHEDULES]
+        key = _key(target)
+        cached = cache.get(key)
+        if not refresh and cached is not None and (time.monotonic() - cached[1]) < SCHEDULE_TTL:
+            return cached[0]
+        schedule = await _run_bridge_rpc(
+            companion, prefix, "get_schedule", {"target": {"type": "room", "id": group_id}}
+        )
+        cache[key] = (schedule, time.monotonic())
+        return schedule
+    cache = store[DATA_SCHEDULES]
     key = _key(target)
     cached = cache.get(key)
     if not refresh and cached is not None and (time.monotonic() - cached[1]) < SCHEDULE_TTL:
@@ -538,7 +579,18 @@ async def set_schedule(
         raise OperationError(errors[0]["code"], errors[0]["message"], errors, errors[0].get("day"))
     room_manager = _companion_room_manager(store)
     if room_manager is not None:
-        await _companion_set_room_schedule(room_manager, target, days)
+        group_id = _room_target(target)
+        cloud_bridge = _companion_cloud_bridge(store, group_id)
+        if cloud_bridge is not None:
+            companion, prefix = cloud_bridge
+            await _run_bridge_rpc(
+                companion,
+                prefix,
+                "set_schedule",
+                {"target": {"type": "room", "id": group_id}, "days": days},
+            )
+        else:
+            await _companion_set_room_schedule(room_manager, target, days)
     else:
         await _run_write(coordinator.client.async_set_schedule_days, target, days)
     _invalidate(store, target)
@@ -566,15 +618,25 @@ async def restore_schedule(hass: HomeAssistant, store: dict, target: dict) -> di
         )
     room_manager = _companion_room_manager(store)
     if room_manager is not None:
-        # The Companion has no cloud "back to schedule"; re-push the room's recorded schedule.
         group_id = _room_target(target)
-        days = room_manager.get_room_schedule(group_id)
-        if not days:
-            raise OperationError(
-                "no_schedule_recorded",
-                "no schedule has been set on this Companion room yet; set one before restoring",
+        cloud_bridge = _companion_cloud_bridge(store, group_id)
+        if cloud_bridge is not None:
+            companion, prefix = cloud_bridge
+            await _run_bridge_rpc(
+                companion,
+                prefix,
+                "restore_schedule",
+                {"target": {"type": "room", "id": group_id}},
             )
-        await _companion_set_room_schedule(room_manager, target, days)
+        else:
+            # Virtual Z2M room: no cloud "back to schedule"; re-push the recorded schedule.
+            days = room_manager.get_room_schedule(group_id)
+            if not days:
+                raise OperationError(
+                    "no_schedule_recorded",
+                    "no schedule has been set on this Companion room yet; set one before restoring",
+                )
+            await _companion_set_room_schedule(room_manager, target, days)
     else:
         await _run_write(coordinator.client.async_restore_schedule, target)
     _invalidate(store, target)

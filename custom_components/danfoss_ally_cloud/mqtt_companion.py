@@ -15,8 +15,10 @@ bridge prefix (``<prefix>/<friendly_name>/set``).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -38,6 +40,25 @@ DEFAULT_COMPANION_PREFIXES: tuple[str, ...] = ("zigbee2mqtt", "danfoss2mqtt")
 # (see ``api/bridge_daemon.py`` ``_CLOUD_UNSUPPORTED_SET_KEYS``): every other key is ignored by the
 # bridge, so the Companion must mark those controls unavailable / refuse them rather than drop them.
 CLOUD_BRIDGE_SUPPORTED_SET_KEYS: frozenset[str] = frozenset({"occupied_heating_setpoint"})
+
+BRIDGE_REQUEST_TIMEOUT = 15.0  # seconds
+
+
+class CompanionBridgeError(RuntimeError):
+    """Raised when a ``<prefix>/bridge/request/<action>`` RPC fails or times out."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        errors: list[dict[str, Any]] | None = None,
+        day: str | None = None,
+    ) -> None:
+        self.code = code
+        self.errors = errors
+        self.day = day
+        super().__init__(message)
 
 
 def _parse_online_payload(raw: str | bytes) -> bool | None:
@@ -91,6 +112,8 @@ class MqttCompanionCoordinator:
 
         self._unsubs: list[CALLBACK_TYPE] = []
         self._listeners: list[Callable[[], None]] = []
+        # In-flight bridge/request/<action> RPC futures keyed by transaction id
+        self._pending_requests: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
     @property
     def native_rooms(self) -> dict[str, dict[str, Any]]:
@@ -172,6 +195,7 @@ class MqttCompanionCoordinator:
                 f"{prefix}/bridge/devices",
                 f"{prefix}/bridge/rooms",
                 f"{prefix}/bridge/holidays",
+                f"{prefix}/bridge/response/+",
                 f"{prefix}/+",
                 f"{prefix}/+/availability",
             ):
@@ -179,10 +203,16 @@ class MqttCompanionCoordinator:
                 self._unsubs.append(unsub)
 
     async def async_stop(self) -> None:
-        """Unsubscribe all MQTT topics."""
+        """Unsubscribe all MQTT topics and cancel any in-flight bridge RPCs."""
         while self._unsubs:
             unsub = self._unsubs.pop()
             unsub()
+        for fut in list(self._pending_requests.values()):
+            if not fut.done():
+                fut.set_exception(
+                    CompanionBridgeError("bridge_stopped", "Companion stopped before bridge reply")
+                )
+        self._pending_requests.clear()
 
     @callback
     def _handle_message(self, msg: Any) -> None:
@@ -217,6 +247,10 @@ class MqttCompanionCoordinator:
 
         if suffix == "bridge/holidays":
             self._ingest_bridge_holidays(matched_prefix, raw_payload)
+            return
+
+        if suffix.startswith("bridge/response/"):
+            self._ingest_bridge_response(raw_payload)
             return
 
         if suffix.startswith("bridge/") or suffix.endswith("/set"):
@@ -352,3 +386,64 @@ class MqttCompanionCoordinator:
         await mqtt.async_publish(
             self.hass, f"{prefix}/{friendly}/set", json.dumps(payload), qos=0, retain=False
         )
+
+    def _ingest_bridge_response(self, raw_payload: str | bytes) -> None:
+        try:
+            text = raw_payload.decode("utf-8") if isinstance(raw_payload, bytes) else raw_payload
+            resp = json.loads(text)
+            if not isinstance(resp, dict):
+                return
+        except (ValueError, UnicodeDecodeError):
+            return
+        tx = resp.get("transaction")
+        if not isinstance(tx, str):
+            return
+        fut = self._pending_requests.get(tx)
+        if fut is not None and not fut.done():
+            fut.set_result(resp)
+
+    async def async_bridge_request(
+        self,
+        prefix: str,
+        action: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        timeout_s: float = BRIDGE_REQUEST_TIMEOUT,
+    ) -> dict[str, Any]:
+        """Send an RPC on ``<prefix>/bridge/request/<action>`` and await the correlated response."""
+        if prefix not in self.prefixes:
+            raise CompanionBridgeError("bridge_unknown", f"unknown bridge prefix: {prefix}")
+        if not self.bridge_online.get(prefix, False):
+            raise CompanionBridgeError("bridge_offline", f"bridge {prefix} is offline")
+        tx = uuid.uuid4().hex
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[dict[str, Any]] = loop.create_future()
+        self._pending_requests[tx] = fut
+        body = {**(payload or {}), "transaction": tx}
+        try:
+            await mqtt.async_publish(
+                self.hass,
+                f"{prefix}/bridge/request/{action}",
+                json.dumps(body),
+                qos=1,
+                retain=False,
+            )
+            async with asyncio.timeout(timeout_s):
+                resp = await fut
+        except TimeoutError as err:
+            raise CompanionBridgeError(
+                "bridge_timeout",
+                f"bridge {prefix} did not reply to {action} within {timeout_s:.0f}s",
+            ) from err
+        finally:
+            self._pending_requests.pop(tx, None)
+
+        if resp.get("status") != "ok":
+            raise CompanionBridgeError(
+                str(resp.get("code") or "bridge_error"),
+                str(resp.get("error") or f"bridge {prefix} refused {action}"),
+                errors=resp.get("errors") if isinstance(resp.get("errors"), list) else None,
+                day=str(resp["day"]) if resp.get("day") is not None else None,
+            )
+        data = resp.get("data")
+        return data if isinstance(data, dict) else {}
