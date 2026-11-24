@@ -11,6 +11,7 @@ from .const import DATA_COORDINATOR, DATA_HEAD_UNBIND
 from .ops_common import (
     OperationError,
     _refresh_after_structural_write,
+    _require_cloud_client,
     _room_target,
     _run_cloud_write,
 )
@@ -80,6 +81,10 @@ async def _resolve_room_id(coordinator, group_id: str) -> str:
     raise OperationError("unknown_room", f"no Tuya room matching {rs.name!r}")
 
 
+def _require_room_cloud_client(store: dict):
+    return _require_cloud_client(store, "room_management_companion_unsupported", "room management")
+
+
 async def create_room(
     hass: HomeAssistant,
     store: dict,
@@ -95,11 +100,12 @@ async def create_room(
     is **inferred from the devices** and a single shared home must resolve, else ``ambiguous_home``
     (pass ``home``) or ``unknown_home``.
     """
-    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    client = _require_room_cloud_client(store)
+    coordinator = store[DATA_COORDINATOR]
     _validate_heads(coordinator, devices, require_verified=True)
     gid = await _resolve_devices_home(coordinator, list(devices), home)
-    room_id = await _run_cloud_write(coordinator.client.async_room_add, gid, name)
-    await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, list(devices))
+    room_id = await _run_cloud_write(client.async_room_add, gid, name)
+    await _run_cloud_write(client.async_room_set_devices, room_id, list(devices))
     await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id)}
 
@@ -135,37 +141,41 @@ async def _resolve_devices_home(
 
 
 async def rename_room(hass: HomeAssistant, store: dict, target: dict, name: str) -> dict:
-    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    client = _require_room_cloud_client(store)
+    coordinator = store[DATA_COORDINATOR]
     room_id = await _resolve_room_id(coordinator, _room_target(target))
-    await _run_cloud_write(coordinator.client.async_room_update, room_id, name)
+    await _run_cloud_write(client.async_room_update, room_id, name)
     await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id)}
 
 
 async def delete_room(hass: HomeAssistant, store: dict, target: dict) -> dict:
-    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    client = _require_room_cloud_client(store)
+    coordinator = store[DATA_COORDINATOR]
     room_id = await _resolve_room_id(coordinator, _room_target(target))
-    await _run_cloud_write(coordinator.client.async_room_dismiss, room_id)
+    await _run_cloud_write(client.async_room_dismiss, room_id)
     await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id)}
 
 
 async def attach_heads(hass: HomeAssistant, store: dict, target: dict, devices: list[str]) -> dict:
     """Add heads to a room (contract §4.7). REPLACES the member list with current ∪ given."""
-    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    client = _require_room_cloud_client(store)
+    coordinator = store[DATA_COORDINATOR]
     group_id = _room_target(target)
     _validate_heads(coordinator, devices, require_verified=True)
     room_id = await _resolve_room_id(coordinator, group_id)
     members = _current_members(coordinator, group_id)
     final = list(dict.fromkeys(members + list(devices)))
-    await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, final)
+    await _run_cloud_write(client.async_room_set_devices, room_id, final)
     await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id), "heads": final, "previous_heads": members}
 
 
 async def detach_heads(hass: HomeAssistant, store: dict, target: dict, devices: list[str]) -> dict:
     """Remove heads from a room (contract §4.7). Refuses to empty a room (use delete_room)."""
-    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    client = _require_room_cloud_client(store)
+    coordinator = store[DATA_COORDINATOR]
     group_id = _room_target(target)
     _validate_heads(coordinator, devices, require_verified=False)  # removal: any known head
     room_id = await _resolve_room_id(coordinator, group_id)
@@ -175,7 +185,7 @@ async def detach_heads(hass: HomeAssistant, store: dict, target: dict, devices: 
     final = [d for d in members if d not in devices]
     if not final:
         raise OperationError("no_members_left", "detaching every head: use delete_room instead")
-    await _run_cloud_write(coordinator.client.async_room_set_devices, room_id, final)
+    await _run_cloud_write(client.async_room_set_devices, room_id, final)
     await _refresh_after_structural_write(coordinator)
     return {"room_id": str(room_id), "heads": final, "previous_heads": members}
 
@@ -188,7 +198,8 @@ async def set_relay_room(
     The room is matched by name against the relay's eligible rooms (``relay_rooms`` cache), so its
     cloud ``roomId`` is used for the edit. Admin-gated by the caller.
     """
-    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    client = _require_cloud_client(store, "relay_companion_unsupported", "boiler relay binding")
+    coordinator = store[DATA_COORDINATOR]
     dev = coordinator.data.get(relay)
     if dev is None or not dev.is_relay:
         raise OperationError("unknown_relay", f"relay not found: {relay}")
@@ -207,9 +218,7 @@ async def set_relay_room(
     )
     if match is None:
         raise OperationError("unknown_room", f"room {rs.name!r} is not eligible for this relay")
-    await _run_cloud_write(
-        coordinator.client.async_relay_bind, relay, match["room_id"], bool(linked)
-    )
+    await _run_cloud_write(client.async_relay_bind, relay, match["room_id"], bool(linked))
     await _refresh_after_structural_write(coordinator)
     return {"relay": relay, "room_id": str(match["room_id"]), "linked": bool(linked)}
 
@@ -282,7 +291,8 @@ async def disconnect_head(
     cases re-pairing needs a physical action on site (permit-join is MQTT, not path 1a).
     """
     _require_unbind(store)
-    coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    client = _require_cloud_client(store, "unbind_companion_unsupported", "device unbind")
+    coordinator = store[DATA_COORDINATOR]
     dev = _require_unbindable_device(coordinator, target)
     dev_id = dev.id
     if not confirm:
@@ -291,7 +301,7 @@ async def disconnect_head(
             "destructive action: pass confirm=true to unbind this device",
         )
     wipe = bool(wipe_data)
-    await _run_cloud_write(coordinator.client.async_device_reset, dev_id, wipe)
+    await _run_cloud_write(client.async_device_reset, dev_id, wipe)
     await _refresh_after_structural_write(coordinator)
     return {
         "device_id": dev_id,

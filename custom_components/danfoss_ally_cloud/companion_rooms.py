@@ -81,6 +81,10 @@ def normalize_day(name: str) -> str | None:
     return _DAY_ALIASES.get(name.strip().lower())
 
 
+class UnsupportedCompanionWriteError(RuntimeError):
+    """Raised when a Companion write targets a bridge that does not support that /set field."""
+
+
 @dataclass(slots=True)
 class CompanionRoomConfig:
     """Configuration of a Companion-managed room (e.g. grouping ``zigbee2mqtt`` heads + sensor)."""
@@ -274,6 +278,17 @@ class CompanionRoomManager:
         member_ids = self.room_members().get(room_id)
         if member_ids is None:
             raise KeyError(f"Unknown room_id: {room_id}")
+
+        unsupported_heads = [
+            head_id
+            for head_id in member_ids
+            if not self._companion.supports_device_set(head_id, "weekly_schedule")
+        ]
+        if unsupported_heads:
+            raise UnsupportedCompanionWriteError(
+                f"room {room_id} has head(s) whose bridge does not support /set weekly_schedule "
+                f"({', '.join(unsupported_heads)}); nothing was sent"
+            )
 
         comfort = comfort_c if comfort_c is not None else (cfg.comfort_setpoint if cfg else 21.0)
         setback = setback_c if setback_c is not None else (cfg.setback_setpoint if cfg else 17.0)

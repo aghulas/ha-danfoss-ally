@@ -101,6 +101,11 @@ _COMPANION_SWITCH_KWARGS: dict[str, str] = {
     "window_detection": "window_detection",
 }
 
+_COMPANION_SWITCH_Z2M_KEYS: dict[str, str] = {
+    "child_lock": "keypad_lockout",
+    "window_detection": "window_open_feature",
+}
+
 
 @dataclass(frozen=True, kw_only=True)
 class DanfossSwitchDescription(SwitchEntityDescription):
@@ -398,11 +403,12 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
     def _write_path(self, dev: DanfossDevice | None) -> str:
         if dev is None:
             return PATH_NONE
-        if (
-            getattr(self.coordinator, "companion", None) is not None
-            and self.entity_description.key in _COMPANION_SWITCH_KWARGS
-        ):
-            return PATH_COMPANION
+        companion = getattr(self.coordinator, "companion", None)
+        if companion is not None:
+            z2m_key = _COMPANION_SWITCH_Z2M_KEYS.get(self.entity_description.key)
+            if z2m_key is not None and companion.supports_device_set(dev.id, z2m_key):
+                return PATH_COMPANION
+            return PATH_NONE
         if not write_allowed(dev):
             return PATH_NONE
         if self.coordinator.group_of(dev.id) is not None:

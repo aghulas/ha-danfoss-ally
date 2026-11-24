@@ -422,7 +422,10 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
         attrs.update(_setpoint_attributes(dev.setpoint, dev.setpoints))
         companion = getattr(self.coordinator, "companion", None)
         if companion is not None:
-            attrs["write_path"] = _PATH_COMPANION
+            # Isolated heads over danfoss2mqtt have no proven path-1a setpoint write (read-only).
+            attrs["write_path"] = (
+                _PATH_NONE if companion.is_cloud_bridge_device(dev.id) else _PATH_COMPANION
+            )
             route = companion.device_route.get(dev.id)
             if route is not None:
                 attrs["mqtt_bridge"] = route[0]
@@ -439,6 +442,11 @@ class DanfossHeadClimate(DanfossEntity, ClimateEntity):
         dev = self.device
         companion = getattr(self.coordinator, "companion", None)
         if companion is not None and dev is not None:
+            if companion.is_cloud_bridge_device(dev.id):
+                raise HomeAssistantError(
+                    "Read-only: isolated heads over danfoss2mqtt have no proven setpoint write "
+                    "path; group the head in a room in the Danfoss app or pair it to Zigbee2MQTT."
+                )
             temp = kwargs.get(ATTR_TEMPERATURE)
             if temp is None:
                 return

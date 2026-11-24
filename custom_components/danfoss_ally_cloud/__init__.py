@@ -89,7 +89,12 @@ from .const import (
     DOMAIN,
     PLATFORMS,
 )
-from .coordinator import DanfossCoordinator, DanfossLocalCoordinator, DanfossMessageCoordinator
+from .coordinator import (
+    CoordinatorProtocol,
+    DanfossCoordinator,
+    DanfossLocalCoordinator,
+    DanfossMessageCoordinator,
+)
 from .device_links import async_link_heads_to_rooms
 from .frontend import async_register_frontend, async_unregister_frontend
 from .local_write import LOCAL_TRIAL_SETTINGS
@@ -107,7 +112,7 @@ _LOGGER = logging.getLogger(__name__)
 class DanfossRuntimeData:
     """Typed runtime container stored on ``entry.runtime_data``."""
 
-    coordinator: DanfossCoordinator
+    coordinator: CoordinatorProtocol
     local_coordinator: DanfossLocalCoordinator | None
     mqtt_publisher: MqttPublisher | None
     jobs: JobManager
