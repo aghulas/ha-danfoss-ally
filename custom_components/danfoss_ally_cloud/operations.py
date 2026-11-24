@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant
@@ -31,6 +32,7 @@ from .api import schedule as sch
 from .api.client import CloudError
 from .api.local import tunnel
 from .api.local.manager import Head
+from .companion_rooms import normalize_day
 from .const import (
     DATA_COORDINATOR,
     DATA_JOBS,
@@ -132,6 +134,26 @@ async def get_room(store: dict, target: dict) -> dict:
 # callers AND behind the opt-in ``DATA_VACATION_WRITE`` flag (CONF_ENABLE_VACATION_WRITE). --------
 
 _DATE_RE = re.compile(r"^\d{8}$")  # YYYYMMDD
+
+
+def _companion_room_manager(store: dict):
+    """The Companion ``room_manager`` when the entry runs the ponts+Companion architecture, else
+    ``None`` (legacy cloud ``DanfossCoordinator`` entry). Mirrors the climate setpoint branch."""
+    return getattr(store[DATA_COORDINATOR], "room_manager", None)
+
+
+def _reject_vacation_on_companion(store: dict) -> None:
+    """Refuse a vacation write on a Companion entry with a clean contract error (not a 500).
+
+    The Companion channel (danfoss2mqtt / zigbee2mqtt bridges) exposes no vacation/holiday write;
+    ``bridge/holidays`` is read-only. There is no proven route, so we refuse rather than guess.
+    """
+    if _companion_room_manager(store) is not None:
+        raise OperationError(
+            "vacation_companion_unsupported",
+            "vacation (holiday) writes have no proven route on a Companion (ponts) entry; set them "
+            "from the Danfoss app or the native bridge",
+        )
 
 
 def _require_vacation_write(store: dict) -> None:
@@ -247,6 +269,7 @@ async def set_vacation(
 ) -> dict:
     """Set / edit an *away* vacation on a home (contract §4.5, ``vacation.plan.leave``). GATED."""
     _require_vacation_write(store)
+    _reject_vacation_on_companion(store)
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     gid = await _resolve_home(coordinator, home)
     _check_date(start_date, "start_date")
@@ -295,6 +318,7 @@ async def set_vacation_at_home(
     cryptic ``REMOTE_API_RUN_UNKNOW_FAILED``), mirroring the app's own guard.
     """
     _require_vacation_write(store)
+    _reject_vacation_on_companion(store)
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     gid = await _resolve_home(coordinator, home)
     _check_date(start_date, "start_date")
@@ -315,6 +339,7 @@ async def cancel_vacation(
 ) -> dict:
     """Cancel a *planned* vacation before it starts (contract §4.5, ``vacation.cancel``). GATED."""
     _require_vacation_write(store)
+    _reject_vacation_on_companion(store)
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     gid = await _resolve_home(coordinator, home)
     await _run_cloud_write(coordinator.client.async_vacation_cancel, gid, time_zone)
@@ -332,6 +357,7 @@ async def end_vacation(
 ) -> dict:
     """End an *in-progress* vacation now (contract §4.5, ``vacation.leave.now``). GATED."""
     _require_vacation_write(store)
+    _reject_vacation_on_companion(store)
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
     gid = await _resolve_home(coordinator, home)
     tenths = _vacation_temperature_tenths(temperature)
@@ -359,9 +385,42 @@ def _key(target: dict) -> str:
     return f"{target.get('type')}:{target.get('id')}"
 
 
+def _companion_schedule_payload(store: dict, room_manager, target: dict) -> dict:
+    """The weekly schedule of a Companion room: what the integration last fanned out to its heads.
+
+    The Companion has no schedule read-back from the heads, so this returns the manager's recorded
+    schedule (``get_room_schedule``), normalised to the cloud day keys of ``api.schedule`` so the
+    payload shape matches the cloud ``async_get_schedule`` one. A non-room target is refused.
+    """
+    coordinator = store[DATA_COORDINATOR]
+    group_id = _room_target(target)
+    if group_id not in coordinator.rooms:
+        raise OperationError("unknown_room", f"room not found: {group_id}")
+    days: dict[str, list[dict[str, str]]] = {}
+    for name, windows in room_manager.get_room_schedule(group_id).items():
+        canon = normalize_day(name)
+        if canon:
+            days[canon] = windows
+    room = coordinator.rooms.get(group_id)
+    return sch.Schedule(
+        target={"type": "room", "id": group_id},
+        name=getattr(room, "name", None),
+        days=days,
+        source="companion",
+        read_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+    ).to_dict()
+
+
 async def get_schedule(store: dict, target: dict, refresh: bool = False) -> dict:
-    """A target's schedule: cache (<= 1 h) or cloud if `refresh` / cache stale."""
+    """A target's schedule: cache (<= 1 h) or cloud if `refresh` / cache stale.
+
+    On a Companion (ponts) entry the schedule is served from the room manager's recorded fan-out,
+    not the cloud client (which the Companion store has no ``.client`` for).
+    """
     coordinator: DanfossCoordinator = store[DATA_COORDINATOR]
+    room_manager = _companion_room_manager(store)
+    if room_manager is not None:
+        return _companion_schedule_payload(store, room_manager, target)
     cache: dict = store[DATA_SCHEDULES]
     key = _key(target)
     cached = cache.get(key)
@@ -453,20 +512,36 @@ async def check_schedule_target(hass: HomeAssistant, store: dict, target: dict) 
         raise _not_following("the head itself reports manual mode")
 
 
+async def _companion_set_room_schedule(room_manager, target: dict, days: dict) -> None:
+    """Fan a weekly schedule out to a Companion room's heads, mapping errors to contract codes."""
+    group_id = _room_target(target)  # a Companion schedule write targets a room
+    try:
+        await room_manager.async_set_room_schedule(group_id, days)
+    except KeyError as err:
+        raise OperationError("unknown_room", f"room not found: {group_id}") from err
+    except ValueError as err:
+        raise OperationError("schedule_invalid", str(err)) from err
+
+
 async def set_schedule(
     hass: HomeAssistant, store: dict, target: dict, days: dict, *, checked: bool = False
 ) -> dict:
     """Write the given days. ``checked``: the caller already ran ``check_schedule_target``."""
     jobs: JobManager = store[DATA_JOBS]
+    coordinator = store[DATA_COORDINATOR]
     if not checked:
         await check_schedule_target(hass, store, target)
     errors = sch.validate_days(days)
     if errors:
         raise OperationError(errors[0]["code"], errors[0]["message"], errors, errors[0].get("day"))
-    await _run_write(store[DATA_COORDINATOR].client.async_set_schedule_days, target, days)
+    room_manager = _companion_room_manager(store)
+    if room_manager is not None:
+        await _companion_set_room_schedule(room_manager, target, days)
+    else:
+        await _run_write(coordinator.client.async_set_schedule_days, target, days)
     _invalidate(store, target)
     head_ids = _head_ids(store, target)
-    store[DATA_COORDINATOR].note_commanded(head_ids)  # R-3: freshen these heads post-command
+    coordinator.note_commanded(head_ids)  # R-3: freshen these heads post-command
     job = jobs.create("set_schedule", target, head_ids)
     _defer_verification(hass, store, job)
     return job.to_dict()
@@ -480,16 +555,29 @@ async def restore_schedule(hass: HomeAssistant, store: dict, target: dict) -> di
     (contract §4.2). Refused until the app's own path is known.
     """
     jobs: JobManager = store[DATA_JOBS]
+    coordinator = store[DATA_COORDINATOR]
     _check_not_grouped(store, target)
     if target.get("type") == "device":
         raise OperationError(
             "isolated_restore_unproven",
             "back to schedule has no proven route for an isolated head; use the Danfoss app",
         )
-    await _run_write(store[DATA_COORDINATOR].client.async_restore_schedule, target)
+    room_manager = _companion_room_manager(store)
+    if room_manager is not None:
+        # The Companion has no cloud "back to schedule"; re-push the room's recorded schedule.
+        group_id = _room_target(target)
+        days = room_manager.get_room_schedule(group_id)
+        if not days:
+            raise OperationError(
+                "no_schedule_recorded",
+                "no schedule has been set on this Companion room yet; set one before restoring",
+            )
+        await _companion_set_room_schedule(room_manager, target, days)
+    else:
+        await _run_write(coordinator.client.async_restore_schedule, target)
     _invalidate(store, target)
     head_ids = _head_ids(store, target)
-    store[DATA_COORDINATOR].note_commanded(head_ids)  # R-3: freshen these heads post-command
+    coordinator.note_commanded(head_ids)  # R-3: freshen these heads post-command
     job = jobs.create("restore", target, head_ids)
     _defer_verification(hass, store, job)
     return job.to_dict()
