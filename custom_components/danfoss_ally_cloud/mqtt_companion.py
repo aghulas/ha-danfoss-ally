@@ -34,6 +34,11 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_COMPANION_PREFIXES: tuple[str, ...] = ("zigbee2mqtt", "danfoss2mqtt")
 
+# Zigbee2MQTT ``/set`` keys proven on the cloud-only ``danfoss2mqtt`` bridge
+# (see ``api/bridge_daemon.py`` ``_CLOUD_UNSUPPORTED_SET_KEYS``): every other key is ignored by the
+# bridge, so the Companion must mark those controls unavailable / refuse them rather than drop them.
+CLOUD_BRIDGE_SUPPORTED_SET_KEYS: frozenset[str] = frozenset({"occupied_heating_setpoint"})
+
 
 def _parse_online_payload(raw: str | bytes) -> bool | None:
     text = (raw.decode("utf-8") if isinstance(raw, bytes) else raw).strip()
@@ -81,6 +86,8 @@ class MqttCompanionCoordinator:
         self._holidays_by_prefix: dict[str, dict[str, Any]] = {}
         # Optional home_id per device published under danfoss.home_id in bridge/devices
         self.device_home: dict[str, str] = {}
+        # Devices served by a cloud-only bridge (danfoss2mqtt) whose /set surface is restricted
+        self._cloud_bridge_devices: set[str] = set()
 
         self._unsubs: list[CALLBACK_TYPE] = []
         self._listeners: list[Callable[[], None]] = []
@@ -116,6 +123,23 @@ class MqttCompanionCoordinator:
             if group_id in rooms:
                 return prefix
         return None
+
+    def is_cloud_bridge_device(self, dev_id: str) -> bool:
+        """Return True if ``dev_id`` is served by a cloud-only bridge (e.g. ``danfoss2mqtt``)."""
+        return dev_id in self._cloud_bridge_devices
+
+    def supports_device_set(self, dev_id: str, z2m_key: str) -> bool:
+        """Return True if publishing ``z2m_key`` to ``dev_id``'s ``/set`` topic is supported.
+
+        Zigbee2MQTT devices accept the full Z2M ``/set`` surface; cloud-only ``danfoss2mqtt``
+        devices only have a proven path 1a for room setpoints (``occupied_heating_setpoint``),
+        matching ``api.bridge_daemon._CLOUD_UNSUPPORTED_SET_KEYS``.
+        """
+        if dev_id not in self.device_route:
+            return False
+        if dev_id in self._cloud_bridge_devices:
+            return z2m_key in CLOUD_BRIDGE_SUPPORTED_SET_KEYS
+        return True
 
     @callback
     def async_add_listener(
@@ -243,6 +267,10 @@ class MqttCompanionCoordinator:
             ext = entry.get("danfoss")
             if isinstance(ext, dict) and ext.get("home_id"):
                 self.device_home[dev.id] = str(ext["home_id"])
+            if prefix == "danfoss2mqtt" or isinstance(ext, dict):
+                self._cloud_bridge_devices.add(dev.id)
+            else:
+                self._cloud_bridge_devices.discard(dev.id)
             seen_for_prefix.add(dev.id)
 
         # Remove stale devices that belonged to this prefix and disappeared from bridge/devices
@@ -255,6 +283,7 @@ class MqttCompanionCoordinator:
             p, f = self.device_route.pop(dev_id)
             self._by_topic_key.pop((p, f), None)
             self.device_home.pop(dev_id, None)
+            self._cloud_bridge_devices.discard(dev_id)
             self.data.pop(dev_id, None)
 
         self._notify_listeners()

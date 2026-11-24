@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import HomeAssistant
 
 from .api import write_allowed
-from .api.client import CloudError
+from .api.client import CloudClient, CloudError
+from .const import DATA_COORDINATOR
 
 if TYPE_CHECKING:
     from .coordinator import DanfossCoordinator
@@ -93,3 +94,21 @@ def _room_target(target: dict) -> str:
     if target.get("type") != "room":
         raise OperationError("unknown_room", "this action targets a room")
     return str(target.get("id"))
+
+
+def _require_cloud_client(store: dict, code: str, action: str) -> CloudClient:
+    """Return ``coordinator.client`` or raise a clean ``OperationError`` on a Companion entry.
+
+    A v2 MQTT Companion entry uses ``CompanionCoordinatorView``, which has no direct cloud
+    ``client``. Guarding cloud-only operations through this helper prevents ``AttributeError`` ->
+    HTTP 500 and surfaces a stable contract code instead.
+    """
+    coordinator = store[DATA_COORDINATOR]
+    client = getattr(coordinator, "client", None)
+    if client is None:
+        raise OperationError(
+            code,
+            f"{action} is not supported on a Companion entry (no direct cloud client); "
+            "use the Danfoss app or a direct-cloud entry",
+        )
+    return client

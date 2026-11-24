@@ -32,7 +32,7 @@ from .api import schedule as sch
 from .api.client import CloudError
 from .api.local import tunnel
 from .api.local.manager import Head
-from .companion_rooms import normalize_day
+from .companion_rooms import UnsupportedCompanionWriteError, normalize_day
 from .const import (
     DATA_COORDINATOR,
     DATA_JOBS,
@@ -517,6 +517,8 @@ async def _companion_set_room_schedule(room_manager, target: dict, days: dict) -
     group_id = _room_target(target)  # a Companion schedule write targets a room
     try:
         await room_manager.async_set_room_schedule(group_id, days)
+    except UnsupportedCompanionWriteError as err:
+        raise OperationError("schedule_companion_unsupported", str(err)) from err
     except KeyError as err:
         raise OperationError("unknown_room", f"room not found: {group_id}") from err
     except ValueError as err:

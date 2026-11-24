@@ -24,7 +24,7 @@ from .const import (
     DATA_MQTT_LINK,
     DOMAIN,
 )
-from .coordinator import DanfossCoordinator, DanfossMessageCoordinator
+from .coordinator import CoordinatorProtocol, DanfossMessageCoordinator
 from .mqtt_coverage import CoverageStats
 
 # Entry keys to redact (account, session and installation secrets).
@@ -55,7 +55,7 @@ async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
     data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: DanfossCoordinator = data[DATA_COORDINATOR]
+    coordinator: CoordinatorProtocol = data[DATA_COORDINATOR]
     devices = [async_redact_data(asdict(dev), DEVICE_REDACT) for dev in coordinator.data.values()]
     diag: dict[str, Any] = {
         "entry": async_redact_data(dict(entry.data), TO_REDACT),
