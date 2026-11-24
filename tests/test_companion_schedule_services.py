@@ -139,17 +139,27 @@ async def test_set_get_restore_schedule_on_z2m_companion_room(
     assert len([p for topic, p in sent if "weekly_schedule" in p]) == 2
 
 
-async def test_set_schedule_on_danfoss2mqtt_room_refused_never_silently_dropped(
+async def test_set_schedule_on_danfoss2mqtt_room_routes_via_bridge_rpc_never_head_set(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """danfoss2mqtt ignores /set weekly_schedule; Companion must refuse cleanly and publish none."""
+    """danfoss2mqtt ignores /set weekly_schedule; Companion routes via bridge/request/set_schedule
+    and never publishes /set weekly_schedule to heads (and refuses cleanly if bridge is offline)."""
     store, sent = _companion_store(hass, monkeypatch)
     target = {"type": "room", "id": D2M_GROUP_ID}
     days = {"mon": [{"start": "08:30", "end": "22:30"}]}
 
+    # Direct room_manager fan-out on a danfoss2mqtt room is still refused (never drops /set).
+    from custom_components.danfoss_ally_cloud.companion_rooms import UnsupportedCompanionWriteError
+
+    with pytest.raises(UnsupportedCompanionWriteError):
+        await store["room_manager"].async_set_room_schedule(D2M_GROUP_ID, days)
+    assert sent == []
+
+    # Through ops.set_schedule, an offline danfoss2mqtt bridge refuses cleanly with bridge_offline.
+    store["companion"].process_mqtt_message(f"{D2M_PREFIX}/bridge/state", "offline")
     with pytest.raises(OperationError) as err:
         await ops.set_schedule(hass, store, target, days)
-    assert err.value.code == "schedule_companion_unsupported"
+    assert err.value.code == "bridge_offline"
     assert sent == []
 
 
