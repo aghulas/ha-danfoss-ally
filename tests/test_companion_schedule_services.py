@@ -2,8 +2,13 @@
 dereferenced ``coordinator.client`` (the legacy cloud API client), which a Companion store's
 ``CompanionCoordinatorView`` does not have — so ``set_schedule`` / ``get_schedule`` /
 ``restore_schedule`` (and the vacation ops) raised ``AttributeError`` -> HTTP 500 and changed
-nothing on a ponts+Companion entry. They must instead route through ``room_manager`` (as the
-climate setpoint path already does) and, for vacation, refuse cleanly (no proven Companion route).
+nothing on a ponts+Companion entry.
+
+On a Companion entry:
+- Zigbee2MQTT rooms route through ``room_manager`` (fan-out ``/set weekly_schedule``).
+- ``danfoss2mqtt`` rooms refuse cleanly with ``schedule_companion_unsupported`` (never silently
+  dropping ``weekly_schedule`` which ``api.bridge_daemon`` ignores).
+- Vacation ops refuse cleanly with ``vacation_companion_unsupported``.
 Synthetic data only."""
 
 from __future__ import annotations
@@ -18,19 +23,25 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.danfoss_ally_cloud import operations as ops
 from custom_components.danfoss_ally_cloud.companion_adapter import build_companion_store
-from custom_components.danfoss_ally_cloud.companion_rooms import CompanionRoomManager
+from custom_components.danfoss_ally_cloud.companion_rooms import (
+    CompanionRoomConfig,
+    CompanionRoomManager,
+)
 from custom_components.danfoss_ally_cloud.const import DATA_VACATION_WRITE
 from custom_components.danfoss_ally_cloud.mqtt_companion import MqttCompanionCoordinator
 from custom_components.danfoss_ally_cloud.ops_common import OperationError
 
-PREFIX = "danfoss2mqtt"
-GROUP_ID = "grp-profs"
-HEADS = {"0x01": "Salle profs #1", "0x02": "Salle profs #2"}
+Z2M_PREFIX = "zigbee2mqtt"
+D2M_PREFIX = "danfoss2mqtt"
+Z2M_ROOM_ID = "virt-chapelle"
+D2M_GROUP_ID = "grp-profs"
+Z2M_HEADS = {"0x01": "Chapelle #1", "0x02": "Chapelle #2"}
+D2M_HEADS = {"bf_d2m_1": "Salle profs #1", "bf_d2m_2": "Salle profs #2"}
 Sent = list[tuple[str, dict[str, Any]]]
 
 
 def _companion_store(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, Sent]:
-    """A Companion store backed by a native ``danfoss2mqtt`` room of two heads (the bug target)."""
+    """A Companion store with both a Z2M virtual room and a native ``danfoss2mqtt`` room."""
     sent: Sent = []
 
     async def _publish(_hass: Any, topic: str, payload: str, **_kw: Any) -> None:
@@ -42,41 +53,69 @@ def _companion_store(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch) -> tu
     # The deferred R7 verification schedules an async_call_later timer; not under test here.
     monkeypatch.setattr(ops, "_defer_verification", lambda *a, **k: None)
 
-    comp = MqttCompanionCoordinator(hass, (PREFIX,))
-    comp.process_mqtt_message(f"{PREFIX}/bridge/state", '{"state": "online"}')
-    devices = [
-        {
-            "ieee_address": ieee,
-            "friendly_name": name,
-            "definition": {"vendor": "Danfoss", "model": "014G2461"},
-        }
-        for ieee, name in HEADS.items()
-    ]
-    comp.process_mqtt_message(f"{PREFIX}/bridge/devices", json.dumps(devices))
+    comp = MqttCompanionCoordinator(hass, (Z2M_PREFIX, D2M_PREFIX))
+    comp.process_mqtt_message(f"{Z2M_PREFIX}/bridge/state", '{"state": "online"}')
     comp.process_mqtt_message(
-        f"{PREFIX}/bridge/rooms",
+        f"{Z2M_PREFIX}/bridge/devices",
         json.dumps(
             [
                 {
-                    "group_id": GROUP_ID,
+                    "ieee_address": ieee,
+                    "friendly_name": name,
+                    "definition": {"vendor": "Danfoss", "model": "014G2461"},
+                }
+                for ieee, name in Z2M_HEADS.items()
+            ]
+        ),
+    )
+
+    comp.process_mqtt_message(f"{D2M_PREFIX}/bridge/state", '{"state": "online"}')
+    comp.process_mqtt_message(
+        f"{D2M_PREFIX}/bridge/devices",
+        json.dumps(
+            [
+                {
+                    "ieee_address": dev_id,
+                    "friendly_name": name,
+                    "definition": {"vendor": "Danfoss", "model": "014G2461"},
+                    "danfoss": {"dev_id": dev_id, "product_id": "03wvrwpv", "category": "head"},
+                }
+                for dev_id, name in D2M_HEADS.items()
+            ]
+        ),
+    )
+    comp.process_mqtt_message(
+        f"{D2M_PREFIX}/bridge/rooms",
+        json.dumps(
+            [
+                {
+                    "group_id": D2M_GROUP_ID,
                     "name": "Salle des professeurs",
                     "home_id": "home-1",
-                    "members": list(HEADS),
+                    "members": list(D2M_HEADS),
                 }
             ]
         ),
     )
+
     room_mgr = CompanionRoomManager(comp)
+    room_mgr.add_virtual_room(
+        CompanionRoomConfig(
+            room_id=Z2M_ROOM_ID,
+            name="Chapelle",
+            head_ids=list(Z2M_HEADS),
+        )
+    )
     store = build_companion_store(comp, room_mgr)
     store[DATA_VACATION_WRITE] = True  # exercise the companion guard, not the disabled-gate
     return store, sent
 
 
-async def test_set_get_restore_schedule_on_companion_store(
+async def test_set_get_restore_schedule_on_z2m_companion_room(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store, sent = _companion_store(hass, monkeypatch)
-    target = {"type": "room", "id": GROUP_ID}
+    target = {"type": "room", "id": Z2M_ROOM_ID}
     days = {"mon": [{"start": "08:30", "end": "22:30"}]}
 
     # set_schedule must not raise AttributeError/500; it fans a weekly_schedule out to both heads.
@@ -100,12 +139,26 @@ async def test_set_get_restore_schedule_on_companion_store(
     assert len([p for topic, p in sent if "weekly_schedule" in p]) == 2
 
 
+async def test_set_schedule_on_danfoss2mqtt_room_refused_never_silently_dropped(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """danfoss2mqtt ignores /set weekly_schedule; Companion must refuse cleanly and publish none."""
+    store, sent = _companion_store(hass, monkeypatch)
+    target = {"type": "room", "id": D2M_GROUP_ID}
+    days = {"mon": [{"start": "08:30", "end": "22:30"}]}
+
+    with pytest.raises(OperationError) as err:
+        await ops.set_schedule(hass, store, target, days)
+    assert err.value.code == "schedule_companion_unsupported"
+    assert sent == []
+
+
 async def test_restore_without_recorded_schedule_is_clean_error(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store, _ = _companion_store(hass, monkeypatch)
     with pytest.raises(OperationError) as err:
-        await ops.restore_schedule(hass, store, {"type": "room", "id": GROUP_ID})
+        await ops.restore_schedule(hass, store, {"type": "room", "id": Z2M_ROOM_ID})
     assert err.value.code == "no_schedule_recorded"
 
 

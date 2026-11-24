@@ -11,9 +11,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import timedelta
-from typing import Any
+from typing import Any, Protocol
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -52,6 +52,49 @@ _TOPOLOGY_TTL = 3600  # seconds
 
 # Cap for exponential polling backoff on repeated transient CloudError failures.
 _MAX_BACKOFF_SECONDS = 900
+
+
+class CoordinatorProtocol(Protocol):
+    """Common structural contract shared by ``DanfossCoordinator`` and ``CompanionCoordinatorView``.
+
+    Deliberately omits ``client`` (direct-cloud only): any operation that needs the Tuya cloud
+    client must go through ``ops_common._require_cloud_client`` so ``mypy`` catches unguarded
+    ``.client`` dereferences that would crash with ``AttributeError`` on a Companion entry.
+    """
+
+    hass: HomeAssistant
+    home_rooms: dict[str, list[dict[str, Any]]]
+    device_home: dict[str, str]
+    relay_rooms: dict[str, list[dict[str, Any]]]
+    last_update_success: bool
+
+    @property
+    def data(self) -> dict[str, DanfossDevice]: ...
+
+    @property
+    def rooms(self) -> dict[str, RoomState]: ...
+
+    @property
+    def holidays(self) -> dict[str, dict[str, Any]]: ...
+
+    @property
+    def grouped_ids(self) -> set[str]: ...
+
+    def group_of(self, head_id: str) -> str | None: ...
+
+    def home_of(self, group_id: str) -> str | None: ...
+
+    def head_home(self, head_id: str) -> str | None: ...
+
+    def room_retired(self, group_id: str) -> bool: ...
+
+    def async_add_listener(
+        self, update_callback: Callable[[], None], context: Any = None
+    ) -> CALLBACK_TYPE: ...
+
+    def note_commanded(self, head_ids: Iterable[str]) -> None: ...
+
+    async def async_request_refresh(self) -> None: ...
 
 
 class DanfossCoordinator(DataUpdateCoordinator[dict[str, DanfossDevice]]):

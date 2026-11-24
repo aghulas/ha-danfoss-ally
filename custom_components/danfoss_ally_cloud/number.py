@@ -405,11 +405,18 @@ class _HeadMqttNumber(DanfossEntity, NumberEntity):
         self._link = link
         self._supervised_dps = supervised_dps
 
+    _companion_z2m_key: str | None = None
+
     def _write_path(self, dev: DanfossDevice | None) -> str:
         if dev is None:
             return PATH_NONE
-        if getattr(self.coordinator, "companion", None) is not None:
-            return "mqtt_companion"
+        companion = getattr(self.coordinator, "companion", None)
+        if companion is not None:
+            if self._companion_z2m_key and companion.supports_device_set(
+                dev.id, self._companion_z2m_key
+            ):
+                return "mqtt_companion"
+            return PATH_NONE
         if self._link is None or not write_allowed(dev) or not dev.node_id or not dev.mesh_id:
             return PATH_NONE
         if self.coordinator.group_of(dev.id) is not None:
@@ -456,6 +463,9 @@ class DanfossHeadBound(_HeadMqttNumber):
         super().__init__(coordinator, device_id, link, supervised_dps)
         self.entity_description = description
         self._dps = (description.dp,)
+        self._companion_z2m_key = (
+            "max_heat_setpoint_limit" if description.bound == "upper" else "min_heat_setpoint_limit"
+        )
         self._attr_unique_id = f"{device_id}_{description.key}"
         low, high = MQTT_TENTHS_RANGE[description.dp]
         self._attr_native_min_value = low / 10
