@@ -1,14 +1,24 @@
 # Changelog
 
-## Unreleased — Companion virtual-room feeds behind options (stage 0 of `docs/z2m-cloud-parity.md`)
+## 2.0.4 — Companion write-safety, `danfoss2mqtt` schedule RPC & virtual-room feeds
 
-Nothing in this entry was validated on real hardware.
+**Added**
+
+- **`danfoss2mqtt` schedule RPC (`bridge/request/{get,set,restore}_schedule`)** (#161): on a v2
+  MQTT Companion entry, `get_schedule`, `set_schedule`, and `restore_schedule` for native
+  `danfoss2mqtt` rooms now route through `<prefix>/bridge/request/<action>` ↔
+  `<prefix>/bridge/response/<action>` with `transaction` correlation (`mqtt_companion.py`,
+  `operations.py`, `api/bridge_daemon.py`), giving real cloud read-back and confirmed HTTP writes
+  instead of dropping `/set weekly_schedule`. *(Note: carry the `api/bridge_daemon.py` RPC
+  handlers to `aghulas/pydanfoss-cloud` and bump `aghulas/danfoss2mqtt` for live add-on support.)*
+- **`CoordinatorProtocol`** (#159): common structural protocol for `DanfossCoordinator` and
+  `CompanionCoordinatorView` (omitting `.client`) so `mypy` catches unguarded cloud-client access.
 
 **Changed**
 
 - **The Companion's two periodic feeds to Zigbee2MQTT heads are now options, closed by default**
-  (`config_flow.py`, `__init__.py`, `companion_rooms.py`): a Companion entry has an options form
-  with `companion_feed_external_sensor` (room sensor temperature →
+  (`config_flow.py`, `__init__.py`, `companion_rooms.py`, #152): a Companion entry has an options
+  form with `companion_feed_external_sensor` (room sensor temperature →
   `external_measured_room_sensor`) and `companion_feed_load_mean` (`load_room_mean`). A change
   applies at the next tick, without a reload. Closing a feed sends nothing.
   - **Upgrade, room sensor**: an entry that already stores a virtual room with a sensor keeps its
@@ -23,11 +33,26 @@ Nothing in this entry was validated on real hardware.
   unknown or has not reported the attribute counts as off.
 - **`async_set_room_schedule` refuses a day of more than six transitions** instead of silently
   dropping the extra ones (rule R1), and validates the whole request before storing or sending
-  anything. The function is still not wired to any service.
+  anything.
+- **Companion options & documentation** (#153, #160): Companion entries hide inert direct-cloud
+  options; preheat absence on Companion heads is explicit; unused `bridge_mqtt.py` removed;
+  `README.md` and `CLAUDE.md` updated for the v2 Bridge + Companion architecture.
 
 **Fixed**
 
-- **Room-sensor keep-alive past the head's deadline** (`companion_rooms.py`, `const.py`): the
+- **Schedule, vacation, and room-management services under Companion** (#158, #159):
+  `set_schedule` / `get_schedule` / `restore_schedule` no longer crash with `AttributeError` (HTTP
+  500) on `CompanionCoordinatorView`; vacation ops and `ops_rooms` (`create_room`, `rename_room`,
+  `delete_room`, `attach_heads`, `detach_heads`, `set_relay_room`, `disconnect_head`) refuse
+  cleanly with contract `OperationError` codes.
+- **No silently dropped `/set` writes on `danfoss2mqtt`** (#159): `MqttCompanionCoordinator`
+  tracks cloud-bridge capabilities (`is_cloud_bridge_device` / `supports_device_set`); switches
+  (`child_lock`, `window_detection`), setpoint bounds (`min_setpoint`, `max_setpoint`), and
+  isolated-head climates are marked unavailable / read-only on `danfoss2mqtt` while remaining
+  writable on `zigbee2mqtt` in mixed fleets.
+- **Rooms and holidays indexed per bridge prefix** (#156): a second bridge publishing
+  `bridge/rooms` or `bridge/holidays` no longer overwrites another bridge's entries.
+- **Room-sensor keep-alive past the head's deadline** (`companion_rooms.py`, `const.py`, #152): the
   refresh threshold was 30 min evaluated on a 15-min timer, so a keep-alive could land at 45 min,
   after the head's own 35-min reset in room-sensor mode (per Zigbee2MQTT's documentation). The
   threshold is now 20 min on a 6-min timer (lands at 24 to 26 min), tracked per head, and a head
