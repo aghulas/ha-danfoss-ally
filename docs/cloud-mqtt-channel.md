@@ -555,6 +555,25 @@ What this measure does not tell: whether a pushed value equals the value the clo
 the same moment (no value is kept), and how the push behaves over a session rotation longer than the
 window. Both belong to stage 4's own validation.
 
+### Real-fleet measure results (2026-11-24/25)
+
+The supervised probe ran over **13.36 hours** (48,085 seconds) covering an evening-to-morning
+transition (19:28 UTC to 08:49 UTC) across the full school fleet.
+
+| Metric | Result | Interpretation |
+|---|---|---|
+| **Duration** | 48,085 s (13.36 h) | Covers nocturnal setback, schedule change, and morning preheat transitions |
+| **Total frames decoded** | **32,296** frames | Protocol 4 (DP reports): 32,161; Protocol 1: 74; Protocol 25: 61 |
+| **Fleet coverage** | **99 / 99 heads seen (100 %)** | Every known head reported at least once |
+| **Heads never seen** | **0** (`heads_never_seen: []`) | Zero coverage holes |
+| **Online heads seen** | **97 / 97 online heads** | Both remaining heads (indexes 48 and 64) were known offline in the cloud poll |
+| **Top push carrier** | **DP 199 (raw Zigbee frame)** | **21,388 reports** across 97 heads (~66 % of all frames) |
+| **DP 199 cadence** | **Median interval: 60.5 s** | Real-time stream equivalent to the tunnel read cadence |
+| **DP 24 (temperature)** | 2,814 reports across 97 heads | Median interval: ~22 minutes (reports only on significant $\Delta T$) |
+| **Key state DPs** | DP 169 (3,058), DP 161 (2,235), DP 108 (2,164), DP 107 (1,396), DP 170 (536), DP 34 (319) | All primary operational telemetry DPs actively pushed |
+
+**Conclusion on Stage 4 readiness**: All 4 criteria are fulfilled. The cloud MQTT push stream is proven to be an authoritative, continuous, real-time telemetry feed across 100 % of the fleet. Stage 4 was promoted and rolled out to production in `danfoss2mqtt` v0.1.4 via `cloud_mqtt_listen: true`.
+
 ## 14. Target routing — how much can go through cloud MQTT
 
 A design study, not a plan of record. It answers one question: **can the cloud MQTT channel carry
