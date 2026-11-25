@@ -283,11 +283,11 @@ on one room, read back from the heads, recorded under `docs/validation/`
 | 0 | Before anything: find what fed the external sensor on 2026-11-21 (done: [`validation/2026-11-21-external-sensor-producer.md`](validation/2026-11-21-external-sensor-producer.md)); record the 2026-11-22 Companion validation under `docs/validation/` (done: [`validation/2026-11-22-companion-v2-validation.md`](validation/2026-11-22-companion-v2-validation.md)); put the Companion's two feeds behind an option and fix the sensor keep-alive (30 / 45 min against a 35-min reset). **Done** — code part (options, keep-alive, load-balancing gate, schedule refusal; §4), not tried on real hardware, and both read-only items closed | Read-only check |
 | 1 | Coordinator, **read only**: room store, `bridge/rooms` aggregates, heat demand, drift report. Companion reads it (rooms per prefix) | None (no write) |
 | 2 | Room setpoint fan-out with per-head verification and write jobs. **Code done** in `pydanfoss-cloud` 0.6.0 (`write_job.py` + `bridge/request/room/set-setpoint`), **closed by default** behind `armed_rooms`; synthetic tests only | Trial: one room, both setpoint properties — **pending** ([`validation/2026-11-23-setpoint-fanout-stage2.md`](validation/2026-11-23-setpoint-fanout-stage2.md)) |
-| 3 | Room sensor feed, event-driven, both `radiator_covered` modes | Trial, including the stop test: coordinator stopped, the head back to −8000 at 35 min |
-| 4 | Weekly schedule, comfort / setback, programming mode | Trial: write, read back, watch the next morning's transitions; **settle whether a mode change keeps the schedule** |
-| 5 | Room-wide settings, preheat, reconciliation | Trial: preheat held over one night with no cloud; a head changed by hand |
-| 6 | Load balancing | Trial on a two-head room: valve openings with and without the mean; what a stale mean does |
-| 7 | Holidays, then open window across a room | Trial each |
+| 3 | Room sensor feed, event-driven, both `radiator_covered` modes. **Code done** in `pydanfoss-cloud` (`room_control.py` + `room_coordinator.py`), **closed by default** behind `armed_rooms` + `feed_external_sensor`; synthetic tests only | Trial, including the stop test: coordinator stopped, the head back to −8000 at 35 min — **pending** ([`validation/2026-11-25-coordinator-stages3-7.md`](validation/2026-11-25-coordinator-stages3-7.md)) |
+| 4 | Weekly schedule, comfort / setback, programming mode. **Code done** in `pydanfoss-cloud` (`write_job.py` + `room_coordinator.py` `room/set-schedule`, `get_schedule`, `room/set-mode`, `room/set-comfort-setback`, `restore_schedule`), **closed by default** behind `armed_rooms` (and conservative `mode_change_keeps_schedule=False`); synthetic tests only | Trial: write, read back, watch the next morning's transitions; **settle whether a mode change keeps the schedule** — **pending** |
+| 5 | Room-wide settings, preheat, reconciliation. **Code done** in `pydanfoss-cloud` (`room/set-settings` + `ReconcileTracker` in `room_control.py`), **closed by default** behind `armed_rooms` + `reconcile_drift`; synthetic tests only | Trial: preheat held over one night with no cloud; a head changed by hand — **pending** |
+| 6 | Load balancing. **Code done** in `pydanfoss-cloud` (`RoomTelemetryTracker` in `room_control.py`, coalesced into one `/set` with sensor feed, `-8000` on clean stop), **closed by default** behind `armed_rooms` + `feed_load_mean`; synthetic tests only | Trial on a two-head room: valve openings with and without the mean; what a stale mean does — **pending** |
+| 7 | Holidays, then open window across a room. **Code done** in `pydanfoss-cloud` (`holiday/{set,cancel,list}`, `bridge/holidays`, startup edge reconciliation + `WindowPropagationTracker`), **closed by default** behind `armed_rooms` + `enable_holidays` / `propagate_window_open`; synthetic tests only | Trial each — **pending** |
 | 8 | Retire the Companion's virtual rooms (migration of the stored rooms to the coordinator) | On-site cutover |
 
 The order follows what is already live (2, 3), then what a re-paired head has lost outright (4),
@@ -305,6 +305,13 @@ For the supervised trial, arm **only the one test room**, by its `room_id`, and 
 
 ```bash
 danfoss-room-coordinator --armed-room <room_id>        # repeatable
+# Stage 3–7 opt-in flags (all False by default):
+#   --feed-external-sensor / DANFOSS_FEED_EXTERNAL_SENSOR=true
+#   --mode-change-keeps-schedule / DANFOSS_MODE_CHANGE_KEEPS_SCHEDULE=true
+#   --reconcile-drift / DANFOSS_RECONCILE_DRIFT=true
+#   --feed-load-mean / DANFOSS_FEED_LOAD_MEAN=true
+#   --enable-holidays / DANFOSS_ENABLE_HOLIDAYS=true
+#   --propagate-window-open / DANFOSS_PROPAGATE_WINDOW_OPEN=true
 # add-on options.json:  {"armed_rooms": ["<room_id>"]}
 # environment:          DANFOSS_ARMED_ROOMS=<room_id>
 ```
