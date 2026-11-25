@@ -8,7 +8,7 @@ only keeps what still decides future work.
 - **2.0.x — Bridge + Companion, stable since 2.0.0 (2026-11-22).** Home Assistant reads Zigbee2MQTT
   (heads on a Zigbee coordinator) and `danfoss2mqtt` (heads on Danfoss gateways, cloud path)
   through the local Mosquitto broker; the integration talks to the broker only
-  (`docs/companion-contract.md`). Current: 2.0.4.
+  (`docs/companion-contract.md`). Current: 2.0.5.
 - **1.4.x — frozen.** The direct-cloud line (cloud HTTP + Tuya cloud MQTT + local tunnel inside the
   integration) gets no new feature. Its routing rules live on in `danfoss2mqtt`
   (`docs/architecture.md`).
