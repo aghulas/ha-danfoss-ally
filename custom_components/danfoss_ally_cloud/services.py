@@ -620,6 +620,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         _COMPANION_DELETE_ROOM,
         SupportsResponse.OPTIONAL,
     )
+
     async def _coordinator_rpc(
         call: ServiceCall,
         action: str,
@@ -698,9 +699,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         payload: dict[str, Any] = {"room_id": call.data["room_id"], "mode": call.data["mode"]}
         if "setpoint" in call.data:
             payload["setpoint"] = float(call.data["setpoint"])
-        return await _coordinator_rpc(
-            call, "room/set-mode", payload, room_id=call.data["room_id"]
-        )
+        return await _coordinator_rpc(call, "room/set-mode", payload, room_id=call.data["room_id"])
 
     async def companion_set_holiday(call: ServiceCall) -> dict[str, Any]:
         payload: dict[str, Any] = {

@@ -124,9 +124,7 @@ async def async_setup_entry(
         companion = getattr(coordinator, "companion", None)
         for group_id, room in coordinator.rooms.items():
             is_coord = companion is not None and companion.is_coordinator_room(group_id)
-            if group_id not in known_rooms and (
-                room.pid in WRITE_VERIFIED_PRODUCTS or is_coord
-            ):
+            if group_id not in known_rooms and (room.pid in WRITE_VERIFIED_PRODUCTS or is_coord):
                 known_rooms.add(group_id)
                 entities += [DanfossRoomSetpoint(coordinator, group_id, desc) for desc in SETPOINTS]
         # Isolated-head settings over cloud MQTT: only with the write option on, a link, and the DP
