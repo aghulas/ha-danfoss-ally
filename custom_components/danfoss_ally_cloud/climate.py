@@ -71,6 +71,7 @@ from .const import (
 )
 from .coordinator import DanfossCoordinator
 from .entity import DanfossEntity
+from .mqtt_companion import CompanionBridgeError
 from .mqtt_write import async_mqtt_write, settings_block, supervised_for
 
 # Mode DP 2 -> readable label (state attribute).
@@ -198,7 +199,14 @@ class DanfossRoomClimate(CoordinatorEntity[DanfossCoordinator], ClimateEntity):
     @property
     def available(self) -> bool:
         room = self.room
-        return bool(super().available and room is not None and room.online)
+        if not (super().available and room is not None and room.online):
+            return False
+        companion = getattr(self.coordinator, "companion", None)
+        if companion is not None:
+            prefix = companion.prefix_of_room(self._group_id)
+            if prefix is not None and not companion.bridge_online.get(prefix, False):
+                return False
+        return True
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -280,9 +288,9 @@ class DanfossRoomClimate(CoordinatorEntity[DanfossCoordinator], ClimateEntity):
         if room_manager is not None:
             try:
                 encoded = encode_setpoint(temp, self.min_temp, self.max_temp, SETPOINT_STEP)
-            except CloudError as err:
+                await room_manager.async_set_room_setpoint(self._group_id, encoded / 10)
+            except (CloudError, CompanionBridgeError) as err:
                 raise HomeAssistantError(f"setpoint refused: {err}") from err
-            await room_manager.async_set_room_setpoint(self._group_id, encoded / 10)
             return
         if room.pid not in WRITE_VERIFIED_PRODUCTS:
             return

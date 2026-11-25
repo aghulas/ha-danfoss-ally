@@ -413,7 +413,7 @@ def _companion_schedule_payload(store: dict, room_manager, target: dict) -> dict
 
 
 def _companion_cloud_bridge(store: dict, group_id: str) -> tuple[Any, str] | None:
-    """Return ``(companion, prefix)`` if ``group_id`` is a native room on a cloud bridge."""
+    """Return ``(companion, prefix)`` when ``group_id`` belongs to a bridge with schedule RPC."""
     coordinator = store[DATA_COORDINATOR]
     companion = getattr(coordinator, "companion", None)
     if companion is None:
@@ -421,6 +421,8 @@ def _companion_cloud_bridge(store: dict, group_id: str) -> tuple[Any, str] | Non
     prefix = companion.prefix_of_room(group_id)
     if prefix is None:
         return None
+    if companion.is_coordinator_room(group_id):
+        return companion, prefix
     room_manager = _companion_room_manager(store)
     members = room_manager.room_members().get(group_id, ()) if room_manager is not None else ()
     if prefix == "danfoss2mqtt" or any(companion.is_cloud_bridge_device(m) for m in members):

@@ -9,10 +9,11 @@ account-level sensor, ``DanfossMessagesSensor``; see its docstring for the repre
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -22,7 +23,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTemperature
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -32,6 +33,9 @@ from .api.local.tunnel import DESCALE_DAYS
 from .const import DATA_COORDINATOR, DATA_LOCAL, DATA_MESSAGES, DOMAIN, MESSAGES_RECENT
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator, DanfossMessageCoordinator
 from .entity import DanfossEntity, DanfossHomeEntity, DanfossLocalEntity
+
+if TYPE_CHECKING:
+    from .mqtt_companion import MqttCompanionCoordinator
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -236,7 +240,29 @@ async def async_setup_entry(
     messages: DanfossMessageCoordinator | None = data.get(DATA_MESSAGES)
     if messages is not None:
         entities.append(DanfossMessagesSensor(messages))
+
+    companion: MqttCompanionCoordinator | None = data.get("companion")
+    known_heat_demand: set[str] = set()
+    if companion is not None:
+        for prefix in companion.heat_demand_by_prefix:
+            known_heat_demand.add(prefix)
+            entities.append(DanfossBridgeHeatDemandSensor(entry.entry_id, companion, prefix))
+
     async_add_entities(entities)
+
+    if companion is not None:
+
+        @callback
+        def _sync_heat_demand() -> None:
+            added: list[SensorEntity] = []
+            for prefix in companion.heat_demand_by_prefix:
+                if prefix not in known_heat_demand:
+                    known_heat_demand.add(prefix)
+                    added.append(DanfossBridgeHeatDemandSensor(entry.entry_id, companion, prefix))
+            if added:
+                async_add_entities(added)
+
+        entry.async_on_unload(companion.async_add_listener(_sync_heat_demand))
 
 
 class DanfossLocalSensor(DanfossLocalEntity, SensorEntity):
@@ -401,4 +427,62 @@ class DanfossMessagesSensor(CoordinatorEntity[DanfossMessageCoordinator], Sensor
             "alert_count": len(alerts),
             "last_alert": last.public_dict(name(last.source_id)) if last is not None else None,
             "alerts": [m.public_dict(name(m.source_id)) for m in alerts[:MESSAGES_RECENT]],
+        }
+
+
+class DanfossBridgeHeatDemandSensor(SensorEntity):
+    """Heat demand published by a room coordinator on ``<prefix>/bridge/heat_demand`` (§5.7)."""
+
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_should_poll = False
+
+    def __init__(
+        self,
+        entry_id: str,
+        companion: MqttCompanionCoordinator,
+        prefix: str,
+    ) -> None:
+        self._companion = companion
+        self._prefix = prefix
+        self._attr_unique_id = f"{entry_id}_heat_demand_{prefix}"
+        self._attr_name = f"{prefix} heat demand"
+
+    async def async_added_to_hass(self) -> None:
+        @callback
+        def _on_update() -> None:
+            self.async_write_ha_state()
+
+        self.async_on_remove(self._companion.async_add_listener(_on_update))
+
+    @property
+    def available(self) -> bool:
+        if not self._companion.bridge_online.get(self._prefix, False):
+            return False
+        raw = self._companion.heat_demand_by_prefix.get(self._prefix)
+        if not raw:
+            return False
+        ts = raw.get("ts")
+        valid_for = raw.get("valid_for_s")
+        if isinstance(ts, (int, float)) and isinstance(valid_for, (int, float)):
+            return (time.time() - float(ts)) <= float(valid_for)
+        return True
+
+    @property
+    def native_value(self) -> float | None:
+        raw = self._companion.heat_demand_by_prefix.get(self._prefix)
+        if not raw:
+            return None
+        val = raw.get("max_valve")
+        return float(val) if isinstance(val, (int, float)) else 0.0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        raw = self._companion.heat_demand_by_prefix.get(self._prefix) or {}
+        return {
+            "prefix": self._prefix,
+            "calling": bool(raw.get("calling", False)),
+            "rooms_calling": list(raw.get("rooms_calling") or []),
+            "ts": raw.get("ts"),
+            "valid_for_s": raw.get("valid_for_s"),
         }

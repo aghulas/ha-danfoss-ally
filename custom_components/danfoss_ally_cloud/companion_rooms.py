@@ -194,7 +194,7 @@ class CompanionRoomManager:
         """Compute ``RoomState`` for all native ``danfoss2mqtt`` rooms and virtual rooms."""
         out: dict[str, RoomState] = {}
 
-        # 1) Native rooms from danfoss2mqtt/bridge/rooms
+        # 1) Native rooms from danfoss2mqtt / danfoss-room-coordinator bridge/rooms
         for gid, raw in self._companion.native_rooms.items():
             member_ids = tuple(str(m) for m in (raw.get("members") or ()))
             members = [self._companion.data[m] for m in member_ids if m in self._companion.data]
@@ -206,7 +206,15 @@ class CompanionRoomManager:
                     home_gid=str(raw.get("home_id") or "default"),
                     members=member_ids,
                 )
-                out[gid] = aggregate_room(room, members)
+                state = aggregate_room(room, members)
+                sensor_id = str(raw["sensor"]) if raw.get("sensor") else None
+                if sensor_id and sensor_id in self._companion.data:
+                    sensor = self._companion.data[sensor_id]
+                    if sensor.online and sensor.temperature is not None:
+                        state.temperature = sensor.temperature
+                elif isinstance(raw.get("temperature"), (int, float)):
+                    state.temperature = float(raw["temperature"])
+                out[gid] = state
 
         # 2) Companion-managed virtual rooms (zigbee2mqtt or mixed heads + 014G2480 sensor)
         for rid, cfg in self.virtual_rooms.items():
@@ -258,6 +266,15 @@ class CompanionRoomManager:
         member_ids = members_map.get(room_id)
         if member_ids is None:
             raise KeyError(f"Unknown room_id: {room_id}")
+        if self._companion.is_coordinator_room(room_id):
+            prefix = self._companion.prefix_of_room(room_id)
+            assert prefix is not None
+            await self._companion.async_bridge_request(
+                prefix,
+                "room/set-setpoint",
+                {"room_id": room_id, "setpoint": float(temperature_c), "source": "user"},
+            )
+            return len(member_ids)
         sent = 0
         for head_id in member_ids:
             if head_id in self._companion.device_route:
@@ -367,13 +384,21 @@ class CompanionRoomManager:
         ts = time.monotonic() if now is None else now
         ext_writes = 0
         load_writes = 0
+        # Single owner per head (§5.1): skip heads already owned by a bridge-published room.
+        bridge_owned = {
+            str(m)
+            for raw in self._companion.native_rooms.values()
+            for m in (raw.get("members") or ())
+        }
 
         for rid, cfg in self.virtual_rooms.items():
             cache = self._telemetry.setdefault(rid, _TelemetryCache())
             members = [
                 self._companion.data[m]
                 for m in cfg.head_ids
-                if m in self._companion.data and self._companion.data[m].online
+                if m not in bridge_owned
+                and m in self._companion.data
+                and self._companion.data[m].online
             ]
             if not members:
                 continue
