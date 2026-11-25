@@ -282,6 +282,14 @@
      "saturday": "Samedi",
      "sunday": "Dimanche"
     }
+   },
+   "room_mode": {
+    "name": "Mode de programmation",
+    "state": {
+     "schedule": "Programme",
+     "manual": "Manuel",
+     "pause": "Pause"
+    }
    }
   },
   "time": {
@@ -754,6 +762,144 @@
     "config_entry_id": {
      "name": "Compte",
      "description": "Si plusieurs comptes sont configurés."
+    }
+   }
+  },
+  "companion_set_room_comfort_setback": {
+   "name": "Companion : consigne confort / réduit de pièce",
+   "description": "Écrit les consignes confort, réduit ou pause sur une pièce danfoss-room-coordinator (R3).",
+   "fields": {
+    "room_id": {
+     "name": "Identifiant de pièce",
+     "description": "room_id du coordinateur (ex. chapelle)."
+    },
+    "comfort": {
+     "name": "Consigne confort",
+     "description": "Température cible pendant les créneaux confort (°C)."
+    },
+    "setback": {
+     "name": "Consigne réduit",
+     "description": "Température cible hors créneaux confort (°C)."
+    },
+    "pause": {
+     "name": "Consigne pause",
+     "description": "Température cible en mode pause (°C)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs entrées Companion sont configurées."
+    }
+   }
+  },
+  "companion_set_room_settings": {
+   "name": "Companion : réglages de pièce",
+   "description": "Écrit les réglages d'une pièce (préchauffage, sécurité enfant, fenêtre ouverte, bornes min/max) via danfoss-room-coordinator.",
+   "fields": {
+    "room_id": {
+     "name": "Identifiant de pièce",
+     "description": "room_id du coordinateur."
+    },
+    "preheat": {
+     "name": "Préchauffage",
+     "description": "Active le préchauffage en mode programme."
+    },
+    "child_lock": {
+     "name": "Sécurité enfant",
+     "description": "Verrouille la molette sur toutes les têtes de la pièce."
+    },
+    "window_detection": {
+     "name": "Détection fenêtre ouverte",
+     "description": "Active la détection de fenêtre ouverte sur toutes les têtes de la pièce."
+    },
+    "min_setpoint": {
+     "name": "Consigne minimale",
+     "description": "Borne basse de consigne (°C)."
+    },
+    "max_setpoint": {
+     "name": "Consigne maximale",
+     "description": "Borne haute de consigne (°C)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs entrées Companion sont configurées."
+    }
+   }
+  },
+  "companion_set_room_mode": {
+   "name": "Companion : mode de pièce",
+   "description": "Bascule une pièce danfoss-room-coordinator entre les modes programme, manuel et pause.",
+   "fields": {
+    "room_id": {
+     "name": "Identifiant de pièce",
+     "description": "room_id du coordinateur."
+    },
+    "mode": {
+     "name": "Mode",
+     "description": "schedule, manual ou pause."
+    },
+    "setpoint": {
+     "name": "Consigne",
+     "description": "Consigne maintenue en mode manual ou pause (°C, optionnel)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs entrées Companion sont configurées."
+    }
+   }
+  },
+  "companion_set_holiday": {
+   "name": "Companion : programmer des vacances",
+   "description": "Planifie ou modifie une période de vacances sur le coordinateur (dates ISO-8601).",
+   "fields": {
+    "start": {
+     "name": "Début",
+     "description": "Horodatage ISO-8601 de début (ex. 2026-12-20T08:00:00+01:00)."
+    },
+    "end": {
+     "name": "Fin",
+     "description": "Horodatage ISO-8601 de fin."
+    },
+    "temperature": {
+     "name": "Température",
+     "description": "Consigne pendant les vacances (°C)."
+    },
+    "room_ids": {
+     "name": "Pièces",
+     "description": "Liste des room_id du coordinateur."
+    },
+    "name": {
+     "name": "Nom",
+     "description": "Libellé de la période."
+    },
+    "holiday_id": {
+     "name": "Identifiant de vacances",
+     "description": "Identifiant optionnel pour modifier une période existante."
+    },
+    "prefix": {
+     "name": "Préfixe du pont",
+     "description": "Préfixe MQTT du coordinateur (si plusieurs coexistent)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs entrées Companion sont configurées."
+    }
+   }
+  },
+  "companion_cancel_holiday": {
+   "name": "Companion : annuler des vacances",
+   "description": "Annule une période de vacances planifiée ou en cours par son identifiant.",
+   "fields": {
+    "holiday_id": {
+     "name": "Identifiant de vacances",
+     "description": "Identifiant de la période à annuler."
+    },
+    "prefix": {
+     "name": "Préfixe du pont",
+     "description": "Préfixe MQTT du coordinateur (si plusieurs coexistent)."
+    },
+    "config_entry_id": {
+     "name": "Compte",
+     "description": "Si plusieurs entrées Companion sont configurées."
     }
    }
   }

@@ -282,6 +282,14 @@
           "saturday": "Saturday",
           "sunday": "Sunday"
         }
+      },
+      "room_mode": {
+        "name": "Programming mode",
+        "state": {
+          "schedule": "Schedule",
+          "manual": "Manual",
+          "pause": "Pause"
+        }
       }
     },
     "time": {
@@ -754,6 +762,144 @@
         "config_entry_id": {
           "name": "Account",
           "description": "If several accounts are configured."
+        }
+      }
+    },
+    "companion_set_room_comfort_setback": {
+      "name": "Companion: set room comfort / setback",
+      "description": "Write comfort, setback or pause setpoints on a danfoss-room-coordinator room (R3).",
+      "fields": {
+        "room_id": {
+          "name": "Room id",
+          "description": "Coordinator room_id (e.g. chapelle)."
+        },
+        "comfort": {
+          "name": "Comfort setpoint",
+          "description": "Target temperature during scheduled comfort windows (°C)."
+        },
+        "setback": {
+          "name": "Setback setpoint",
+          "description": "Target temperature outside comfort windows (°C)."
+        },
+        "pause": {
+          "name": "Pause setpoint",
+          "description": "Target temperature used when switched to pause mode (°C)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several Companion entries are configured."
+        }
+      }
+    },
+    "companion_set_room_settings": {
+      "name": "Companion: set room settings",
+      "description": "Write room-wide settings (preheat, child lock, window detection, min/max setpoint) via danfoss-room-coordinator.",
+      "fields": {
+        "room_id": {
+          "name": "Room id",
+          "description": "Coordinator room_id."
+        },
+        "preheat": {
+          "name": "Pre-heating",
+          "description": "Enable pre-heating in schedule mode."
+        },
+        "child_lock": {
+          "name": "Child lock",
+          "description": "Lock physical dials on all heads of the room."
+        },
+        "window_detection": {
+          "name": "Open window detection",
+          "description": "Enable open window detection on all heads of the room."
+        },
+        "min_setpoint": {
+          "name": "Minimum setpoint",
+          "description": "Lower setpoint bound (°C)."
+        },
+        "max_setpoint": {
+          "name": "Maximum setpoint",
+          "description": "Upper setpoint bound (°C)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several Companion entries are configured."
+        }
+      }
+    },
+    "companion_set_room_mode": {
+      "name": "Companion: set room mode",
+      "description": "Switch a danfoss-room-coordinator room between schedule, manual and pause modes.",
+      "fields": {
+        "room_id": {
+          "name": "Room id",
+          "description": "Coordinator room_id."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "schedule, manual or pause."
+        },
+        "setpoint": {
+          "name": "Setpoint",
+          "description": "Optional held setpoint when switching to manual or pause (°C)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several Companion entries are configured."
+        }
+      }
+    },
+    "companion_set_holiday": {
+      "name": "Companion: set holiday",
+      "description": "Schedule or update a coordinator holiday period (ISO-8601 timestamps) across rooms.",
+      "fields": {
+        "start": {
+          "name": "Start",
+          "description": "ISO-8601 start timestamp (e.g. 2026-12-20T08:00:00+01:00)."
+        },
+        "end": {
+          "name": "End",
+          "description": "ISO-8601 end timestamp."
+        },
+        "temperature": {
+          "name": "Temperature",
+          "description": "Holiday setpoint (°C)."
+        },
+        "room_ids": {
+          "name": "Rooms",
+          "description": "List of coordinator room_ids."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Holiday label."
+        },
+        "holiday_id": {
+          "name": "Holiday id",
+          "description": "Optional identifier to update an existing holiday."
+        },
+        "prefix": {
+          "name": "Bridge prefix",
+          "description": "Optional coordinator MQTT prefix (when several exist)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several Companion entries are configured."
+        }
+      }
+    },
+    "companion_cancel_holiday": {
+      "name": "Companion: cancel holiday",
+      "description": "Cancel a scheduled or active coordinator holiday by id.",
+      "fields": {
+        "holiday_id": {
+          "name": "Holiday id",
+          "description": "Holiday identifier to cancel."
+        },
+        "prefix": {
+          "name": "Bridge prefix",
+          "description": "Optional coordinator MQTT prefix (when several exist)."
+        },
+        "config_entry_id": {
+          "name": "Account",
+          "description": "If several Companion entries are configured."
         }
       }
     }

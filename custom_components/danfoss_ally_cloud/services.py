@@ -11,7 +11,7 @@ from typing import Any, NoReturn
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
 from . import operations as ops
@@ -174,6 +174,53 @@ _COMPANION_DELETE_ROOM = vol.Schema(
     }
 )
 _COMPANION_SYNC_ROOMS = vol.Schema({vol.Optional("config_entry_id"): cv.string})
+_COMPANION_SET_COMFORT_SETBACK = vol.Schema(
+    {
+        vol.Required("room_id"): cv.string,
+        vol.Optional("comfort"): vol.Coerce(float),
+        vol.Optional("setback"): vol.Coerce(float),
+        vol.Optional("pause"): vol.Coerce(float),
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
+_COMPANION_SET_ROOM_SETTINGS = vol.Schema(
+    {
+        vol.Required("room_id"): cv.string,
+        vol.Optional("preheat"): cv.boolean,
+        vol.Optional("child_lock"): cv.boolean,
+        vol.Optional("window_detection"): cv.boolean,
+        vol.Optional("min_setpoint"): vol.Coerce(float),
+        vol.Optional("max_setpoint"): vol.Coerce(float),
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
+_COMPANION_SET_ROOM_MODE = vol.Schema(
+    {
+        vol.Required("room_id"): cv.string,
+        vol.Required("mode"): vol.In(["schedule", "manual", "pause"]),
+        vol.Optional("setpoint"): vol.Coerce(float),
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
+_COMPANION_SET_HOLIDAY = vol.Schema(
+    {
+        vol.Required("start"): cv.string,
+        vol.Required("end"): cv.string,
+        vol.Required("temperature"): vol.Coerce(float),
+        vol.Required("room_ids"): [cv.string],
+        vol.Optional("name", default="Holiday"): cv.string,
+        vol.Optional("holiday_id"): cv.string,
+        vol.Optional("prefix"): cv.string,
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
+_COMPANION_CANCEL_HOLIDAY = vol.Schema(
+    {
+        vol.Required("holiday_id"): cv.string,
+        vol.Optional("prefix"): cv.string,
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
 
 
 def _companion_store(hass: HomeAssistant, call: ServiceCall) -> tuple[str, dict]:
@@ -573,10 +620,148 @@ def async_register_services(hass: HomeAssistant) -> None:
         _COMPANION_DELETE_ROOM,
         SupportsResponse.OPTIONAL,
     )
+
+    async def _coordinator_rpc(
+        call: ServiceCall,
+        action: str,
+        payload: dict[str, Any],
+        *,
+        room_id: str | None = None,
+        prefix_arg: str | None = None,
+    ) -> dict[str, Any]:
+        from .mqtt_companion import CompanionBridgeError
+
+        _entry_id, store = _companion_store(hass, call)
+        try:
+            await ops.ensure_admin(hass, call.context.user_id)
+        except ops.OperationError as err:
+            _raise(err)
+        comp = store["companion"]
+        if room_id is not None:
+            if not comp.is_coordinator_room(room_id):
+                raise HomeAssistantError(f"room {room_id} is not managed by a room coordinator")
+            prefix = comp.prefix_of_room(room_id)
+        elif prefix_arg is not None:
+            prefix = prefix_arg
+        else:
+            room_ids = payload.get("room_ids")
+            candidates: list[str] = []
+            if isinstance(room_ids, list) and room_ids:
+                first_prefix = comp.prefix_of_room(str(room_ids[0]))
+                if first_prefix is not None:
+                    candidates = [first_prefix]
+            if not candidates:
+                candidates = sorted(
+                    {
+                        p
+                        for p in comp.prefixes
+                        if any(
+                            comp.prefix_of_room(gid) == p and comp.is_coordinator_room(gid)
+                            for gid in comp.native_rooms
+                        )
+                        or p in comp.heat_demand_by_prefix
+                    }
+                )
+            if len(candidates) != 1:
+                raise HomeAssistantError(
+                    "specify prefix when zero or multiple room coordinators exist"
+                )
+            prefix = candidates[0]
+        if prefix is None:
+            raise HomeAssistantError("coordinator bridge prefix not found")
+        try:
+            return await comp.async_bridge_request(prefix, action, payload)
+        except CompanionBridgeError as err:
+            raise HomeAssistantError(str(err)) from err
+
+    async def companion_set_room_comfort_setback(call: ServiceCall) -> dict[str, Any]:
+        payload: dict[str, Any] = {"room_id": call.data["room_id"]}
+        for k in ("comfort", "setback", "pause"):
+            if k in call.data:
+                payload[k] = float(call.data[k])
+        return await _coordinator_rpc(
+            call, "room/set-comfort-setback", payload, room_id=call.data["room_id"]
+        )
+
+    async def companion_set_room_settings(call: ServiceCall) -> dict[str, Any]:
+        payload: dict[str, Any] = {"room_id": call.data["room_id"]}
+        for k in ("preheat", "child_lock", "window_detection"):
+            if k in call.data:
+                payload[k] = bool(call.data[k])
+        for k in ("min_setpoint", "max_setpoint"):
+            if k in call.data:
+                payload[k] = float(call.data[k])
+        return await _coordinator_rpc(
+            call, "room/set-settings", payload, room_id=call.data["room_id"]
+        )
+
+    async def companion_set_room_mode(call: ServiceCall) -> dict[str, Any]:
+        payload: dict[str, Any] = {"room_id": call.data["room_id"], "mode": call.data["mode"]}
+        if "setpoint" in call.data:
+            payload["setpoint"] = float(call.data["setpoint"])
+        return await _coordinator_rpc(call, "room/set-mode", payload, room_id=call.data["room_id"])
+
+    async def companion_set_holiday(call: ServiceCall) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "start": call.data["start"],
+            "end": call.data["end"],
+            "temperature": float(call.data["temperature"]),
+            "room_ids": list(call.data["room_ids"]),
+            "name": call.data.get("name", "Holiday"),
+        }
+        if "holiday_id" in call.data:
+            payload["holiday_id"] = call.data["holiday_id"]
+        return await _coordinator_rpc(
+            call, "holiday/set", payload, prefix_arg=call.data.get("prefix")
+        )
+
+    async def companion_cancel_holiday(call: ServiceCall) -> dict[str, Any]:
+        return await _coordinator_rpc(
+            call,
+            "holiday/cancel",
+            {"holiday_id": call.data["holiday_id"]},
+            prefix_arg=call.data.get("prefix"),
+        )
+
     reg(
         DOMAIN,
         "companion_sync_rooms",
         companion_sync_rooms,
         _COMPANION_SYNC_ROOMS,
+        SupportsResponse.OPTIONAL,
+    )
+    reg(
+        DOMAIN,
+        "companion_set_room_comfort_setback",
+        companion_set_room_comfort_setback,
+        _COMPANION_SET_COMFORT_SETBACK,
+        SupportsResponse.OPTIONAL,
+    )
+    reg(
+        DOMAIN,
+        "companion_set_room_settings",
+        companion_set_room_settings,
+        _COMPANION_SET_ROOM_SETTINGS,
+        SupportsResponse.OPTIONAL,
+    )
+    reg(
+        DOMAIN,
+        "companion_set_room_mode",
+        companion_set_room_mode,
+        _COMPANION_SET_ROOM_MODE,
+        SupportsResponse.OPTIONAL,
+    )
+    reg(
+        DOMAIN,
+        "companion_set_holiday",
+        companion_set_holiday,
+        _COMPANION_SET_HOLIDAY,
+        SupportsResponse.OPTIONAL,
+    )
+    reg(
+        DOMAIN,
+        "companion_cancel_holiday",
+        companion_cancel_holiday,
+        _COMPANION_CANCEL_HOLIDAY,
         SupportsResponse.OPTIONAL,
     )

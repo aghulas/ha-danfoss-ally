@@ -76,6 +76,7 @@ from .entity import (
     remove_registry_entries,
 )
 from .local_write import async_local_write_setting, local_trial_split
+from .mqtt_companion import CompanionBridgeError
 from .mqtt_write import (  # noqa: F401 - timeout re-exported
     DP_PREHEAT,
     DP_VIEWING_DIRECTION,
@@ -148,9 +149,25 @@ async def async_setup_entry(
 
     companion = getattr(coordinator, "companion", None)
     known_switch_uids: set[str] = set()
+    known_room_uids: set[str] = set()
 
     def _collect_switches() -> list[SwitchEntity]:
         new_entities: list[SwitchEntity] = []
+        if companion is not None:
+            for uid_key in list(known_room_uids):
+                gid = uid_key.split("_room_", 1)[0]
+                if coordinator.room_retired(gid):
+                    known_room_uids.discard(uid_key)
+                    remove_registry_entries(hass, entry, "switch", [uid_key])
+            for group_id in coordinator.rooms:
+                if not companion.is_coordinator_room(group_id):
+                    continue
+                for rdesc in ROOM_COORDINATOR_SWITCHES:
+                    uid = f"{group_id}_{rdesc.key}"
+                    if uid in known_room_uids:
+                        continue
+                    known_room_uids.add(uid)
+                    new_entities.append(DanfossRoomCoordinatorSwitch(coordinator, group_id, rdesc))
         for dev in coordinator.data.values():
             if not (dev.is_head and (companion is not None or write_allowed(dev))):
                 continue
@@ -685,3 +702,127 @@ class DanfossViewingDirection(DanfossTrialEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs) -> None:
         await self._async_write(False)
+
+
+@dataclass(frozen=True, kw_only=True)
+class RoomCoordinatorSwitchDescription(SwitchEntityDescription):
+    """Room-wide setting of a ``danfoss-room-coordinator`` room (Stage 5)."""
+
+    setting: str  # key in desired & room/set-settings payload
+    dev_attr: str  # attribute on member DanfossDevice fallback
+
+
+ROOM_COORDINATOR_SWITCHES: tuple[RoomCoordinatorSwitchDescription, ...] = (
+    RoomCoordinatorSwitchDescription(
+        key="room_preheat",
+        translation_key="preheat",
+        setting="preheat",
+        dev_attr="preheat",
+    ),
+    RoomCoordinatorSwitchDescription(
+        key="room_child_lock",
+        translation_key="child_lock",
+        setting="child_lock",
+        dev_attr="child_lock",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    RoomCoordinatorSwitchDescription(
+        key="room_window_detection",
+        translation_key="window_detection",
+        setting="window_detection",
+        dev_attr="window_detection",
+        entity_category=EntityCategory.CONFIG,
+    ),
+)
+
+
+class DanfossRoomCoordinatorSwitch(CoordinatorEntity[DanfossCoordinator], SwitchEntity):
+    """Room-wide switch for a ``danfoss-room-coordinator`` room (``room/set-settings``)."""
+
+    _attr_has_entity_name = True
+    entity_description: RoomCoordinatorSwitchDescription
+
+    def __init__(
+        self,
+        coordinator: DanfossCoordinator,
+        group_id: str,
+        description: RoomCoordinatorSwitchDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self._group_id = group_id
+        self.entity_description = description
+        self._attr_unique_id = f"{group_id}_{description.key}"
+
+    @property
+    def _companion(self):
+        return getattr(self.coordinator, "companion", None)
+
+    @property
+    def _room(self):
+        return self.coordinator.rooms.get(self._group_id)
+
+    @property
+    def available(self) -> bool:
+        comp = self._companion
+        room = self._room
+        if not (super().available and room is not None and room.online and comp is not None):
+            return False
+        prefix = comp.prefix_of_room(self._group_id)
+        return prefix is not None and bool(comp.bridge_online.get(prefix, False))
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        room = self._room
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"group_{self._group_id}")},
+            name=(room.name if room and room.name else self._group_id),
+            manufacturer="Danfoss",
+            model="Danfoss Ally room (group)",
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        comp = self._companion
+        if comp is None:
+            return None
+        raw = comp.native_rooms.get(self._group_id) or {}
+        raw_desired = raw.get("desired")
+        desired: dict[str, Any] = raw_desired if isinstance(raw_desired, dict) else {}
+        val = desired.get(self.entity_description.setting)
+        if isinstance(val, bool):
+            return val
+        room = self._room
+        if room is None:
+            return None
+        vals = {
+            getattr(self.coordinator.data[m], self.entity_description.dev_attr)
+            for m in room.members
+            if m in self.coordinator.data
+            and getattr(self.coordinator.data[m], self.entity_description.dev_attr) is not None
+        }
+        if len(vals) == 1:
+            only = next(iter(vals))
+            return only if isinstance(only, bool) else None
+        return None
+
+    async def _async_set_setting(self, enabled: bool) -> None:
+        comp = self._companion
+        if comp is None or not comp.is_coordinator_room(self._group_id):
+            raise HomeAssistantError("room setting write unavailable for this room")
+        prefix = comp.prefix_of_room(self._group_id)
+        if prefix is None:
+            raise HomeAssistantError("room setting write unavailable for this room")
+        try:
+            await comp.async_bridge_request(
+                prefix,
+                "room/set-settings",
+                {"room_id": self._group_id, self.entity_description.setting: enabled},
+            )
+        except CompanionBridgeError as err:
+            raise HomeAssistantError(f"room setting write refused: {err}") from err
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._async_set_setting(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._async_set_setting(False)

@@ -38,6 +38,10 @@ def _room_climate_entity_id(coordinator: DanfossCoordinator, group_id: str) -> s
 def _room_entry(coordinator: DanfossCoordinator, group_id: str) -> dict:
     """One room payload (contract §3.4) from the aggregated RoomState + member head states."""
     rs = coordinator.rooms[group_id]
+    companion = getattr(coordinator, "companion", None)
+    writable = rs.pid in WRITE_VERIFIED_PRODUCTS or (
+        companion is not None and companion.is_coordinator_room(group_id)
+    )
     return {
         "id": group_id,
         "name": rs.name,
@@ -52,7 +56,7 @@ def _room_entry(coordinator: DanfossCoordinator, group_id: str) -> dict:
         "mode": rs.mode,
         "heating": rs.heating,
         "online": rs.online,
-        "writable": rs.pid in WRITE_VERIFIED_PRODUCTS,
+        "writable": writable,
         "climate_entity_id": _room_climate_entity_id(coordinator, group_id),
     }
 

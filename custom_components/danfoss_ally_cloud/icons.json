@@ -167,6 +167,14 @@
       },
       "valve_exercise_day": {
         "default": "mdi:calendar-week"
+      },
+      "room_mode": {
+        "default": "mdi:thermostat-auto",
+        "state": {
+          "schedule": "mdi:calendar-clock",
+          "manual": "mdi:thermostat",
+          "pause": "mdi:pause-circle-outline"
+        }
       }
     },
     "time": {
@@ -184,6 +192,11 @@
     "companion_set_room": "mdi:home-thermometer",
     "companion_delete_room": "mdi:delete-outline",
     "companion_sync_rooms": "mdi:sync",
+    "companion_set_room_comfort_setback": "mdi:thermometer-lines",
+    "companion_set_room_settings": "mdi:tune",
+    "companion_set_room_mode": "mdi:thermostat-auto",
+    "companion_set_holiday": "mdi:beach",
+    "companion_cancel_holiday": "mdi:calendar-remove",
     "attach_heads": "mdi:link-plus",
     "detach_heads": "mdi:link-off",
     "disconnect_head": "mdi:connection",

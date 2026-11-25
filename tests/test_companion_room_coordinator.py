@@ -322,3 +322,165 @@ async def test_companion_subscriptions_include_heat_demand_and_wildcard_response
     assert f"{COORD}/bridge/heat_demand" in subs
     assert f"{COORD}/bridge/response/#" in subs
     assert CompanionBridgeError("closed", "closed").code == "closed"
+
+
+async def test_coordinator_room_entities_number_switch_select_and_services(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Coordinator rooms expose comfort/setback, switches, mode select & services."""
+    from custom_components.danfoss_ally_cloud import number as number_mod
+    from custom_components.danfoss_ally_cloud import ops_views
+    from custom_components.danfoss_ally_cloud import select as select_mod
+    from custom_components.danfoss_ally_cloud import services as services_mod
+    from custom_components.danfoss_ally_cloud import switch as switch_mod
+    from custom_components.danfoss_ally_cloud.const import DATA_JOBS
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_CONNECTION_MODE: CONNECTION_MODE_MQTT_COMPANION,
+            CONF_MQTT_PREFIXES: [Z2M, COORD],
+        },
+        options={CONF_MQTT_PREFIXES: [Z2M, COORD]},
+    )
+    entry.add_to_hass(hass)
+
+    store, comp, mgr, sent = _setup_coord_companion(hass, monkeypatch)
+    # Enrich bridge/rooms with desired + schedule fields as emitted by coordinator >= 0.2.0
+    comp.process_mqtt_message(
+        f"{COORD}/bridge/rooms",
+        json.dumps(
+            [
+                {
+                    "group_id": ROOM_ID,
+                    "name": "Living",
+                    "prefix": Z2M,
+                    "members": ["0xA1"],
+                    "sensor": "0xS1",
+                    "temperature": 19.3,
+                    "min_setpoint": 5.0,
+                    "max_setpoint": 22.0,
+                    "schedule": {"comfort": 21.0, "setback": 14.0, "days": {}},
+                    "desired": {
+                        "comfort": 21.0,
+                        "setback": 14.0,
+                        "mode": "schedule",
+                        "preheat": True,
+                        "child_lock": False,
+                        "window_detection": True,
+                    },
+                }
+            ]
+        ),
+    )
+    store["entry"] = entry
+    store["room_manager"] = mgr
+    store[DATA_JOBS]  # present via build_companion_store
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = store
+
+    # ops_views exposes comfort/setback and writable=True
+    view_rooms = ops_views.rooms_payload(store)["rooms"]
+    assert view_rooms[0]["comfort"] == 21.0
+    assert view_rooms[0]["setback"] == 14.0
+    assert view_rooms[0]["writable"] is True
+
+    # Auto-reply helper for every coordinator bridge/request/<action>
+    orig_pub = mqtt_mod.async_publish
+
+    async def _reply_rpc(_hass: Any, topic: str, payload: str, **kw: Any) -> None:
+        await orig_pub(_hass, topic, payload, **kw)
+        body = json.loads(payload)
+        action = topic.split(f"{COORD}/bridge/request/", 1)[-1]
+        comp.process_mqtt_message(
+            f"{COORD}/bridge/response/{action}",
+            json.dumps({"status": "ok", "transaction": body["transaction"], "data": {"ok": True}}),
+        )
+
+    monkeypatch.setattr(mqtt_mod, "async_publish", _reply_rpc)
+
+    # Number entities: comfort & setback setpoints
+    num_entities: list[Any] = []
+    await number_mod.async_setup_entry(hass, entry, num_entities.extend)
+    room_nums = [e for e in num_entities if isinstance(e, number_mod.DanfossRoomSetpoint)]
+    assert {e.entity_description.key for e in room_nums} == {"comfort_setpoint", "setback_setpoint"}
+    setback_num = next(e for e in room_nums if e.entity_description.key == "setback_setpoint")
+    assert setback_num.native_value == 14.0
+    await setback_num.async_set_native_value(15.5)
+    assert any(
+        t == f"{COORD}/bridge/request/room/set-comfort-setback" and p["setback"] == 15.5
+        for t, p in sent
+    )
+
+    # Switch entities: preheat, child_lock, window_detection
+    sw_entities: list[Any] = []
+    await switch_mod.async_setup_entry(hass, entry, sw_entities.extend)
+    room_sw = [e for e in sw_entities if isinstance(e, switch_mod.DanfossRoomCoordinatorSwitch)]
+    assert {e.entity_description.setting for e in room_sw} == {
+        "preheat",
+        "child_lock",
+        "window_detection",
+    }
+    lock_sw = next(e for e in room_sw if e.entity_description.setting == "child_lock")
+    assert lock_sw.is_on is False
+    await lock_sw.async_turn_on()
+    assert any(
+        t == f"{COORD}/bridge/request/room/set-settings" and p["child_lock"] is True
+        for t, p in sent
+    )
+
+    # Select entity: mode
+    sel_entities: list[Any] = []
+    await select_mod.async_setup_entry(hass, entry, sel_entities.extend)
+    room_sel = [
+        e for e in sel_entities if isinstance(e, select_mod.DanfossRoomCoordinatorModeSelect)
+    ]
+    assert len(room_sel) == 1
+    assert room_sel[0].current_option == "schedule"
+    await room_sel[0].async_select_option("pause")
+    assert any(
+        t == f"{COORD}/bridge/request/room/set-mode" and p["mode"] == "pause" for t, p in sent
+    )
+
+    # Services: register & invoke all 5 coordinator services
+    monkeypatch.setattr(services_mod.ops, "ensure_admin", AsyncMock())
+    services_mod.async_register_services(hass)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "companion_set_room_comfort_setback",
+        {"room_id": ROOM_ID, "comfort": 20.5, "setback": 14.0},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "companion_set_room_settings",
+        {"room_id": ROOM_ID, "preheat": False, "max_setpoint": 21.0},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "companion_set_room_mode",
+        {"room_id": ROOM_ID, "mode": "manual", "setpoint": 18.0},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "companion_set_holiday",
+        {
+            "start": "2026-12-20T08:00:00+01:00",
+            "end": "2027-01-04T08:00:00+01:00",
+            "temperature": 14.0,
+            "room_ids": [ROOM_ID],
+            "holiday_id": "hol-1",
+        },
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "companion_cancel_holiday",
+        {"holiday_id": "hol-1"},
+        blocking=True,
+    )
+    topics_sent = {t for t, _ in sent}
+    assert f"{COORD}/bridge/request/holiday/set" in topics_sent
+    assert f"{COORD}/bridge/request/holiday/cancel" in topics_sent
