@@ -116,11 +116,13 @@ Heads whose `0x0025` bit 1 differed from the cloud's DP 1 on the evening of 2026
 
 ## To prove on real hardware first
 
-- **A1 — the pair holds overnight.** Two isolated heads, same night: a control written through
-  the tunnel alone (expected to revert) and a head aligned by the pair. Without the control, a
-  value that held proves nothing. Started on 2026-11-20 (control: tunnel OFF with cloud DP 1 left
-  on; aligned head: the pair, OFF → ON); **the next-morning read was not recorded** in this
-  repository, so A1 is still open.
+- **A1 — the pair holds overnight.** Concluded on real hardware (2026-11-24/25, record:
+  [`docs/validation/2026-11-preheat-trial-a1.md`](validation/2026-11-preheat-trial-a1.md)). Both the
+  control head (`C-0 Sanitaires Filles`) and the aligned head (`C-0 Sanitaire Garçons`) held
+  `pre_chauffage: false` (attribute `0x0025` bit 1 = 0) through the 03:53 nocturnal sync window.
+  Major discovery: writing the tunnel causes the gateway to autonomously push an upstream Tuya
+  `{"1": false}` report to the cloud (captured at 19:57:26 on `smart/mb/in/<gw>`), keeping the
+  cloud cache aligned.
 - **A2 — which alignment is needed**: the publish alone, the block alone, or both.
 - **A3 — the alignment leaves the head alone**: both bits of `0x0025`, setpoints and schedule
   read through the tunnel before and after.

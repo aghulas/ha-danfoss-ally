@@ -19,3 +19,4 @@ session*.json
 captures/
 # macOS
 .DS_Store
+scratch/
