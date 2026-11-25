@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.0.7 — Coordinator room entities (`comfort`/`setback`, settings, mode) & holiday services
+
+**Added**
+
+- **Full Home Assistant controls for `danfoss-room-coordinator` rooms**:
+  - `number` (`number.py`): `DanfossRoomSetpoint` (`comfort_setpoint`, `setback_setpoint`) exposed
+    and routed via `<prefix>/bridge/request/room/set-comfort-setback` (R3).
+  - `switch` (`switch.py`): `DanfossRoomCoordinatorSwitch` (`preheat`, `child_lock`,
+    `window_detection`) exposed per coordinator room and routed via
+    `<prefix>/bridge/request/room/set-settings`.
+  - `select` (`select.py`): `DanfossRoomCoordinatorModeSelect` (`schedule` / `manual` / `pause`)
+    exposed per coordinator room and routed via `<prefix>/bridge/request/room/set-mode`.
+  - **Services** (`services.py`, `services.yaml`): `companion_set_room_comfort_setback`,
+    `companion_set_room_settings`, `companion_set_room_mode`, `companion_set_holiday`, and
+    `companion_cancel_holiday`.
+- **`companion_rooms.py` & `ops_views.py`**: populate `setpoints`, `mode`, min/max bounds, and
+  `writable: true` from coordinator `bridge/rooms` payloads (`desired` + `schedule`).
+
+**Documentation**
+
+- Recorded Stage 3 live sensor feed (`13.80 °C -> 1380`), Stage 4 `set-comfort-setback` /
+  `set-mode`, Stage 5 `set-settings`, and Stage 7 `holiday/set` + end-edge recovery results in
+  `docs/validation/2026-11-25-coordinator-stages3-7.md`.
+
 ## 2.0.6 — Coordinator RPC timeout fix, Z2M schedule cleanup & live trial records
 
 **Fixed**

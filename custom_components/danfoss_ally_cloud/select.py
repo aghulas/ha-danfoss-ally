@@ -29,9 +29,11 @@ from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .api.local import tunnel
@@ -51,6 +53,7 @@ from .entity import (
     remove_registry_entries,
 )
 from .local_write import async_local_write_valve_exercise, local_trial_split
+from .mqtt_companion import CompanionBridgeError
 from .mqtt_write import (
     ORIENTATION_FLAG,
     async_mqtt_write_orientation,
@@ -95,7 +98,36 @@ async def async_setup_entry(
     if local is not None:
         entities += [DanfossValveExerciseDay(local, coordinator, dev_id) for dev_id in armed]
     remove_registry_entries(hass, entry, "select", [*closed, *closed_local])
+
+    companion = getattr(coordinator, "companion", None)
+    known_room_modes: set[str] = set()
+
+    def _collect_room_modes() -> list[SelectEntity]:
+        added: list[SelectEntity] = []
+        if companion is None:
+            return added
+        for group_id in list(known_room_modes):
+            if coordinator.room_retired(group_id):
+                known_room_modes.discard(group_id)
+                remove_registry_entries(hass, entry, "select", [f"{group_id}_room_mode"])
+        for group_id in coordinator.rooms:
+            if group_id not in known_room_modes and companion.is_coordinator_room(group_id):
+                known_room_modes.add(group_id)
+                added.append(DanfossRoomCoordinatorModeSelect(coordinator, group_id))
+        return added
+
+    entities += _collect_room_modes()
     async_add_entities(entities)
+
+    if companion is not None:
+
+        @callback
+        def _sync_room_modes() -> None:
+            added = _collect_room_modes()
+            if added:
+                async_add_entities(added)
+
+        entry.async_on_unload(coordinator.async_add_listener(_sync_room_modes))
 
 
 VALVE_EXERCISE_DAY_UID = "valve_exercise_day"
@@ -213,3 +245,78 @@ class DanfossOrientation(DanfossTrialEntity, SelectEntity):
                 supervised=self._supervised_dps,
             )
         )
+
+
+ROOM_MODES: tuple[str, ...] = ("schedule", "manual", "pause")
+
+
+class DanfossRoomCoordinatorModeSelect(CoordinatorEntity[DanfossCoordinator], SelectEntity):
+    """Programming mode selector (``schedule`` / ``manual`` / ``pause``) for a coordinator room."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "room_mode"
+    _attr_options = list(ROOM_MODES)
+
+    def __init__(self, coordinator: DanfossCoordinator, group_id: str) -> None:
+        super().__init__(coordinator)
+        self._group_id = group_id
+        self._attr_unique_id = f"{group_id}_room_mode"
+
+    @property
+    def _companion(self):
+        return getattr(self.coordinator, "companion", None)
+
+    @property
+    def _room(self):
+        return self.coordinator.rooms.get(self._group_id)
+
+    @property
+    def available(self) -> bool:
+        comp = self._companion
+        room = self._room
+        if not (super().available and room is not None and room.online and comp is not None):
+            return False
+        prefix = comp.prefix_of_room(self._group_id)
+        return prefix is not None and bool(comp.bridge_online.get(prefix, False))
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        room = self._room
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"group_{self._group_id}")},
+            name=(room.name if room and room.name else self._group_id),
+            manufacturer="Danfoss",
+            model="Danfoss Ally room (group)",
+        )
+
+    @property
+    def current_option(self) -> str | None:
+        comp = self._companion
+        if comp is None:
+            return None
+        raw = comp.native_rooms.get(self._group_id) or {}
+        raw_desired = raw.get("desired")
+        desired: dict[str, Any] = raw_desired if isinstance(raw_desired, dict) else {}
+        raw_mode = desired.get("mode") or raw.get("mode")
+        if isinstance(raw_mode, str) and raw_mode.lower() in ROOM_MODES:
+            return raw_mode.lower()
+        room = self._room
+        if room is not None and room.mode == "auto":
+            return "schedule"
+        return None
+
+    async def async_select_option(self, option: str) -> None:
+        if option not in ROOM_MODES:
+            raise HomeAssistantError(f"unknown room mode: {option!r}")
+        comp = self._companion
+        if comp is None or not comp.is_coordinator_room(self._group_id):
+            raise HomeAssistantError("room mode write unavailable for this room")
+        prefix = comp.prefix_of_room(self._group_id)
+        if prefix is None:
+            raise HomeAssistantError("room mode write unavailable for this room")
+        try:
+            await comp.async_bridge_request(
+                prefix, "room/set-mode", {"room_id": self._group_id, "mode": option}
+            )
+        except CompanionBridgeError as err:
+            raise HomeAssistantError(f"room mode write refused: {err}") from err

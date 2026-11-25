@@ -214,6 +214,35 @@ class CompanionRoomManager:
                         state.temperature = sensor.temperature
                 elif isinstance(raw.get("temperature"), (int, float)):
                     state.temperature = float(raw["temperature"])
+                if self._companion.is_coordinator_room(gid):
+                    raw_desired = raw.get("desired")
+                    desired: dict[str, Any] = raw_desired if isinstance(raw_desired, dict) else {}
+                    raw_sched = raw.get("schedule")
+                    sched: dict[str, Any] = raw_sched if isinstance(raw_sched, dict) else {}
+                    comfort = desired.get("comfort")
+                    if comfort is None:
+                        comfort = sched.get("comfort")
+                    setback = desired.get("setback")
+                    if setback is None:
+                        setback = sched.get("setback")
+                    if isinstance(comfort, (int, float)):
+                        state.setpoints["comfort"] = float(comfort)
+                    if isinstance(setback, (int, float)):
+                        state.setpoints["setback"] = float(setback)
+                    pause_sp = desired.get("pause_setpoint")
+                    if isinstance(pause_sp, (int, float)):
+                        state.setpoints["pause"] = float(pause_sp)
+                    raw_mode = desired.get("mode") or raw.get("mode")
+                    if isinstance(raw_mode, str) and raw_mode:
+                        state.mode = raw_mode
+                    if state.min_setpoint is None and isinstance(
+                        raw.get("min_setpoint"), (int, float)
+                    ):
+                        state.min_setpoint = float(raw["min_setpoint"])
+                    if state.max_setpoint is None and isinstance(
+                        raw.get("max_setpoint"), (int, float)
+                    ):
+                        state.max_setpoint = float(raw["max_setpoint"])
                 out[gid] = state
 
         # 2) Companion-managed virtual rooms (zigbee2mqtt or mixed heads + 014G2480 sensor)

@@ -75,6 +75,7 @@ from .const import (
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
 from .entity import DanfossEntity, DanfossLocalTrialEntity, remove_registry_entries
 from .local_write import async_local_write_setting, local_trial_split
+from .mqtt_companion import CompanionBridgeError
 from .mqtt_write import (  # noqa: F401 - block helpers re-exported
     SETTINGS_BLOCK_DPS,
     async_mqtt_write,
@@ -120,15 +121,18 @@ async def async_setup_entry(
 
     def _collect_new_entities() -> list[NumberEntity]:
         entities: list[NumberEntity] = []
+        companion = getattr(coordinator, "companion", None)
         for group_id, room in coordinator.rooms.items():
-            if group_id not in known_rooms and room.pid in WRITE_VERIFIED_PRODUCTS:
+            is_coord = companion is not None and companion.is_coordinator_room(group_id)
+            if group_id not in known_rooms and (
+                room.pid in WRITE_VERIFIED_PRODUCTS or is_coord
+            ):
                 known_rooms.add(group_id)
                 entities += [DanfossRoomSetpoint(coordinator, group_id, desc) for desc in SETPOINTS]
         # Isolated-head settings over cloud MQTT: only with the write option on, a link, and the DP
         # open on that channel FOR THAT HEAD (proven, or under supervised trial on the designated
         # trial head). An entity whose DP is closed by configuration is not provided, and its
         # registry entry is removed so it does not linger "restored, unavailable".
-        companion = getattr(coordinator, "companion", None)
         closed: list[str] = []
         for dev in coordinator.data.values():
             if not dev.is_head:
@@ -248,7 +252,14 @@ class DanfossRoomSetpoint(CoordinatorEntity[DanfossCoordinator], NumberEntity):
     @property
     def available(self) -> bool:
         room = self.room
-        return bool(super().available and room is not None and room.online)
+        if not (super().available and room is not None and room.online):
+            return False
+        companion = getattr(self.coordinator, "companion", None)
+        if companion is not None and companion.is_coordinator_room(self._group_id):
+            prefix = companion.prefix_of_room(self._group_id)
+            if prefix is not None and not companion.bridge_online.get(prefix, False):
+                return False
+        return True
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -278,14 +289,29 @@ class DanfossRoomSetpoint(CoordinatorEntity[DanfossCoordinator], NumberEntity):
         return room.setpoints.get(self.entity_description.setpoint)
 
     async def async_set_native_value(self, value: float) -> None:
-        """Publish the comfort/setback setpoint on the group then rewrite the schedule (R3)."""
+        """Publish comfort/setback setpoint on the group or coordinator room (R3)."""
         room = self.room
-        if room is None or room.pid not in WRITE_VERIFIED_PRODUCTS:
+        companion = getattr(self.coordinator, "companion", None)
+        is_coord = companion is not None and companion.is_coordinator_room(self._group_id)
+        if room is None or (room.pid not in WRITE_VERIFIED_PRODUCTS and not is_coord):
             raise HomeAssistantError("setpoint write unavailable for this room")
-        dps_nums = MODE_GROUP_SETPOINT_DP[self.entity_description.mode_key]
         encoded = encode_setpoint(
             value, self.native_min_value, self.native_max_value, SETPOINT_STEP
         )
+        if is_coord and companion is not None:
+            prefix = companion.prefix_of_room(self._group_id)
+            if prefix is None:
+                raise HomeAssistantError("setpoint write unavailable for this room")
+            try:
+                await companion.async_bridge_request(
+                    prefix,
+                    "room/set-comfort-setback",
+                    {"room_id": self._group_id, self.entity_description.setpoint: encoded / 10},
+                )
+            except CompanionBridgeError as err:
+                raise HomeAssistantError(f"setpoint write refused: {err}") from err
+            return
+        dps_nums = MODE_GROUP_SETPOINT_DP[self.entity_description.mode_key]
         dps = {str(dp): encoded for dp in dps_nums}
         try:
             await self.coordinator.client.async_set_group_setpoint(self._group_id, room.pid, dps)

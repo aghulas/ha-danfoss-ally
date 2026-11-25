@@ -559,3 +559,180 @@ companion_sync_rooms:
       selector:
         config_entry:
           integration: danfoss_ally_cloud
+
+companion_set_room_comfort_setback:
+  fields:
+    room_id:
+      required: true
+      example: "chapelle"
+      selector:
+        text:
+    comfort:
+      required: false
+      example: 21.0
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    setback:
+      required: false
+      example: 14.0
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    pause:
+      required: false
+      example: 14.0
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+companion_set_room_settings:
+  fields:
+    room_id:
+      required: true
+      example: "chapelle"
+      selector:
+        text:
+    preheat:
+      required: false
+      selector:
+        boolean:
+    child_lock:
+      required: false
+      selector:
+        boolean:
+    window_detection:
+      required: false
+      selector:
+        boolean:
+    min_setpoint:
+      required: false
+      example: 5.0
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    max_setpoint:
+      required: false
+      example: 21.0
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+companion_set_room_mode:
+  fields:
+    room_id:
+      required: true
+      example: "chapelle"
+      selector:
+        text:
+    mode:
+      required: true
+      example: "schedule"
+      selector:
+        select:
+          options:
+            - "schedule"
+            - "manual"
+            - "pause"
+    setpoint:
+      required: false
+      example: 14.0
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+companion_set_holiday:
+  fields:
+    start:
+      required: true
+      example: "2026-12-20T08:00:00+01:00"
+      selector:
+        text:
+    end:
+      required: true
+      example: "2027-01-04T08:00:00+01:00"
+      selector:
+        text:
+    temperature:
+      required: true
+      example: 14.0
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    room_ids:
+      required: true
+      example: '["chapelle"]'
+      selector:
+        object:
+    name:
+      required: false
+      default: "Holiday"
+      selector:
+        text:
+    holiday_id:
+      required: false
+      selector:
+        text:
+    prefix:
+      required: false
+      example: "danfoss_rooms"
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
+
+companion_cancel_holiday:
+  fields:
+    holiday_id:
+      required: true
+      selector:
+        text:
+    prefix:
+      required: false
+      example: "danfoss_rooms"
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: danfoss_ally_cloud
