@@ -791,12 +791,10 @@ class DanfossRoomCoordinatorSwitch(CoordinatorEntity[DanfossCoordinator], Switch
         val = desired.get(self.entity_description.setting)
         if isinstance(val, bool):
             return val
-        room = self._room
-        if room is None:
-            return None
+        members = self.coordinator.room_members(self._group_id)
         vals = {
             getattr(self.coordinator.data[m], self.entity_description.dev_attr)
-            for m in room.members
+            for m in members
             if m in self.coordinator.data
             and getattr(self.coordinator.data[m], self.entity_description.dev_attr) is not None
         }

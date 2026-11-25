@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.8 — Fix coordinator room switch fallback when `desired` omits settings
+
+**Fixed**
+
+- `switch.py` (`DanfossRoomCoordinatorSwitch.is_on`) & `companion_adapter.py`
+  (`CompanionCoordinatorView.room_members`): read member head IDs via
+  `coordinator.room_members(group_id)` instead of `RoomState.members` (which does not exist),
+  fixing `AttributeError: 'RoomState' object has no attribute 'members'` when coordinator
+  `desired` omits `child_lock` or `window_detection`.
+
 ## 2.0.7 — Coordinator room entities (`comfort`/`setback`, settings, mode) & holiday services
 
 **Added**
