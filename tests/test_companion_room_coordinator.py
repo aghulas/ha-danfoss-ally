@@ -484,3 +484,64 @@ async def test_coordinator_room_entities_number_switch_select_and_services(
     topics_sent = {t for t, _ in sent}
     assert f"{COORD}/bridge/request/holiday/set" in topics_sent
     assert f"{COORD}/bridge/request/holiday/cancel" in topics_sent
+
+
+async def test_coordinator_room_switch_fallback_from_member_heads(
+    hass: HomeAssistant, monkeypatch: Any
+) -> None:
+    """When desired omits child_lock / window_detection, switch.is_on falls back to head states."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from custom_components.danfoss_ally_cloud import switch as switch_mod
+    from custom_components.danfoss_ally_cloud.const import (
+        CONF_CONNECTION_MODE,
+        CONF_MQTT_PREFIXES,
+        CONNECTION_MODE_MQTT_COMPANION,
+        DATA_COORDINATOR,
+        DOMAIN,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_CONNECTION_MODE: CONNECTION_MODE_MQTT_COMPANION,
+            CONF_MQTT_PREFIXES: [Z2M, COORD],
+        },
+        options={CONF_MQTT_PREFIXES: [Z2M, COORD]},
+    )
+    entry.add_to_hass(hass)
+    store, comp, mgr, _sent = _setup_coord_companion(hass, monkeypatch)
+    # Remove child_lock / window_detection from desired (real-world Chapelle state on boot)
+    comp.process_mqtt_message(
+        f"{COORD}/bridge/rooms",
+        json.dumps(
+            [
+                {
+                    "group_id": ROOM_ID,
+                    "name": "Living",
+                    "prefix": Z2M,
+                    "members": ["0xA1"],
+                    "desired": {"preheat": True},
+                }
+            ]
+        ),
+    )
+    comp.data["0xA1"].child_lock = True
+    comp.data["0xA1"].window_detection = False
+    store["entry"] = entry
+    store["room_manager"] = mgr
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = store
+
+    view = store[DATA_COORDINATOR]
+    assert view.room_members(ROOM_ID) == ("0xA1",)
+
+    sw_entities: list[Any] = []
+    await switch_mod.async_setup_entry(hass, entry, sw_entities.extend)
+    by_setting = {
+        e.entity_description.setting: e
+        for e in sw_entities
+        if isinstance(e, switch_mod.DanfossRoomCoordinatorSwitch)
+    }
+    assert by_setting["preheat"].is_on is True
+    assert by_setting["child_lock"].is_on is True
+    assert by_setting["window_detection"].is_on is False

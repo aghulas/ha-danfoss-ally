@@ -59,6 +59,10 @@ class CompanionCoordinatorView:
                 return gid
         return None
 
+    def room_members(self, group_id: str) -> tuple[str, ...]:
+        """Member head ids of a room (group), matching ``DanfossCoordinator.room_members``."""
+        return self.room_manager.room_members().get(group_id, ())
+
     def home_of(self, group_id: str) -> str | None:
         """Return the home gid of ``group_id``."""
         raw = self.companion.native_rooms.get(group_id)
