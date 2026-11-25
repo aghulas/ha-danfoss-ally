@@ -105,6 +105,7 @@ class MqttCompanionCoordinator:
         # the existing consumers, ``native_rooms_by_prefix`` keeps the source for write routing.
         self._rooms_by_prefix: dict[str, dict[str, dict[str, Any]]] = {}
         self._holidays_by_prefix: dict[str, dict[str, Any]] = {}
+        self._heat_demand_by_prefix: dict[str, dict[str, Any]] = {}
         # Optional home_id per device published under danfoss.home_id in bridge/devices
         self.device_home: dict[str, str] = {}
         # Devices served by a cloud-only bridge (danfoss2mqtt) whose /set surface is restricted
@@ -140,12 +141,26 @@ class MqttCompanionCoordinator:
             merged.update(holidays)
         return merged
 
+    @property
+    def heat_demand_by_prefix(self) -> dict[str, dict[str, Any]]:
+        """Latest ``bridge/heat_demand`` payload per bridge prefix."""
+        return {p: dict(hd) for p, hd in self._heat_demand_by_prefix.items()}
+
     def prefix_of_room(self, group_id: str) -> str | None:
         """Return the source bridge prefix that owns ``group_id`` (for write routing)."""
         for prefix, rooms in self._rooms_by_prefix.items():
             if group_id in rooms:
                 return prefix
         return None
+
+    def is_coordinator_room(self, group_id: str) -> bool:
+        """Return True when ``group_id`` is owned by a standalone Z2M room coordinator bridge."""
+        prefix = self.prefix_of_room(group_id)
+        if prefix is None or prefix == "danfoss2mqtt":
+            return False
+        raw = self._rooms_by_prefix.get(prefix, {}).get(group_id) or {}
+        members = raw.get("members") or ()
+        return not any(self.is_cloud_bridge_device(str(m)) for m in members)
 
     def is_cloud_bridge_device(self, dev_id: str) -> bool:
         """Return True if ``dev_id`` is served by a cloud-only bridge (e.g. ``danfoss2mqtt``)."""
@@ -195,7 +210,8 @@ class MqttCompanionCoordinator:
                 f"{prefix}/bridge/devices",
                 f"{prefix}/bridge/rooms",
                 f"{prefix}/bridge/holidays",
-                f"{prefix}/bridge/response/+",
+                f"{prefix}/bridge/heat_demand",
+                f"{prefix}/bridge/response/#",
                 f"{prefix}/+",
                 f"{prefix}/+/availability",
             ):
@@ -247,6 +263,10 @@ class MqttCompanionCoordinator:
 
         if suffix == "bridge/holidays":
             self._ingest_bridge_holidays(matched_prefix, raw_payload)
+            return
+
+        if suffix == "bridge/heat_demand":
+            self._ingest_bridge_heat_demand(matched_prefix, raw_payload)
             return
 
         if suffix.startswith("bridge/response/"):
@@ -365,6 +385,17 @@ class MqttCompanionCoordinator:
         self._holidays_by_prefix[prefix] = holidays
         self._notify_listeners()
 
+    def _ingest_bridge_heat_demand(self, prefix: str, raw_payload: str | bytes) -> None:
+        try:
+            text = raw_payload.decode("utf-8") if isinstance(raw_payload, bytes) else raw_payload
+            hd = json.loads(text)
+            if not isinstance(hd, dict):
+                return
+        except (ValueError, UnicodeDecodeError):
+            return
+        self._heat_demand_by_prefix[prefix] = hd
+        self._notify_listeners()
+
     async def async_send_device_set(self, dev_id: str, **kwargs: Any) -> dict[str, Any]:
         """Publish a normalized command to ``<prefix>/<friendly_name>/set`` for ``dev_id``."""
         route = self.device_route.get(dev_id)
@@ -439,11 +470,16 @@ class MqttCompanionCoordinator:
             self._pending_requests.pop(tx, None)
 
         if resp.get("status") != "ok":
+            err_code = resp.get("code") or (
+                resp.get("status") if resp.get("status") not in (None, "error") else None
+            )
             raise CompanionBridgeError(
-                str(resp.get("code") or "bridge_error"),
+                str(err_code or "bridge_error"),
                 str(resp.get("error") or f"bridge {prefix} refused {action}"),
                 errors=resp.get("errors") if isinstance(resp.get("errors"), list) else None,
                 day=str(resp["day"]) if resp.get("day") is not None else None,
             )
         data = resp.get("data")
-        return data if isinstance(data, dict) else {}
+        if isinstance(data, dict):
+            return data
+        return {k: v for k, v in resp.items() if k not in ("status", "transaction")}
