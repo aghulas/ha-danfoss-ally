@@ -329,7 +329,6 @@ class CompanionRoomManager:
                     "weekly_schedule": {
                         "dayofweek": day_bit,
                         "num_of_transitions": len(transitions),
-                        "mode": 1,  # heat
                         "transitions": transitions,
                     }
                 }

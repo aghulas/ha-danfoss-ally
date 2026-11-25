@@ -41,7 +41,10 @@ DEFAULT_COMPANION_PREFIXES: tuple[str, ...] = ("zigbee2mqtt", "danfoss2mqtt")
 # bridge, so the Companion must mark those controls unavailable / refuse them rather than drop them.
 CLOUD_BRIDGE_SUPPORTED_SET_KEYS: frozenset[str] = frozenset({"occupied_heating_setpoint"})
 
-BRIDGE_REQUEST_TIMEOUT = 15.0  # seconds
+# Generous timeout for bridge RPCs: coordinator write fan-outs (`room/set-setpoint`,
+# `set_schedule`, `restore_schedule`) write sleeping Zigbee TRVs sequentially with
+# `setpoint_timeout_s = 30.0` + retries and exceeded 15s on a 4-head room in live trials.
+BRIDGE_REQUEST_TIMEOUT = 60.0  # seconds
 
 
 class CompanionBridgeError(RuntimeError):

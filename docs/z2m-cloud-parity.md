@@ -332,5 +332,8 @@ the room from `armed_rooms` again until the next supervised step. Procedure:
 - Does the Danfoss gateway propagate an open window between the heads of a room, and does it
   write `heat_available` from the relay state?
 - Are the `schedule_<day>` properties present in the installed Zigbee2MQTT?
+  **Answered (2026-11-25)**: No in Zigbee2MQTT `2.14.3-1` (`bridge/devices` exposes only
+  `occupied_heating_setpoint_scheduled`, no `schedule_<day>` read-back; `weekly_schedule` writes
+  are accepted directly by `zhc`, without `"mode": 1`).
 - Battery cost of the feeds on a head (§5.8).
 - Who consumes the heat demand on this site: the boiler integration, or nobody yet?

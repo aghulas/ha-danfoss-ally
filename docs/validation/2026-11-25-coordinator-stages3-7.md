@@ -1,13 +1,23 @@
-# Stages 3–7 — coordinator write stages: supervised trial plan (PENDING)
+# Stages 3–7 — coordinator write stages: supervised trial (PARTIAL — 2026-11-25)
 
-**Status: not yet run.** Code for Stages 3–7 is implemented closed by default in `pydanfoss-cloud`
-(`room_control.py`, `room_coordinator.py`, `room_store.py`, `room_view.py`, `write_job.py`) and
-covered by synthetic tests only (`tests/test_room_coordinator_stages.py`). **Nothing was written to
-a head to produce this file.**
+**Status: partially run on 2026-11-25** on 4-head Zigbee2MQTT test room `Area X` + `014G2480` room
+sensor (`danfoss-room-coordinator 0.2.0` / `pydanfoss-cloud 0.7.0`, Companion `2.0.5`, Zigbee2MQTT
+`2.14.3-1`, anonymised). One stage flag was armed at a time; all flags were returned to `false` and
+`Area X` restored to `14.0 °C` afterwards. Remaining items require physical presence or >35 min windows.
 
 See [`../first-write-procedure.md`](../first-write-procedure.md) and
 [`2026-11-23-setpoint-fanout-stage2.md`](2026-11-23-setpoint-fanout-stage2.md) for general rules.
 Arm **only one test room** (`--armed-room <room_id>`) and enable **one stage flag at a time**.
+
+## Live results (2026-11-25)
+
+| Stage | Tested | Observed on hardware / Z2M | Remaining |
+|---|---|---|---|
+| **3** (`feed_external_sensor`) | Armed `feed_external_sensor: true` (`radiator_covered: false`) | **Z2M non-retained sensor finding**: after daemon restart (`12:57`), `zigbee2mqtt/<sensor>` is not retained, so `coordinator` lacked the `12:50` report (`humidity: null`, temperature fell back to head mean `16.3 °C`) until the next periodic report (`13:19` -> `13.77 °C / 62.1 %`, ~30 min cadence). | Observe initial `external_measured_room_sensor` `/set` across a `:20`/`:50` report + 35-min (`radiator_covered: true`) / 3-h (`false`) stop reset to `-8000`. |
+| **4** (Schedules & modes) | R1 validation (`7` slots), `set_schedule`, `restore_schedule`, `bridge/devices` inspection | **R1 refusal**: rejected in `0.0 s` (`400 too many slots: 14 transitions`). **`set_schedule`**: Z2M `2.14.3-1` processed all 28 `weekly_schedule` ZCL frames + `programming_operation_mode: "schedule"` (`schedule_with_preheat -> schedule`) with zero errors; **`zhc:tz` warning** on `"mode": 1` (`ignoring provided mode value (1), this is now calculated automatically` — fixed by omitting `mode`). **`restore_schedule`**: succeeded in `12.4 s`. **`bridge/devices`**: Z2M `2.14.3-1` exposes **no `schedule_<day>`** properties. Note: Z2M `day_of_week`/`trigger_time` are the valve descaling day/time (not wall clock); head clock is `genTime` (verified via `preheat_time` in Nov 2026). | Direct MQTT `room/set-comfort-setback`, `room/set-mode` (`pause -> schedule`), and morning transition read-back (`[H]`). |
+| **5** (`reconcile_drift`) | Armed `reconcile_drift: true`; pushed one individual head (`Area X-1`) to `15.0 °C` vs `desired.setpoint = 14.0 °C` (twice) | **Pass**: next coordinator tick (~9–11 s) wrote `{"occupied_heating_setpoint_scheduled": 14.0}` to `Area X-1/set` only; heads 2–4 untouched; `Area X-1` and `bridge/rooms` returned to `14.0 °C` (`drift: []`). | Manual dial test, 1-hour cooldown under sustained drift, `reconcile_blocked` after 3 failed attempts, `room/set-settings`, overnight preheat. |
+| **6** (`feed_load_mean`) | Armed `feed_load_mean: true`, then `false` | **Pass**: all 4 heads (with `load_balancing_enable: true`) received `{"load_room_mean": 782}` and updated `-8000 -> 782`. On clean stop (`feed_load_mean: false`), all 4 heads reset back to `-8000.0`. | Compare valve openings over time with/without mean; stale mean behavior. |
+| **7** (Holidays & window) | — | Not run remotely (`set_vacation` intentionally refuses Companion rooms in HA; `window_open_internal` requires physical draft). | `holiday/set` + restart end-edge reconciliation; physical open-window propagation across multi-head room. |
 
 ## Stage 3 — Room sensor feed (`--feed-external-sensor`)
 
