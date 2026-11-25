@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.0.6 — Coordinator RPC timeout fix, Z2M schedule cleanup & live trial records
+
+**Fixed**
+
+- **Companion bridge RPC timeout** (`mqtt_companion.py`): raised `BRIDGE_REQUEST_TIMEOUT` from
+  `15.0 s` to `60.0 s` so sequential coordinator write fan-outs across sleeping multi-head Z2M
+  rooms (`setpoint_timeout_s = 30.0` + retries) complete cleanly without spurious HA `500` errors.
+- **Zigbee2MQTT `weekly_schedule` converter warning** (`companion_rooms.py`): omitted the
+  deprecated `"mode": 1` field on Z2M virtual-room schedule payloads (`zhc:tz` calculates it
+  automatically).
+
+**Documentation**
+
+- **Coordinator real-hardware trials** (`docs/validation/2026-11-23-setpoint-fanout-stage2.md`,
+  `docs/validation/2026-11-25-coordinator-stages3-7.md`, `docs/z2m-cloud-parity.md`): recorded
+  the live 4-head Zigbee2MQTT trial results for Stages 2, 3, 4, 5, and 6 and confirmed that
+  Zigbee2MQTT `2.14.3-1` exposes no `schedule_<day>` read-back properties.
+
 ## 2.0.5 — Companion support for `danfoss-room-coordinator` & heat demand sensor
 
 **Added**

@@ -334,6 +334,7 @@ async def test_room_schedule_refuses_more_than_six_transitions(
     ]
     assert await mgr.async_set_room_schedule("room-1", {"monday": six}) == 2
     week = sent[0][1]["weekly_schedule"]
+    assert "mode" not in week
     assert week["num_of_transitions"] == 6 and len(week["transitions"]) == 6
     assert cfg.schedule == {"monday": six}
 

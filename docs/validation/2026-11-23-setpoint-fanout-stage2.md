@@ -1,10 +1,9 @@
-# Stage 2 — room setpoint fan-out: supervised trial (PENDING)
+# Stage 2 — room setpoint fan-out: supervised trial (PARTIAL — 2026-11-25)
 
-**Status: not yet run.** The Stage 2 code is merged closed (`pydanfoss-cloud` room coordinator,
-`write_job.py` + `bridge/request/room/set-setpoint`, `aghulas/pydanfoss-cloud` PR #8). This note is
-the plan for the supervised real-hardware trial of [`../z2m-cloud-parity.md`](../z2m-cloud-parity.md)
-§7 Stage 2, to run in a later session with the owner present. **Nothing was written to a head to
-produce this file** — it records the procedure and leaves the results blank.
+**Status: partially validated on 2026-11-25** (4-head Zigbee2MQTT test room `Area X`, add-on `0.2.0` /
+`pydanfoss-cloud 0.7.0`, Companion `2.0.5`, anonymised). Cases 1 and 3 passed against the
+coordinator and all 4 heads; Cases 2 (`source: "coordinator"` direct MQTT) and 4 (powered-down head)
+remain pending on site.
 
 See [`../first-write-procedure.md`](../first-write-procedure.md) for the general supervised-write
 rules; this note only adds what is specific to the setpoint fan-out.
@@ -45,18 +44,19 @@ For each, publish to `<base>/bridge/request/room/set-setpoint` and read the per-
 4. **One head powered down** — expect that head `unreachable` after the bounded retries, the others
    `applied`, `job_status: "partial"`.
 
-## Results (to fill in during the trial)
+## Results (2026-11-25 trial on 4-head `Area X`)
 
 | # | Input | Per-head report | Independent read-back | Valve behaviour | Verdict |
 |---|---|---|---|---|---|
-| 1 | | | | | |
-| 2 | | | | | |
-| 3 | | | | | |
-| 4 | | | | | |
+| 1 | `climate.set_temperature` (`14.0 -> 14.5 -> 14.0 °C`, `source: "user"`) | HA service returned HTTP `500` after `15.0–15.5 s` (`BRIDGE_REQUEST_TIMEOUT = 15.0` too short for 4 sleeping heads) | `bridge/rooms` showed `desired.setpoint`, `setpoint`, and `drift: []`; all 4 head entities updated to `14.5 °C` then back to `14.0 °C` | Normal heating state | **Pass on hardware**; Companion timeout bumped `15s -> 60s` |
+| 2 | Scheduled setpoint (`source: "coordinator"`) | — | — | — | **Pending** (covered indirectly via Stage 5 `reconcile_drift` writing `occupied_heating_setpoint_scheduled`) |
+| 3 | Out-of-bounds (`22.0 °C` > `max_temp: 21.0`) | Refused at HA layer in `0.9 s` (`400 Provided temperature 22.0 is not valid. Accepted range is 5.0 to 21.0`) | All 4 heads untouched | No change | **Pass** |
+| 4 | One head powered down | — | — | — | **Pending** (requires physical power-off on site) |
 
-## After the trial
+## Findings & after the trial
 
-- Remove the room from `armed_rooms` again (back to read-only) until the next supervised step.
-- Record anomalies (lag, a head that reports late, mismatch retries) and whether the 0.1 °C match
-  tolerance and the default timeout/retries fit the hardware.
-- If clean, Stage 2 can be marked validated in [`../z2m-cloud-parity.md`](../z2m-cloud-parity.md) §7.
+- **Companion RPC timeout**: Sequential Zigbee writes + confirmation on 4 sleeping TRVs regularly
+  exceeded `15.0 s` (`BRIDGE_REQUEST_TIMEOUT`), triggering a false HA `500` even though all 4 heads
+  applied cleanly (`drift: []`) and `setpoint_timeout_s` on the coordinator is `30.0 s`. Raised
+  `BRIDGE_REQUEST_TIMEOUT` to `60.0 s` in `mqtt_companion.py`.
+- Re-verification confirmed `Area X` restored to `14.0 °C` with `drift: []`.

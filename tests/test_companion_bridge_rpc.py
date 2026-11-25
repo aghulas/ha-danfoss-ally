@@ -35,6 +35,7 @@ from custom_components.danfoss_ally_cloud.api.client import (
 from custom_components.danfoss_ally_cloud.companion_adapter import build_companion_store
 from custom_components.danfoss_ally_cloud.companion_rooms import CompanionRoomManager
 from custom_components.danfoss_ally_cloud.mqtt_companion import (
+    BRIDGE_REQUEST_TIMEOUT,
     CompanionBridgeError,
     MqttCompanionCoordinator,
 )
@@ -196,6 +197,9 @@ async def test_bridge_rpc_offline_timeout_and_stop(
     with pytest.raises(OperationError) as op_err:
         await ops.set_schedule(hass, store, target, {"mon": [{"start": "08:00", "end": "12:00"}]})
     assert op_err.value.code == "bridge_offline"
+
+    # Default RPC timeout exceeds coordinator sequential multi-head fan-out budget (>= 45s)
+    assert BRIDGE_REQUEST_TIMEOUT >= 45.0
 
     # Online bridge with no listener -> timeout
     comp.process_mqtt_message(f"{PREFIX}/bridge/state", "online")
