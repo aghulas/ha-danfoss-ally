@@ -1,5 +1,40 @@
 # Changelog
 
+## 2.0.5 — Companion support for `danfoss-room-coordinator` & heat demand sensor
+
+**Added**
+
+- **Standalone `danfoss-room-coordinator` routing in v2 Companion** (#166):
+  - `MqttCompanionCoordinator` subscribes to `<prefix>/bridge/heat_demand` and
+    `<prefix>/bridge/response/#` (supporting two-segment RPC topics such as
+    `bridge/response/room/set-setpoint`), exposes `is_coordinator_room()` and
+    `heat_demand_by_prefix`, and preserves `"closed"` error codes on `CompanionBridgeError`.
+  - `DanfossBridgeHeatDemandSensor` (`sensor.py`): dynamically created when
+    `<prefix>/bridge/heat_demand` is published; exposes `max_valve` (%) and
+    `calling` / `rooms_calling` / `ts` / `valid_for_s`, becoming unavailable when the bridge is
+    offline or the validity window expires.
+- **Documentation & real-hardware records** (#163, #164, #165):
+  - Trial A1 overnight preheat hold & gateway upstream DP 1 sync recorded
+    (`docs/validation/2026-11-preheat-trial-a1.md`).
+  - 24h passive cloud-MQTT probe telemetry results & Stage 4 promotion recorded
+    (`docs/cloud-mqtt-channel.md`).
+  - Zigbee2MQTT coordinator Stages 3–7 arming flags and supervised trial plans documented
+    (`docs/z2m-cloud-parity.md`, `docs/validation/2026-11-25-coordinator-stages3-7.md`).
+
+**Changed**
+
+- **Coordinator room setpoint & schedule routing** (`companion_rooms.py`, `operations.py`, #166):
+  - `CompanionRoomManager.async_set_room_setpoint()` routes coordinator-owned rooms through
+    `<prefix>/bridge/request/room/set-setpoint` (`source: "user"`), preserving coordinator sensor
+    temperatures on native rooms in `build_rooms()`.
+  - `operations.{get,set,restore}_schedule` route coordinator-owned rooms through
+    `<prefix>/bridge/request/{get,set,restore}_schedule`.
+  - `CompanionRoomManager.async_sync_telemetry()` skips heads owned by any bridge-published room
+    (single owner per head, `docs/z2m-cloud-parity.md` §5.1).
+- **Bridge availability & error surfacing on `DanfossRoomClimate`** (`climate.py`, #166): room
+  climate entities become unavailable when their owning bridge is offline, and bridge refusals
+  (such as `"closed"` on an unarmed room) surface as `HomeAssistantError`.
+
 ## 2.0.4 — Companion write-safety, `danfoss2mqtt` schedule RPC & virtual-room feeds
 
 **Added**
