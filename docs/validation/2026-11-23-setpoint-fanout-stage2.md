@@ -1,9 +1,8 @@
 # Stage 2 — room setpoint fan-out: supervised trial (PARTIAL — 2026-11-25)
 
-**Status: partially validated on 2026-11-25** (4-head Zigbee2MQTT test room `Area X`, add-on `0.2.0` /
-`pydanfoss-cloud 0.7.0`, Companion `2.0.5`, anonymised). Cases 1 and 3 passed against the
-coordinator and all 4 heads; Cases 2 (`source: "coordinator"` direct MQTT) and 4 (powered-down head)
-remain pending on site.
+**Status: partially validated on 2026-11-25** (4-head Zigbee2MQTT test room `Area X`, add-on `0.2.0`/`0.2.1`,
+Companion `2.0.5`–`2.0.8`, anonymised). Cases 1, 2 (`source: "coordinator"`), and 3 passed against the
+coordinator and all 4 heads; Case 4 (powered-down head) remains pending on site.
 
 See [`../first-write-procedure.md`](../first-write-procedure.md) for the general supervised-write
 rules; this note only adds what is specific to the setpoint fan-out.
@@ -48,8 +47,8 @@ For each, publish to `<base>/bridge/request/room/set-setpoint` and read the per-
 
 | # | Input | Per-head report | Independent read-back | Valve behaviour | Verdict |
 |---|---|---|---|---|---|
-| 1 | `climate.set_temperature` (`14.0 -> 14.5 -> 14.0 °C`, `source: "user"`) | HA service returned HTTP `500` after `15.0–15.5 s` (`BRIDGE_REQUEST_TIMEOUT = 15.0` too short for 4 sleeping heads) | `bridge/rooms` showed `desired.setpoint`, `setpoint`, and `drift: []`; all 4 head entities updated to `14.5 °C` then back to `14.0 °C` | Normal heating state | **Pass on hardware**; Companion timeout bumped `15s -> 60s` |
-| 2 | Scheduled setpoint (`source: "coordinator"`) | — | — | — | **Pending** (covered indirectly via Stage 5 `reconcile_drift` writing `occupied_heating_setpoint_scheduled`) |
+| 1 | `climate.set_temperature` (`14.0 -> 14.5 -> 14.0 °C`, `source: "user"`) | HA service returned HTTP `500` after `15.0–15.5 s` (`BRIDGE_REQUEST_TIMEOUT = 15.0` too short for 4 sleeping heads) | `bridge/rooms` showed `desired.setpoint`, `setpoint`, and `drift: []`; all 4 head entities updated to `14.5 °C` then back to `14.0 °C` (re-tested cleanly on `2.0.6` in `10.8 s` / `20.1 s`, 0 errors) | Normal heating state | **Pass on hardware** |
+| 2 | Direct MQTT `room/set-setpoint` (`14.0 -> 14.5 -> 14.0 °C`, `source: "coordinator"`) | `bridge/request/room/set-setpoint` acknowledged and executed by coordinator `0.2.1` | `bridge/rooms` showed `desired.setpoint` and `setpoint` reach `14.5 °C` then `14.0 °C` with `drift: []` across all 4 heads | Scheduled write path | **Pass on hardware** |
 | 3 | Out-of-bounds (`22.0 °C` > `max_temp: 21.0`) | Refused at HA layer in `0.9 s` (`400 Provided temperature 22.0 is not valid. Accepted range is 5.0 to 21.0`) | All 4 heads untouched | No change | **Pass** |
 | 4 | One head powered down | — | — | — | **Pending** (requires physical power-off on site) |
 
