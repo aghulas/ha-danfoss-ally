@@ -30,7 +30,11 @@ from custom_components.danfoss_ally_cloud.const import (
     DATA_COORDINATOR,
     DOMAIN,
 )
-from custom_components.danfoss_ally_cloud.repairs import clear_repairs, sync_repairs
+from custom_components.danfoss_ally_cloud.repairs import (
+    _ACTIVE_ISSUES,
+    clear_repairs,
+    sync_repairs,
+)
 from tests.common import FakeCloudClient, head
 
 _COMP_DIR = Path(__file__).resolve().parent.parent / "custom_components" / "danfoss_ally_cloud"
@@ -176,6 +180,91 @@ def test_repairs_lifecycle_and_cleanup(hass: HomeAssistant) -> None:
     # Unload cleanup removes remaining issue
     clear_repairs(hass, "entry1")
     assert reg.async_get_issue(DOMAIN, "head_fault_entry1_h1") is None
+
+
+def test_head_fault_issue_cleared_when_fault_resolves(hass: HomeAssistant) -> None:
+    """A head's fault issue is deleted as soon as the head reports no fault while online."""
+    reg = ir.async_get(hass)
+    faulty = DanfossDevice(
+        id="h1",
+        name="Class 1",
+        category="head",
+        product_id="03wvrwpv",
+        online=True,
+        faults=[{"code": "E12", "label": "radio communication error"}],
+    )
+    sync_repairs(hass, "entry1", {"h1": faulty})
+    assert reg.async_get_issue(DOMAIN, "head_fault_entry1_h1") is not None
+
+    healed = DanfossDevice(
+        id="h1", name="Class 1", category="head", product_id="03wvrwpv", online=True, faults=[]
+    )
+    sync_repairs(hass, "entry1", {"h1": healed})
+    assert reg.async_get_issue(DOMAIN, "head_fault_entry1_h1") is None
+
+    clear_repairs(hass, "entry1")
+
+
+def test_head_fault_issue_reaped_after_restart(hass: HomeAssistant) -> None:
+    """A fault issue persisted across an HA restart is reaped on the first fault-free online read.
+
+    ``_ACTIVE_ISSUES`` lives only in memory, so after a restart it no longer knows about an issue
+    still sitting in ``repairs.issue_registry``. The ``previous - current`` diff alone would never
+    clear it; the explicit ``fault == 0`` delete must. Here we create the issue, wipe the in-memory
+    tracking to mimic the restart, and verify a healthy online head still clears it.
+    """
+    reg = ir.async_get(hass)
+    faulty = DanfossDevice(
+        id="h1",
+        name="Class 1",
+        category="head",
+        product_id="03wvrwpv",
+        online=True,
+        faults=[{"code": "E12", "label": "radio communication error"}],
+    )
+    sync_repairs(hass, "entry1", {"h1": faulty})
+    assert reg.async_get_issue(DOMAIN, "head_fault_entry1_h1") is not None
+
+    # Mimic a Home Assistant restart: the issue persists in the registry, the in-memory set is gone.
+    _ACTIVE_ISSUES.pop("entry1", None)
+    assert reg.async_get_issue(DOMAIN, "head_fault_entry1_h1") is not None
+
+    healed = DanfossDevice(
+        id="h1", name="Class 1", category="head", product_id="03wvrwpv", online=True, faults=[]
+    )
+    sync_repairs(hass, "entry1", {"h1": healed})
+    assert reg.async_get_issue(DOMAIN, "head_fault_entry1_h1") is None
+
+    clear_repairs(hass, "entry1")
+
+
+def test_head_fault_issue_kept_while_head_offline(hass: HomeAssistant) -> None:
+    """An offline head with no reported fault must NOT clear a persisted fault issue.
+
+    Fault is unknown while the head is unreachable, so we never fabricate a resolution: the issue is
+    left in place until the head comes back online and reads ``fault == 0``.
+    """
+    reg = ir.async_get(hass)
+    faulty = DanfossDevice(
+        id="h1",
+        name="Class 1",
+        category="head",
+        product_id="03wvrwpv",
+        online=True,
+        faults=[{"code": "E12", "label": "radio communication error"}],
+    )
+    sync_repairs(hass, "entry1", {"h1": faulty})
+    assert reg.async_get_issue(DOMAIN, "head_fault_entry1_h1") is not None
+
+    # Restart wipes in-memory tracking; head is now offline with no fault data.
+    _ACTIVE_ISSUES.pop("entry1", None)
+    offline = DanfossDevice(
+        id="h1", name="Class 1", category="head", product_id="03wvrwpv", online=False, faults=[]
+    )
+    sync_repairs(hass, "entry1", {"h1": offline})
+    assert reg.async_get_issue(DOMAIN, "head_fault_entry1_h1") is not None
+
+    clear_repairs(hass, "entry1")
 
 
 async def test_setup_entry_sets_typed_runtime_data(hass: HomeAssistant) -> None:
