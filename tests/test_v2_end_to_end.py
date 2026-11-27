@@ -946,6 +946,7 @@ async def test_companion_room_sensors_and_relays_get_entities_when_they_arrive(
         CONNECTION_MODE_MQTT_COMPANION,
         DOMAIN,
     )
+    from custom_components.danfoss_ally_cloud.device_links import find_device
 
     monkeypatch.setattr(mqtt_mod, "async_wait_for_mqtt_client", AsyncMock(return_value=True))
     monkeypatch.setattr(mqtt_mod, "async_subscribe", AsyncMock(return_value=lambda: None))
@@ -999,8 +1000,8 @@ async def test_companion_room_sensors_and_relays_get_entities_when_they_arrive(
     assert state_of("sensor", f"{relay.id}_relay_rooms") == "1"
     # Each has its device, found by the identifier the side panel uses.
     devices = dr.async_get(hass)
-    assert devices.async_get_device(identifiers={(DOMAIN, sensor.id)}) is not None
-    assert devices.async_get_device(identifiers={(DOMAIN, relay.id)}) is not None
+    assert find_device(devices, entry.entry_id, sensor.id) is not None
+    assert find_device(devices, entry.entry_id, relay.id) is not None
 
     # A later fleet update does not create them twice.
     before = len(registry.entities)
