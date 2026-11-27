@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Relay rooms in the side panel
+## 2.0.13 — Relay rooms in the side panel
 
 **Added**
 
