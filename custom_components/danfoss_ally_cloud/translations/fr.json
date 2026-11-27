@@ -11,22 +11,24 @@
    },
    "cloud": {
     "title": "Danfoss Ally Cloud — compte",
-    "description": "Étape 1 sur 2. Connectez-vous avec le compte de l'application Danfoss Ally / Smart Life — les mêmes e-mail et mot de passe que dans l'application. Aucune application développeur ni clé API n'est requise. L'étape suivante demande les secrets d'installation, à saisir une seule fois.",
+    "description": "Connectez-vous avec votre compte de l'application Danfoss Ally — le même e-mail et le même mot de passe que dans l'application. Aucun compte développeur, clé d'API ni capture de trafic n'est nécessaire.",
     "data": {
      "username": "E-mail",
      "password": "Mot de passe",
      "country_code": "Pays",
-     "region": "Datacenter (avancé)"
+     "region": "Datacenter (avancé)",
+     "manual_secrets": "Saisir les secrets d'installation manuellement (avancé)"
     },
     "data_description": {
      "username": "L'adresse e-mail de votre compte de l'application Danfoss Ally / Smart Life.",
      "country_code": "Le pays de votre compte. Le datacenter en est déduit automatiquement.",
-     "region": "Laissez sur « Automatique » : le datacenter est déduit de votre pays. Ne le changez que si votre compte est sur un autre datacenter Tuya."
+     "region": "Laissez sur « Automatique » : le datacenter est déduit de votre pays. Ne le changez que si votre compte est sur un autre datacenter Tuya.",
+     "manual_secrets": "Laissez décoché : l'intégration dérive elle-même le matériel de signature. Ne cochez que si la connexion est refusée alors que l'e-mail et le mot de passe sont corrects (par exemple après une nouvelle version de l'application) et que vous avez capturé sign_key, deviceId et chKey depuis l'application."
     }
    },
    "cloud_secrets": {
     "title": "Danfoss Ally Cloud — secrets d'installation",
-    "description": "Étape 2 sur 2. Ces trois valeurs sont les secrets d'enregistrement d'appareil de votre installation. Ils se capturent une seule fois dans le trafic réseau de l'application (voir la documentation pour la procédure de capture) et ne peuvent pas être devinés à partir de votre compte. Ils sont stockés chiffrés, jamais réaffichés ni journalisés.",
+    "description": "Repli avancé. Normalement l'intégration dérive ces valeurs elle-même ; ne les saisissez que si la connexion automatique a été refusée. Elles se capturent dans le trafic réseau de l'application (voir la documentation), sont stockées avec l'entrée et ne sont plus jamais affichées ni journalisées.",
     "data": {
      "sign_key": "Clé de signature (sign_key)",
      "device_id": "Identifiant d'appareil (deviceId)",
@@ -75,7 +77,7 @@
   "error": {
    "cannot_connect": "Connexion impossible",
    "empty_prefixes": "Indiquez au moins un préfixe MQTT (ex. zigbee2mqtt)",
-   "invalid_auth": "Identifiants ou secrets d'installation invalides",
+   "invalid_auth": "Connexion refusée : vérifiez l'e-mail, le mot de passe et le pays (ou les secrets d'installation saisis manuellement)",
    "unknown": "Erreur inattendue"
   },
   "abort": {

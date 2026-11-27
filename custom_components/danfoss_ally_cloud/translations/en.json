@@ -11,22 +11,24 @@
       },
       "cloud": {
         "title": "Danfoss Ally Cloud — account",
-        "description": "Step 1 of 2. Sign in with your Danfoss Ally / Smart Life app account — the same email and password you use in the app. No developer account or API key is required. The next step asks for the one-time installation secrets.",
+        "description": "Sign in with your Danfoss Ally app account — the same email and password you use in the app. No developer account, API key or traffic capture is required.",
         "data": {
           "username": "Email",
           "password": "Password",
           "country_code": "Country",
-          "region": "Datacenter (advanced)"
+          "region": "Datacenter (advanced)",
+          "manual_secrets": "Enter the installation secrets manually (advanced)"
         },
         "data_description": {
           "username": "The email address of your Danfoss Ally / Smart Life app account.",
           "country_code": "The country of your app account. The datacenter is derived from it automatically.",
-          "region": "Leave on \"Automatic\": the datacenter is derived from your country. Only change it if your account lives in a different Tuya datacenter."
+          "region": "Leave on \"Automatic\": the datacenter is derived from your country. Only change it if your account lives in a different Tuya datacenter.",
+          "manual_secrets": "Leave unticked: the integration derives the signing material itself. Tick only if sign-in is refused although your email and password are correct (e.g. after a new app version) and you have captured sign_key, deviceId and chKey from the app."
         }
       },
       "cloud_secrets": {
         "title": "Danfoss Ally Cloud — installation secrets",
-        "description": "Step 2 of 2. These three values are the device-registration material of your installation. They are captured once from the app's network traffic (see the documentation for the capture procedure) and cannot be guessed from your account. They are stored encrypted and never shown again or logged.",
+        "description": "Advanced fallback. Normally the integration derives these values itself; enter them only if the automatic sign-in was refused. They are captured from the app's network traffic (see the documentation), stored with the entry and never shown again or logged.",
         "data": {
           "sign_key": "Sign key (sign_key)",
           "device_id": "Device id (deviceId)",
@@ -75,7 +77,7 @@
     "error": {
       "cannot_connect": "Cannot connect",
       "empty_prefixes": "Specify at least one MQTT prefix (e.g. zigbee2mqtt)",
-      "invalid_auth": "Invalid credentials or installation secrets",
+      "invalid_auth": "Sign-in refused: check the email, password and country (or the manually entered installation secrets)",
       "unknown": "Unexpected error"
     },
     "abort": {

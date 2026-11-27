@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from ._tuya.install import app_sign_key, derive_ch_key
 from .client import CloudClient, CloudError, ScheduleValidationError, UnknownTargetError
 from .const import (
     MODE_GROUP_SETPOINT_DP,
@@ -673,6 +674,11 @@ def load_bridge_config(
     password = _pick("password", "password", "DANFOSS_PASSWORD")
     sign_key = _pick("sign_key", "sign_key", "DANFOSS_SIGN_KEY")
     ch_key = _pick("ch_key", "ch_key", "DANFOSS_CH_KEY")
+    if username and password:
+        # Installation material is derived from app constants unless given explicitly
+        # (docs/install-material.md); explicit values stay the override for a rotated app build.
+        sign_key = sign_key or app_sign_key()
+        ch_key = ch_key or derive_ch_key()
     device_id = _pick("device_id", "device_id", "DANFOSS_DEVICE_ID")
     if not device_id and username and password and sign_key and ch_key:
         if path:

@@ -1,5 +1,6 @@
 """Config flow tests (hass harness, mocked client)."""
 
+import re
 from unittest.mock import patch
 
 from homeassistant.config_entries import SOURCE_USER
@@ -7,7 +8,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.danfoss_ally_cloud.api import app_sign_key, derive_ch_key
 from custom_components.danfoss_ally_cloud.api.client import CloudAuthError, CloudError
+from custom_components.danfoss_ally_cloud.config_flow import CONF_MANUAL_SECRETS
 from custom_components.danfoss_ally_cloud.const import (
     CONF_CH_KEY,
     CONF_COMPANION_FEED_EXTERNAL_SENSOR,
@@ -33,14 +36,14 @@ from .common import ENTRY_DATA, FakeCloudClient
 
 _FLOW = "custom_components.danfoss_ally_cloud.config_flow.CloudClient"
 
-# The account step (1/2): email, password, country, datacenter.
+# The account step: email, password, country, datacenter. Normally the only step.
 _ACCOUNT = {
     CONF_USERNAME: ENTRY_DATA[CONF_USERNAME],
     CONF_PASSWORD: ENTRY_DATA[CONF_PASSWORD],
     CONF_COUNTRY_CODE: ENTRY_DATA[CONF_COUNTRY_CODE],
     CONF_REGION: ENTRY_DATA[CONF_REGION],
 }
-# The installation-secrets step (2/2).
+# The manual installation-secrets step (fallback, only when asked on the account step).
 _SECRETS = {
     CONF_SIGN_KEY: ENTRY_DATA[CONF_SIGN_KEY],
     CONF_DEVICE_ID: ENTRY_DATA[CONF_DEVICE_ID],
@@ -48,35 +51,69 @@ _SECRETS = {
 }
 
 
-async def _submit(hass: HomeAssistant, fake: FakeCloudClient, account=None):
-    """Drive the two-step cloud flow: account step then installation-secrets step.
+async def _submit(hass: HomeAssistant, fake: FakeCloudClient, account=None, manual=False):
+    """Drive the cloud flow: the account step alone, or account + manual secrets (``manual``).
 
     Returns early if the account step itself ends the flow (e.g. already_configured abort).
     """
-    with patch(_FLOW, return_value=fake):
+    with patch(_FLOW, return_value=fake) as client_cls:
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
         assert result["type"] == FlowResultType.MENU
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], {"next_step_id": "cloud"}
         )
         assert result["step_id"] == "cloud"
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], account or _ACCOUNT
-        )
-        if result["type"] != FlowResultType.FORM:
-            return result
-        assert result["step_id"] == "cloud_secrets"
-        return await hass.config_entries.flow.async_configure(result["flow_id"], _SECRETS)
+        user_input = {**(account or _ACCOUNT), CONF_MANUAL_SECRETS: manual}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input)
+        if manual and result["type"] == FlowResultType.FORM:
+            assert result["step_id"] == "cloud_secrets"
+            result = await hass.config_entries.flow.async_configure(result["flow_id"], _SECRETS)
+        result["client_calls"] = client_cls.call_args_list
+        return result
 
 
 async def test_user_success(hass: HomeAssistant):
+    """Email + password + country is enough: the installation material is derived, not asked."""
     result = await _submit(hass, FakeCloudClient())
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["title"] == ENTRY_DATA["username"]
-    assert result["data"]["username"] == ENTRY_DATA["username"]
-    # The two steps are merged into the stored entry (account + secrets).
+    data = result["data"]
+    assert data["username"] == ENTRY_DATA["username"]
+    assert data[CONF_COUNTRY_CODE] == ENTRY_DATA[CONF_COUNTRY_CODE]
+    assert data[CONF_REGION] == ENTRY_DATA[CONF_REGION]
+    # Derived material: app-wide sign key + channel key, and a deviceId generated for this entry.
+    assert data[CONF_SIGN_KEY] == app_sign_key()
+    assert data[CONF_CH_KEY] == derive_ch_key()
+    assert re.fullmatch(r"[0-9a-f]{44}", data[CONF_DEVICE_ID])
+    assert CONF_MANUAL_SECRETS not in data
+    # The login that validated the account used exactly the material stored in the entry.
+    kwargs = result["client_calls"][-1].kwargs
+    assert kwargs["sign_key"] == data[CONF_SIGN_KEY]
+    assert kwargs["device_id"] == data[CONF_DEVICE_ID]
+    assert kwargs["ch_key"] == data[CONF_CH_KEY]
+
+
+async def test_user_device_id_is_unique_per_setup(hass: HomeAssistant):
+    """Each setup draws its own deviceId (the cloud keys the session on it)."""
+    first = await _submit(hass, FakeCloudClient())
+    other = {**_ACCOUNT, CONF_USERNAME: "autre@exemple.fr"}
+    second = await _submit(hass, FakeCloudClient(), account=other)
+    assert first["data"][CONF_DEVICE_ID] != second["data"][CONF_DEVICE_ID]
+
+
+async def test_user_manual_secrets_success(hass: HomeAssistant):
+    """Fallback: ticking the manual box asks for the three secrets and stores them as typed."""
+    result = await _submit(hass, FakeCloudClient(), manual=True)
+    assert result["type"] == FlowResultType.CREATE_ENTRY
     for key in (CONF_COUNTRY_CODE, CONF_REGION, CONF_SIGN_KEY, CONF_DEVICE_ID, CONF_CH_KEY):
         assert result["data"][key] == ENTRY_DATA[key]
+
+
+async def test_user_manual_secrets_invalid_auth(hass: HomeAssistant):
+    result = await _submit(hass, FakeCloudClient(validate_exc=CloudAuthError("refus")), manual=True)
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "cloud_secrets"
+    assert result["errors"] == {"base": "invalid_auth"}
 
 
 async def test_cloud_region_auto_derived_from_country(hass: HomeAssistant):
@@ -91,6 +128,7 @@ async def test_cloud_region_auto_derived_from_country(hass: HomeAssistant):
 async def test_user_invalid_auth(hass: HomeAssistant):
     result = await _submit(hass, FakeCloudClient(validate_exc=CloudAuthError("refus")))
     assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "cloud"  # the error is shown on the account form itself
     assert result["errors"] == {"base": "invalid_auth"}
 
 

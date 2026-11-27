@@ -352,3 +352,26 @@ def test_load_bridge_config_auto_generates_and_persists_device_id(tmp_path: Path
     # Second load reuses the exact same persisted device_id (stable across restarts)
     cfg2 = load_bridge_config(args)
     assert cfg2.device_id == cfg1.device_id
+
+
+def test_load_bridge_config_derives_install_material(tmp_path: Path) -> None:
+    """Username + password alone are enough: sign_key / ch_key default to the app constants and a
+    device id is generated and persisted next to the options file."""
+    from custom_components.danfoss_ally_cloud.api import app_sign_key, derive_ch_key
+
+    opts = tmp_path / "options.json"
+    opts.write_text(
+        json.dumps({"username": "user@example.test", "password": "pw"}), encoding="utf-8"
+    )
+    cfg = load_bridge_config(build_arg_parser().parse_args(["--options", str(opts)]))
+    assert cfg.has_cloud_credentials is True
+    assert cfg.sign_key == app_sign_key()
+    assert cfg.ch_key == derive_ch_key()
+    assert cfg.device_id and len(cfg.device_id) == 44
+    # Explicit values still win (override for a rotated app build).
+    opts.write_text(
+        json.dumps({"username": "u", "password": "p", "sign_key": "sk", "ch_key": "ck"}),
+        encoding="utf-8",
+    )
+    cfg2 = load_bridge_config(build_arg_parser().parse_args(["--options", str(opts)]))
+    assert (cfg2.sign_key, cfg2.ch_key) == ("sk", "ck")

@@ -15,6 +15,12 @@ Reuse (see docs/reuse.md):
 from __future__ import annotations
 
 from . import schedule, z2m_contract
+from ._tuya.install import (
+    app_install_material,
+    app_sign_key,
+    derive_ch_key,
+    generate_device_id,
+)
 from .client import (
     CloudAuthError,
     CloudClient,
@@ -73,6 +79,8 @@ __all__ = [
     "UnknownTargetError",
     "apply_dps_overlay",
     "async_fetch_gateway_keys",
+    "app_install_material",
+    "app_sign_key",
     "classify_z2m_descriptor",
     "clean_friendly_name",
     "count_transitions",
@@ -80,7 +88,9 @@ __all__ = [
     "decode_operation",
     "decode_z2m_descriptor",
     "decode_z2m_state",
+    "derive_ch_key",
     "derive_distinct_device_id",
+    "generate_device_id",
     "MQTT_CANDIDATE_DPS",
     "MQTT_CLOUD_CONFIRMED_DPS",
     "MQTT_ENUM_VALUES",

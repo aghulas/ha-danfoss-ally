@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Direct-cloud onboarding with email, password and country only
+
+**Changed**
+
+- `config_flow.py`: the direct-cloud setup no longer asks for `sign_key` / `device_id` / `ch_key`.
+  The integration derives them (`api/_tuya/install.py`: app-wide `sign_key` and `chKey`, plus a
+  `deviceId` generated once per entry) and validates them with a real login. The three-field step
+  remains as an advanced manual fallback (checkbox on the account step). Existing entries, reauth
+  and reconfigure are unchanged. See `docs/install-material.md`.
+- `danfoss2mqtt` (`bridge_daemon.py`): `sign_key` / `ch_key` default to the derived values when a
+  username and password are configured; explicit values still override.
+
+**Added**
+
+- `pydanfoss-cloud`: `derive_ch_key`, `app_sign_key`, `generate_device_id`, `app_install_material`.
+
 ## 2.0.9 — Fix Zigbee2MQTT `weekly_schedule` `dayofweek` encoding
 
 **Fixed**
