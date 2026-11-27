@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Head settings through the cloud bridge
+## 2.0.16 — Head settings through the cloud bridge
 
 **Added**
 
