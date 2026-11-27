@@ -9,6 +9,7 @@ import {
   roomDeviceIdent,
   roomHeads,
   roomSensors,
+  roundedReading,
   unplacedSensors,
 } from "../src/element";
 import { elementPath, parsePath } from "../src/nav";
@@ -113,6 +114,16 @@ describe("éléments d'une pièce", () => {
     expect(findElement(overview, rooms, "gw1")?.home.name).toBe("École");
     expect(findElement(overview, rooms, "nope")).toBeNull();
     expect(findElement(null, rooms, "a")).toBeNull();
+  });
+});
+
+describe("mesures affichées", () => {
+  it("arrondit sans zéro inutile", () => {
+    expect(roundedReading(16.64)).toBe("16.6");
+    expect(roundedReading(16.65)).toBe("16.7");
+    expect(roundedReading(20)).toBe("20");
+    expect(roundedReading(36.3, 0)).toBe("36");
+    expect(roundedReading(-0.04)).toBe("0");
   });
 });
 

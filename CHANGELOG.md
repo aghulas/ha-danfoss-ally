@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Relay rooms in the side panel
+
+**Added**
+
+- `overview`: `linked_room_names` on each boiler relay (contract §3.6), the names of the rooms that
+  drive it. The relay page of the side panel lists them. Display text only: they are app room
+  names, not targets.
+
+**Fixed**
+
+- Side panel: a room sensor's temperature and humidity are rounded for display (0.1 °C, 1 %). A
+  bridge-computed mean was shown with two decimals (16.64 °C, seen on real hardware).
+
 ## 2.0.12 — Room sensors and relay linkage in the side panel
 
 **Added**

@@ -117,6 +117,15 @@ export function haDeviceId(hass: HassLike | undefined, ident: string): string | 
   return null;
 }
 
+/**
+ * Mesure arrondie pour l'affichage : `digits` décimales au plus, sans zéro inutile
+ * (16.64 → « 16.6 », 20 → « 20 »). Un pont peut publier une moyenne non arrondie.
+ */
+export function roundedReading(value: number, digits = 1): string {
+  const factor = 10 ** digits;
+  return String(Math.round(value * factor) / factor);
+}
+
 /** Groupe d'affichage d'une entité, d'après sa catégorie. */
 export type EntityGroup = "controls" | "config" | "diagnostic";
 

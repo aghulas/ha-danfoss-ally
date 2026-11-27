@@ -277,7 +277,8 @@ cached state** — no extra cloud call (added in 0.6.0, axis D).
         }
       ],
       "relays": [
-        { "device_id": "<devId>", "name": "Boiler relay", "on": true, "online": true, "linked_rooms": 2 }
+        { "device_id": "<devId>", "name": "Boiler relay", "on": true, "online": true, "linked_rooms": 2,
+          "linked_room_names": ["Room 1", "Room 2"] }
       ],
       "sensors": [
         { "device_id": "<devId>", "name": "Room sensor", "online": true, "room_id": "13000000",
@@ -291,7 +292,11 @@ cached state** — no extra cloud call (added in 0.6.0, axis D).
   }
 }
 ```
-- **Room sensors** (`sensors`, unreleased): every room sensor of the fleet, under its home (its
+- **Relay rooms** (`linked_room_names`, unreleased): the names of the rooms that drive the relay
+  (those counted by `linked_rooms`), sorted. They are Tuya *room* names, a different id space from
+  the `rooms` of this payload: display text only, never a navigation or write target. The relay
+  page of the side panel lists them.
+- **Room sensors** (`sensors`): every room sensor of the fleet, under its home (its
   own home from the per-home device list, else its room's, else the first home: kept visible).
   `room_id` is the `id` of the room it measures **when the coordinator knows the link**: the v2
   Companion does (a native room names its sensor in `bridge/rooms`, a Companion-managed room in

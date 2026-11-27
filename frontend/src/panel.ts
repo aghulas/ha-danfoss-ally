@@ -43,6 +43,7 @@ import {
   haDeviceId,
   roomDeviceIdent,
   roomHeads,
+  roundedReading,
   roomSensors,
   unplacedSensors,
 } from "./element";
@@ -277,7 +278,7 @@ export class DanfossAllyPanel extends LitElement {
                   sensor.online ? "on-ok" : "offline",
                   sensor.name,
                   sensor.online && sensor.temperature !== null
-                    ? t(this.hass, "el_temperature", { value: sensor.temperature })
+                    ? t(this.hass, "el_temperature", { value: roundedReading(sensor.temperature) })
                     : t(this.hass, sensor.online ? "head_online" : "head_offline"),
                   !sensor.online,
                   t(this.hass, "el_kind_sensor"),
@@ -404,10 +405,14 @@ export class DanfossAllyPanel extends LitElement {
         ? html`<span class="flag ok">${t(this.hass, "head_online")}</span>`
         : html`<span class="flag warn">${t(this.hass, "head_offline")}</span>`}
       ${sensor.temperature !== null
-        ? html`<span class="flag">${t(this.hass, "el_temperature", { value: sensor.temperature })}</span>`
+        ? html`<span class="flag"
+            >${t(this.hass, "el_temperature", { value: roundedReading(sensor.temperature) })}</span
+          >`
         : nothing}
       ${sensor.humidity !== null
-        ? html`<span class="flag">${t(this.hass, "el_humidity", { value: sensor.humidity })}</span>`
+        ? html`<span class="flag"
+            >${t(this.hass, "el_humidity", { value: roundedReading(sensor.humidity, 0) })}</span
+          >`
         : nothing}
       ${sensor.battery !== null
         ? html`<span class="flag">${t(this.hass, "head_battery", { value: sensor.battery })}</span>`
@@ -515,7 +520,29 @@ export class DanfossAllyPanel extends LitElement {
         </div>
         <div class="flags">${this._elementFlags(el)}</div>
       </section>
+      ${el.kind === "relay" ? this._renderRelayRooms(el.relay) : nothing}
       ${this._renderEntities(haDeviceId(this.hass, el.id), "el_state", true)}
+    `;
+  }
+
+  /**
+   * Pièces qui pilotent un relais, par leur nom. Ce sont des noms de pièces de l'app, pas
+   * des identifiants de la vue d'ensemble : du texte, pas des liens. Rien si le backend ne
+   * les donne pas (plus ancien) ou si aucune n'est liée.
+   */
+  private _renderRelayRooms(relay: FleetRelay): TemplateResult | typeof nothing {
+    const names = relay.linked_room_names ?? [];
+    if (names.length === 0) {
+      return nothing;
+    }
+    return html`
+      <section class="home">
+        <div class="home-head">
+          <h2>${t(this.hass, "el_relay_rooms")}</h2>
+          <span class="heads-count">${names.length}</span>
+        </div>
+        <div class="flags">${names.map((name) => html`<span class="flag">${name}</span>`)}</div>
+      </section>
     `;
   }
 
