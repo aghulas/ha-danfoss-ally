@@ -102,6 +102,11 @@ export class DanfossAllyRoomCard extends LitElement {
   @state() private _info: Info | null = null;
   @state() private _schedule: Schedule | null = null;
   @state() private _loaded = false;
+  /**
+   * Aucune lecture n'a encore abouti pour la pièce configurée : la carte dit qu'elle
+   * charge, au lieu d'annoncer une pièce inconnue, sans programme et sans tête.
+   */
+  @state() private _pending = true;
   @state() private _refreshing = false;
   @state() private _busy = false;
   @state() private _error: string | null = null;
@@ -141,6 +146,7 @@ export class DanfossAllyRoomCard extends LitElement {
       this._schedule = null;
       this._job = null;
       this._error = null;
+      this._pending = true;
       void this._load();
     }
   }
@@ -253,6 +259,7 @@ export class DanfossAllyRoomCard extends LitElement {
       }
       this._info = info;
       this._rooms = rooms;
+      this._pending = false;
       this._schedule = schedule;
       this._scheduleRoomId = target?.id;
       if (!target && this._target) {
@@ -435,12 +442,14 @@ export class DanfossAllyRoomCard extends LitElement {
     const comfort = this._schedule?.comfort ?? room?.comfort ?? null;
     const setback = this._schedule?.setback ?? room?.setback ?? null;
     const areaMode = Boolean(this._config?.area_id);
+    // Première lecture en cours et pièce pas encore connue : ni « inconnue », ni corps vide.
+    const loading = this._pending && !areaMode && !room && Boolean(this._config?.room_id);
     return html`
       <ha-card>
         <div class="content">
           ${showReload ? renderReloadBanner(this.hass, () => this._reload()) : nothing}
           <div class="titlebar">
-            <div class="room">${this._title(room)}</div>
+            <div class="room">${loading ? t(this.hass, "loading") : this._title(room)}</div>
             ${this._renderActions(room)}
           </div>
           ${areaMode ? this._renderRoomSensors() : nothing}
@@ -449,7 +458,11 @@ export class DanfossAllyRoomCard extends LitElement {
             : nothing}
           ${readOnly ? html`<div class="hint">${t(this.hass, "read_only")}</div>` : nothing}
           ${this._error ? html`<div class="banner error" role="alert">${this._error}</div>` : nothing}
-          ${room || !areaMode ? this._renderAllyBody(room, comfort, setback) : nothing}
+          ${loading
+            ? nothing
+            : room || !areaMode
+              ? this._renderAllyBody(room, comfort, setback)
+              : nothing}
           ${areaMode ? this._renderAreaClimates(room) : nothing}
           ${room || !areaMode
             ? renderCardFooter(
