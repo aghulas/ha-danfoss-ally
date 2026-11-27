@@ -210,6 +210,16 @@ While `zigbee2mqtt` manages individual Zigbee devices, a Danfoss heating system 
      and the relay's linked-rooms sensor. Until a bridge has published a relay, its linkage is
      empty, never assumed; a malformed payload leaves the previous one in place. The bridge
      re-reads the linkage from the cloud at most once an hour (one request per relay).
+   - Each head in `danfoss2mqtt/bridge/devices` carries `danfoss.set_keys`: the `/set` keys the
+     bridge can write for it **right now**. Always `occupied_heating_setpoint`; plus, when the
+     bridge's head-setting writes are open (add-on option `head_settings_writes`, off by default,
+     optionally confined to one `head_settings_trial_head`), the settings it can reach on a
+     proven channel: `keypad_lockout`, `window_open_feature`, `max_heat_setpoint_limit` for a
+     grouped head (the room's group publish: **every head of the room** takes it), and the same
+     plus `min_heat_setpoint_limit` for an isolated head while the bridge's cloud-MQTT link can
+     reach its gateway (a DP publish, confirmed by the gateway's echo or a per-device read). The
+     Companion opens a control only for an advertised key; without the list (older bridge) only
+     the setpoint.
    - `danfoss2mqtt/bridge/request/<action>` → `danfoss2mqtt/bridge/response/<action>` and
      `danfoss2mqtt/bridge/jobs/<job_id>` for room/schedule/vacation operations.
 2. **Companion-managed rooms (for `zigbee2mqtt` heads + `014G2480` sensors)**:

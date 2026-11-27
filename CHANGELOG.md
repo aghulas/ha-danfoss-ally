@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Head settings through the cloud bridge
+
+**Added**
+
+- v2 Companion: a `danfoss2mqtt` head's settings (child lock, open-window detection, setpoint
+  bounds) follow the `/set` keys its bridge advertises in `bridge/devices` (`danfoss.set_keys`):
+  a setting entity is available only while the bridge can write it on a proven channel. With an
+  older bridge, or with the bridge's head-setting writes closed (its default), nothing changes:
+  only the setpoint. On a grouped head the bridge writes the setting on the room, so every head of
+  the room takes it: the switch says so (`write_scope: room`, `room_head_count`).
+
 ## 2.0.15 — Head readings under the Companion
 
 **Added**

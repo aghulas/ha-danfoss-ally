@@ -178,3 +178,48 @@ async def test_companion_capabilities_update_on_migration_and_stale_removal(
     )
     assert comp.is_cloud_bridge_device(D2M_HEAD) is False
     assert comp.supports_device_set(D2M_HEAD, "keypad_lockout") is True
+
+
+async def test_cloud_bridge_head_settings_follow_the_keys_the_bridge_advertises(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A danfoss2mqtt head opens a setting only when its bridge advertises it in
+    ``danfoss.set_keys`` (proven channel open right now); without the list, only the setpoint."""
+    pub = AsyncMock()
+    monkeypatch.setattr(mqtt_mod, "async_publish", pub)
+    comp = MqttCompanionCoordinator(hass, prefixes=("danfoss2mqtt",))
+
+    def bridge_devices(keys: list[str] | None) -> None:
+        ext: dict = {"dev_id": D2M_HEAD}
+        if keys is not None:
+            ext["set_keys"] = keys
+        comp.process_mqtt_message(
+            "danfoss2mqtt/bridge/devices",
+            json.dumps(
+                [
+                    {
+                        "ieee_address": D2M_HEAD,
+                        "friendly_name": "Salle Iso",
+                        "definition": {"vendor": "Danfoss", "model": "03wvrwpv"},
+                        "danfoss": ext,
+                    }
+                ]
+            ),
+        )
+
+    bridge_devices(None)  # older bridge: no list
+    assert comp.supports_device_set(D2M_HEAD, "occupied_heating_setpoint") is True
+    assert comp.supports_device_set(D2M_HEAD, "keypad_lockout") is False
+
+    bridge_devices(["keypad_lockout", "occupied_heating_setpoint", "window_open_feature"])
+    assert comp.supports_device_set(D2M_HEAD, "keypad_lockout") is True
+    assert comp.supports_device_set(D2M_HEAD, "window_open_feature") is True
+    assert comp.supports_device_set(D2M_HEAD, "min_heat_setpoint_limit") is False
+
+    # The bridge closes it again (gate closed, link down): the key is refused at once.
+    bridge_devices(["occupied_heating_setpoint"])
+    assert comp.supports_device_set(D2M_HEAD, "keypad_lockout") is False
+    # The device disappears from the bridge: nothing is left.
+    comp.process_mqtt_message("danfoss2mqtt/bridge/devices", "[]")
+    assert comp.supports_device_set(D2M_HEAD, "keypad_lockout") is False
+    pub.assert_not_awaited()
