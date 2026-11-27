@@ -929,3 +929,84 @@ async def test_companion_bridge_connectivity_binary_sensors(
     assert d2m.attributes["state"] == "offline"
 
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_companion_room_sensors_and_relays_get_entities_when_they_arrive(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression (real install, 2026-11-27): the Companion fleet arrives over MQTT after the
+    platforms are set up, so room sensors and boiler relays never got an entity nor a device."""
+    from homeassistant.helpers import device_registry as dr
+    from homeassistant.helpers import entity_registry as er
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from custom_components.danfoss_ally_cloud.const import (
+        CONF_CONNECTION_MODE,
+        CONF_MQTT_PREFIXES,
+        CONNECTION_MODE_MQTT_COMPANION,
+        DOMAIN,
+    )
+
+    monkeypatch.setattr(mqtt_mod, "async_wait_for_mqtt_client", AsyncMock(return_value=True))
+    monkeypatch.setattr(mqtt_mod, "async_subscribe", AsyncMock(return_value=lambda: None))
+    monkeypatch.setattr(mqtt_mod, "async_publish", AsyncMock())
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Companion",
+        data={
+            CONF_CONNECTION_MODE: CONNECTION_MODE_MQTT_COMPANION,
+            CONF_MQTT_PREFIXES: "danfoss2mqtt",
+        },
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    registry = er.async_get(hass)
+    # Nothing known at setup: no entity yet.
+    assert registry.async_get_entity_id("sensor", DOMAIN, "s-1_temperature") is None
+
+    comp: MqttCompanionCoordinator = hass.data[DOMAIN][entry.entry_id]["companion"]
+    sensor, relay = _sensor(), _relay()
+    comp.process_mqtt_message("danfoss2mqtt/bridge/state", '{"state": "online"}')
+    comp.process_mqtt_message(
+        "danfoss2mqtt/bridge/devices",
+        json.dumps([encode_z2m_descriptor(sensor), encode_z2m_descriptor(relay)]),
+    )
+    comp.process_mqtt_message(
+        f"danfoss2mqtt/{sensor.name}",
+        json.dumps({"temperature": 20.2, "humidity": 48.0, "battery": 96.0}),
+    )
+    comp.process_mqtt_message(f"danfoss2mqtt/{sensor.name}/availability", "online")
+    comp.process_mqtt_message(f"danfoss2mqtt/{relay.name}", json.dumps({"state": "ON"}))
+    comp.process_mqtt_message(f"danfoss2mqtt/{relay.name}/availability", "online")
+    comp.process_mqtt_message(
+        "danfoss2mqtt/bridge/relays",
+        json.dumps({relay.id: [{"room_id": 7, "name": "Salle 1", "linked": True}]}),
+    )
+    await hass.async_block_till_done()
+
+    def state_of(domain: str, unique_id: str) -> str | None:
+        entity_id = registry.async_get_entity_id(domain, DOMAIN, unique_id)
+        assert entity_id is not None, unique_id
+        st = hass.states.get(entity_id)
+        return st.state if st else None
+
+    assert float(state_of("sensor", f"{sensor.id}_temperature") or 0) == 20.2
+    assert float(state_of("sensor", f"{sensor.id}_humidity") or 0) == 48.0
+    assert float(state_of("sensor", f"{sensor.id}_battery") or 0) == 96.0
+    assert state_of("binary_sensor", f"{relay.id}_boiler_relay") == "on"
+    assert state_of("sensor", f"{relay.id}_relay_rooms") == "1"
+    # Each has its device, found by the identifier the side panel uses.
+    devices = dr.async_get(hass)
+    assert devices.async_get_device(identifiers={(DOMAIN, sensor.id)}) is not None
+    assert devices.async_get_device(identifiers={(DOMAIN, relay.id)}) is not None
+
+    # A later fleet update does not create them twice.
+    before = len(registry.entities)
+    comp.process_mqtt_message(
+        "danfoss2mqtt/bridge/devices",
+        json.dumps([encode_z2m_descriptor(sensor), encode_z2m_descriptor(relay)]),
+    )
+    await hass.async_block_till_done()
+    assert len(registry.entities) == before

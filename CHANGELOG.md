@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Entities for room sensors and relays under the Companion
+
+**Fixed**
+
+- v2 Companion: room sensors (temperature, humidity, battery) and boiler relays (on/off, linked
+  rooms) now get their entities and their device. The fleet arrives over MQTT after the platforms
+  are set up, and the sensor / binary sensor platforms only looked at it once, at setup: these
+  devices had no entity and no device at all (seen on real hardware, 2026-11-27). They are now
+  added when they appear, as heads already were on the climate / number / switch platforms.
+
 ## 2.0.13 — Relay rooms in the side panel
 
 **Added**
