@@ -36,7 +36,6 @@ class CompanionCoordinatorView:
         self.hass: HomeAssistant = companion.hass
         self.home_rooms: dict[str, list[dict[str, Any]]] = {}
         self.device_home: dict[str, str] = {}
-        self.relay_rooms: dict[str, list[dict[str, Any]]] = {}
         self.messages: list[Any] = []
         self.last_update_success: bool = True
 
@@ -47,6 +46,14 @@ class CompanionCoordinatorView:
     @property
     def rooms(self) -> dict[str, RoomState]:
         return self.room_manager.build_rooms()
+
+    @property
+    def relay_rooms(self) -> dict[str, list[dict[str, Any]]]:
+        """Relay id -> rooms eligible to drive it, as the bridges publish them (``bridge/relays``).
+
+        Empty for a relay no bridge has published: read-only here, and never assumed.
+        """
+        return self.companion.relay_rooms
 
     @property
     def holidays(self) -> dict[str, dict[str, Any]]:

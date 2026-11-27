@@ -203,6 +203,13 @@ While `zigbee2mqtt` manages individual Zigbee devices, a Danfoss heating system 
    - `danfoss2mqtt/bridge/rooms` (`retain`): list of room objects (`group_id`, `name`, `home_id`,
      `members`, `temperature`, `humidity`, `setpoint`, `setpoints`, `mode`, `heating`, `schedule`).
    - `danfoss2mqtt/bridge/holidays`, `danfoss2mqtt/bridge/relays`, `danfoss2mqtt/bridge/alerts` (`retain`).
+     `bridge/relays` is a dict keyed by the boiler relay's device id, each value the rooms eligible
+     to drive it: `{"<relay id>": [{"room_id": "<id>", "name": "Room 1", "linked": true}]}`
+     (`room_id` is a Tuya *room* id, not a schedule-group id; the relay's own on/off stays on its
+     device topic). Read only: the Companion feeds it to `overview` (`linked_rooms`), `get_relays`
+     and the relay's linked-rooms sensor. Until a bridge has published a relay, its linkage is
+     empty, never assumed; a malformed payload leaves the previous one in place. The bridge
+     re-reads the linkage from the cloud at most once an hour (one request per relay).
    - `danfoss2mqtt/bridge/request/<action>` → `danfoss2mqtt/bridge/response/<action>` and
      `danfoss2mqtt/bridge/jobs/<job_id>` for room/schedule/vacation operations.
 2. **Companion-managed rooms (for `zigbee2mqtt` heads + `014G2480` sensors)**:
