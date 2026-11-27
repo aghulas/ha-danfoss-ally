@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Entities for room sensors and relays under the Companion
+## 2.0.14 — Entities for room sensors and relays under the Companion
 
 **Fixed**
 
