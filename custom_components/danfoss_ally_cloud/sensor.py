@@ -84,6 +84,14 @@ SENSORS: tuple[DanfossSensorDescription, ...] = (
     ),
 )
 
+# Per-head readings created under the v2 Companion, for heads served by a cloud-only bridge
+# (``danfoss2mqtt``) only: they have no other source of entities, whereas a Zigbee2MQTT head already
+# has Zigbee2MQTT's own. The fault sensor is left out: faults are raised as Repairs issues and shown
+# on the side panel, and a fleet of ~100 heads would carry ~100 more always-"none" entities.
+COMPANION_HEAD_SENSORS: tuple[DanfossSensorDescription, ...] = tuple(
+    desc for desc in SENSORS if desc.key != "fault"
+)
+
 # Danfoss Ally room sensor (014G2480, Tuya category ``wsdcg``): temperature, humidity, battery,
 # all read only (cloud device list, DP 1 / 2 / 4). A device of its own, not a head.
 ROOM_SENSORS: tuple[DanfossSensorDescription, ...] = (
@@ -205,10 +213,12 @@ async def async_setup_entry(
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator: DanfossCoordinator = data[DATA_COORDINATOR]
     local: DanfossLocalCoordinator | None = data.get(DATA_LOCAL)
+    companion: MqttCompanionCoordinator | None = data.get("companion")
+    # Direct cloud: every head's readings. Companion: added below, as the fleet arrives.
     entities: list[SensorEntity] = [
         DanfossSensor(coordinator, dev.id, desc)
         for dev in coordinator.data.values()
-        if dev.is_head
+        if dev.is_head and companion is None
         for desc in SENSORS
     ]
     # Danfoss Ally room sensor (category ``wsdcg``): temperature / humidity / battery, read only.
@@ -241,7 +251,6 @@ async def async_setup_entry(
     if messages is not None:
         entities.append(DanfossMessagesSensor(messages))
 
-    companion: MqttCompanionCoordinator | None = data.get("companion")
     known_heat_demand: set[str] = set()
     if companion is not None:
         for prefix in companion.heat_demand_by_prefix:
@@ -267,7 +276,8 @@ async def async_setup_entry(
         # The Companion fleet arrives over MQTT AFTER the platforms are set up: at setup time
         # ``coordinator.data`` is usually empty, so the room sensors and boiler relays listed
         # above were never created (they had no entity and no device at all). Add them as they
-        # appear, like the climate / number / switch platforms do for heads.
+        # appear, like the climate / number / switch platforms do for heads. Heads served by a
+        # cloud-only bridge get their readings the same way (``COMPANION_HEAD_SENSORS``).
         known_devices: set[str] = {
             dev.id for dev in coordinator.data.values() if dev.is_sensor or dev.is_relay
         }
@@ -276,17 +286,24 @@ async def async_setup_entry(
         def _sync_companion_devices() -> None:
             added: list[SensorEntity] = []
             for dev in list(coordinator.data.values()):
-                if dev.id in known_devices or not (dev.is_sensor or dev.is_relay):
+                if dev.id in known_devices:
                     continue
-                known_devices.add(dev.id)
                 if dev.is_sensor:
                     added.extend(DanfossSensor(coordinator, dev.id, desc) for desc in ROOM_SENSORS)
-                else:
+                elif dev.is_relay:
                     added.append(DanfossRelayRooms(coordinator, dev.id))
+                elif dev.is_head and companion.is_cloud_bridge_device(dev.id):
+                    added.extend(
+                        DanfossSensor(coordinator, dev.id, desc) for desc in COMPANION_HEAD_SENSORS
+                    )
+                else:
+                    continue  # a Zigbee2MQTT head (or not yet known as a cloud one): nothing
+                known_devices.add(dev.id)
             if added:
                 async_add_entities(added)
 
         entry.async_on_unload(companion.async_add_listener(_sync_companion_devices))
+        _sync_companion_devices()
 
 
 class DanfossLocalSensor(DanfossLocalEntity, SensorEntity):
