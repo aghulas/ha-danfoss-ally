@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Boiler relays under their own home
+## Unreleased — Side panel navigation, relays under their own home
 
 **Fixed**
 
@@ -8,6 +8,13 @@
   relay-to-room linkage is empty, so with several homes every relay fell back to the first one. The
   relay's own home (published per device by `danfoss2mqtt`) now wins; the vote of the linked rooms
   is only the fallback when that home is unknown.
+
+**Added**
+
+- Side panel: navigation (contract §8.2). Every room tile is a link to a room page (`/room/<id>`
+  under the panel URL) with a breadcrumb back to the building; the browser's back button and a
+  copied link work. A grouped room's page embeds the room card unchanged (same reads, actions and
+  rules); a single-head room's page is read-only. The panel adds no write path of its own.
 
 ## 2.0.10 — Direct-cloud onboarding with email, password and country only
 
@@ -28,10 +35,6 @@
 
 **Added**
 
-- Side panel: navigation (contract §8.2). Every room tile is a link to a room page (`/room/<id>`
-  under the panel URL) with a breadcrumb back to the building; the browser's back button and a
-  copied link work. A grouped room's page embeds the room card unchanged (same reads, actions and
-  rules); a single-head room's page is read-only. The panel adds no write path of its own.
 - `pydanfoss-cloud`: `derive_ch_key`, `app_sign_key`, `generate_device_id`, `app_install_material`.
 
 **Docs**
