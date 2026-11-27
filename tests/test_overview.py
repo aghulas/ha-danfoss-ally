@@ -253,6 +253,25 @@ def test_relay_home_majority_vote_and_ambiguity():
     assert ops._relay_home_gid(coord, relay("r3"), homes, by_name) == "h1"
 
 
+def test_relay_home_is_its_own_home_when_known():
+    """Regression (v2 Companion, 2026-11-27): ``relay_rooms`` is empty there, so with two homes
+    every relay was listed under the first one. The relay's own home (per-home device list,
+    published by ``danfoss2mqtt`` as ``danfoss.home_id``) is exact and wins over the room vote."""
+    coord = _TwoHomeCoord()
+    coord.relay_rooms = {}  # Companion view: no relay -> room linkage
+    coord.device_home.update({"r": "h1", "r2": "h2"})
+    data = ops.overview_payload({DATA_COORDINATOR: coord})
+    by_home = {h["gid"]: [r["device_id"] for r in h["relays"]] for h in data["homes"]}
+    assert by_home == {"h1": ["r"], "h2": ["r2"]}
+    # The exact home wins even against a contrary vote; an unknown home falls back to the vote.
+    homes = ["h1", "h2"]
+    by_name = ops._home_by_room_name(coord)
+    coord.relay_rooms = {"r2": [{"room_id": 9001, "name": "Salle 1", "linked": True}]}
+    assert ops._relay_home_gid(coord, coord.data["r2"], homes, by_name) == "h2"
+    coord.device_home["r2"] = "gone"
+    assert ops._relay_home_gid(coord, coord.data["r2"], homes, by_name) == "h1"
+
+
 # --- Single-head rooms (a head with no schedule-group): listed and counted (§3.6) --------------
 
 

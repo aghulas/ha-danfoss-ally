@@ -226,7 +226,12 @@ def _relay_home_gid(
     home_gids: list[str],
     home_by_name: dict[str, str | None],
 ) -> str | None:
-    """Home of a boiler relay, by majority vote of the rooms that drive it.
+    """Home of a boiler relay: its own home when known, else a vote of the rooms that drive it.
+
+    The per-home device list (``head_home``) is exact and wins: the direct-cloud coordinator reads
+    it from the account, and ``danfoss2mqtt`` publishes it per device (``danfoss.home_id``). It is
+    the only source under the v2 Companion, whose ``relay_rooms`` is empty: without it every relay
+    fell back to the first home. The vote below is the fallback when that home is unknown.
 
     The relay -> room link (``relay_rooms``) carries Tuya *room* ids (type 4), a different id space
     from the schedule *groups* (type 5) that ``home_of`` knows, so rooms are matched by name (the
@@ -237,6 +242,9 @@ def _relay_home_gid(
     """
     if len(home_gids) == 1:
         return home_gids[0]
+    own = coordinator.head_home(relay.id)
+    if own in home_gids:
+        return own
     listed = coordinator.relay_rooms.get(relay.id, [])
     voters = [r for r in listed if r.get("linked")] or listed
     votes: dict[str, int] = {}
