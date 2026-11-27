@@ -1,7 +1,10 @@
 """Config flow and options flow.
 
-Path 1a: the app account's credentials (email/password login) + installation material captured
-once (sign_key, deviceId, chKey - see README). The login validates the credentials AND the secrets
+Path 1a: the app account's credentials (email/password login) are enough. The installation material
+the Tuya mobile API requires (sign_key, deviceId, chKey) is derived by the integration itself
+(``api/_tuya/install.py``, see docs/install-material.md): app-wide constants plus a deviceId
+generated once and stored in the entry. A manual entry path (``cloud_secrets``) stays available for
+the case where the built-in constants are refused (new app build). The login validates everything
 at once. Session renewal is handled by the client (the password is kept in the entry). When the
 login itself is refused (password changed, installation secrets no longer valid), the coordinator
 raises ``ConfigEntryAuthFailed`` and HA starts the ``reauth`` step below: same account, new
@@ -28,7 +31,14 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
-from .api import MQTT_CANDIDATE_DPS, CloudAuthError, CloudClient, CloudError, write_allowed
+from .api import (
+    MQTT_CANDIDATE_DPS,
+    CloudAuthError,
+    CloudClient,
+    CloudError,
+    app_install_material,
+    write_allowed,
+)
 from .const import (
     CONF_CH_KEY,
     CONF_CLOUD_MQTT_PROBE,
@@ -91,6 +101,10 @@ def _schema(schema: vol.Schema) -> Any:
 
 # Password and installation secrets are typed in a masked field, never shown on screen.
 _SECRET = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+
+# Account-step checkbox (not stored): type the installation secrets by hand instead of deriving
+# them.
+CONF_MANUAL_SECRETS = "manual_secrets"
 
 # Installation secrets the reauth step may replace (left empty = keep the entry's value).
 _INSTALL_SECRETS = (CONF_SIGN_KEY, CONF_DEVICE_ID, CONF_CH_KEY)
@@ -169,7 +183,7 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    # Account step's answers, kept between the two cloud steps (account -> installation secrets).
+    # Account step's answers, kept for the optional manual installation-secrets step.
     _cloud_account: dict[str, Any]
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> Any:
@@ -180,11 +194,13 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_cloud(self, user_input: dict[str, Any] | None = None) -> Any:
-        """v1 direct cloud setup, step 1/2: the app account (email, password, country).
+        """v1 direct cloud setup: the app account (email, password, country) is all that is asked.
 
         The datacenter is derived from the country (CONF_REGION defaults to "auto"); an advanced
-        override stays available. The installation secrets are asked on the next step so the account
-        details and the one-time captured secrets never crowd the same form.
+        override stays available. The installation material (sign_key, deviceId, chKey) is derived
+        by the integration (app constants + a deviceId generated here, once) and validated together
+        with the account by a real login. Ticking "enter the installation secrets manually" goes to
+        the ``cloud_secrets`` step instead (fallback when the built-in constants are refused).
         """
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -198,7 +214,18 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                     user_input[CONF_COUNTRY_CODE], user_input.get(CONF_REGION)
                 ),
             }
-            return await self.async_step_cloud_secrets()
+            if user_input.get(CONF_MANUAL_SECRETS):
+                return await self.async_step_cloud_secrets()
+            material = app_install_material()
+            data = {
+                **self._cloud_account,
+                CONF_SIGN_KEY: material["sign_key"],
+                CONF_DEVICE_ID: material["device_id"],
+                CONF_CH_KEY: material["ch_key"],
+            }
+            errors = await self._async_validate_cloud(data)
+            if not errors:
+                return self.async_create_entry(title=data[CONF_USERNAME], data=data)
 
         schema = vol.Schema(
             {
@@ -206,44 +233,49 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_PASSWORD): _SECRET,
                 vol.Required(CONF_COUNTRY_CODE, default=DEFAULT_COUNTRY_CODE): _country_selector(),
                 vol.Required(CONF_REGION, default=REGION_AUTO): _region_selector(),
+                vol.Optional(CONF_MANUAL_SECRETS, default=False): bool,
             }
         )
         return self.async_show_form(step_id="cloud", data_schema=_schema(schema), errors=errors)
 
-    async def async_step_cloud_secrets(self, user_input: dict[str, Any] | None = None) -> Any:
-        """v1 direct cloud setup, step 2/2: the one-time installation secrets.
+    async def _async_validate_cloud(self, data: dict[str, Any]) -> dict[str, str]:
+        """Validate account + installation material by a real login; return the form errors."""
+        client = CloudClient(
+            username=data[CONF_USERNAME],
+            password=data[CONF_PASSWORD],
+            country_code=data[CONF_COUNTRY_CODE],
+            sign_key=data[CONF_SIGN_KEY],
+            device_id=data[CONF_DEVICE_ID],
+            ch_key=data[CONF_CH_KEY],
+            region=data[CONF_REGION],
+            # Validate with the distinct deviceId (the runtime default), so even setup keeps
+            # its own Tuya session rather than briefly stealing the app's / MCP's.
+            distinct_device_id=DEFAULT_DISTINCT_DEVICE_ID,
+        )
+        try:
+            await client.async_validate()
+        except CloudAuthError:
+            return {"base": "invalid_auth"}
+        except CloudError:
+            return {"base": "cannot_connect"}
+        except Exception:  # noqa: BLE001 - config_flow robustness
+            _LOGGER.exception("Unexpected error while validating the Danfoss Ally account")
+            return {"base": "unknown"}
+        await client.async_close()
+        return {}
 
-        sign_key / device_id / ch_key are the device-registration material captured once from the
-        app's traffic (see the documentation). They cannot be derived from the account, so the three
-        are required; the account+secrets are validated together by a real login before the entry is
-        created. Nothing typed here is logged.
+    async def async_step_cloud_secrets(self, user_input: dict[str, Any] | None = None) -> Any:
+        """Fallback: installation secrets typed by hand (captured from the app's traffic).
+
+        Only reached when the user asks for it on the account step: normally the integration derives
+        sign_key / device_id / ch_key itself. Kept for the case where the built-in app constants are
+        refused (e.g. rotated by a new app build). Nothing typed here is logged.
         """
         errors: dict[str, str] = {}
         if user_input is not None:
             data = {**self._cloud_account, **user_input}
-            client = CloudClient(
-                username=data[CONF_USERNAME],
-                password=data[CONF_PASSWORD],
-                country_code=data[CONF_COUNTRY_CODE],
-                sign_key=data[CONF_SIGN_KEY],
-                device_id=data[CONF_DEVICE_ID],
-                ch_key=data[CONF_CH_KEY],
-                region=data[CONF_REGION],
-                # Validate with the distinct deviceId (the runtime default), so even setup keeps
-                # its own Tuya session rather than briefly stealing the app's / MCP's.
-                distinct_device_id=DEFAULT_DISTINCT_DEVICE_ID,
-            )
-            try:
-                await client.async_validate()
-            except CloudAuthError:
-                errors["base"] = "invalid_auth"
-            except CloudError:
-                errors["base"] = "cannot_connect"
-            except Exception:  # noqa: BLE001 - config_flow robustness
-                _LOGGER.exception("Unexpected error while validating the Danfoss Ally account")
-                errors["base"] = "unknown"
-            else:
-                await client.async_close()
+            errors = await self._async_validate_cloud(data)
+            if not errors:
                 return self.async_create_entry(title=data[CONF_USERNAME], data=data)
 
         schema = vol.Schema(

@@ -230,7 +230,8 @@ the head in a room, which is positive by nature.
 
 The `danfoss_ally_cloud` integration and the MCP connector `danfoss-ally-mcp` are configured from
 the **same installation material captured from the app**: `deviceId`, `sign_key` and `chKey` (see
-README, "Installation secrets"). The decisive question was what the Tuya server keys a path-1a
+README, "Installation secrets"; since the derived material of `docs/install-material.md`, new
+entries build it themselves and nothing is captured). The decisive question was what the Tuya server keys a path-1a
 session on.
 
 ### What keys a session: the `deviceId` request param (proven)

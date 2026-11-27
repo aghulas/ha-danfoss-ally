@@ -54,16 +54,17 @@ Zigbee2MQTT-format topics (`zigbee2mqtt` and/or `danfoss2mqtt`).
 
 The configuration screen asks for:
 
-- **Username / Password**: the Danfoss Ally / Smart Life app account.
-- **Country calling code**: e.g. `33` for France.
-- **Datacenter**: `eu`, `us`, `cn` or `in` (France → `eu`).
-- **Installation secrets**: `sign_key`, `device_id` (`deviceId`), `ch_key` (`chKey`).
+- **Email / Password**: the Danfoss Ally app account.
+- **Country**: the datacenter is derived from it (an advanced override stays available).
 
-The three installation secrets are specific to one installation of the app and are **captured
-once** (they stay stable afterwards). They are essential to the signature and encryption of the Tuya
-mobile API; the server rejects an unknown `chKey`. The capture method is described in `docs/` (native
-hook / network capture). These values, the password and the session material (`sid`/`ecode`) are
-**secrets**: they are never written to the logs or the diagnostics (see `diagnostics.py`).
+Nothing has to be captured from the app. The signing material the Tuya mobile API requires
+(`sign_key`, `deviceId`, `chKey`) is derived by the integration itself — app-wide constants plus a
+device id generated once for the entry — see
+[`docs/install-material.md`](docs/install-material.md). An advanced checkbox, *Enter the
+installation secrets manually*, keeps the former three-field entry as a fallback if a future app
+version makes the built-in constants obsolete. The password and the session material
+(`sid`/`ecode`) are **secrets**: they are never written to the logs or the diagnostics (see
+`diagnostics.py`).
 
 If the account later refuses the sign-in (password changed, installation secrets no longer valid),
 Home Assistant shows a **Re-authenticate** prompt for the entry: enter the new password of the same
@@ -72,7 +73,7 @@ is no need to delete and re-add it.
 
 > **Coexistence with other path-1a clients.** The Tuya server keys a session on the `deviceId`
 > request parameter, not on the account or the `chKey`. The integration therefore gives itself a
-> **distinct, stable `deviceId`** derived from the captured one (same `sign_key`/`chKey`) so it
+> **distinct, stable `deviceId`** of its own (same `sign_key`/`chKey`) so it
 > keeps its own session and does not log out the Danfoss app or the MCP connector `danfoss-ally-mcp`
 > (and vice-versa). This is on by default (option *Use a dedicated device id*); turn it off only to
 > reproduce the legacy shared-session behaviour. Detail in

@@ -3,7 +3,7 @@
 Built on ``sign`` (HMAC-SHA256) + ``postdata`` (AES-GCM). Endpoint per datacenter (EU/US/CN/IN).
 The ``User-Agent: Thing-UA=...`` header is mandatory. Material required:
 - SESSION: ``sid`` and ``ecode`` from the login (stable as long as the app stays logged in).
-- INSTALLATION: ``sign_key``, ``deviceId``, ``chKey`` (captured once, stable).
+- INSTALLATION: ``sign_key``, ``deviceId``, ``chKey`` (derived, see ``install.py``; stable).
 
 Reverse engineering and login flow verified on real hardware (see danfoss-ally-mcp/tuya/
 client_http.py). Synchronous calls (requests): the HA integration runs them in the executor.

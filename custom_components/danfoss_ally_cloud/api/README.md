@@ -6,7 +6,7 @@ no developer app and no shared quota), extracted from the Home Assistant integra
 
 It provides:
 
-- `CloudClient` — email/password login (+ installation secrets), list of heads, guarded writes
+- `CloudClient` — email/password login (installation material derived by `_tuya/install.py`, or given explicitly), list of heads, guarded writes
   (`tuya.m.custom.wkf.settings.change`, with the head's gateway as `gw_id`), room writes, schedules,
   holidays, rooms, robust re-authentication, optional distinct `deviceId`
   (`derive_distinct_device_id`) so a client does not share its Tuya session with the app.
