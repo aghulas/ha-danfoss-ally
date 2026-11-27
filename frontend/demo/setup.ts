@@ -238,6 +238,26 @@ const OVERVIEW: FleetOverview = {
           setpoint: 20,
         },
       ],
+      sensors: [
+        {
+          device_id: "sensor-synth-1",
+          name: "Capteur Salle 1",
+          online: true,
+          room_id: "13000000",
+          temperature: 20.1,
+          humidity: 47,
+          battery: 88,
+        },
+        {
+          device_id: "sensor-synth-2",
+          name: "Capteur couloir",
+          online: false,
+          room_id: null,
+          temperature: null,
+          humidity: null,
+          battery: 52,
+        },
+      ],
       relays: [
         {
           device_id: "relay-synth",

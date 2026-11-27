@@ -278,15 +278,26 @@ cached state** — no extra cloud call (added in 0.6.0, axis D).
       ],
       "relays": [
         { "device_id": "<devId>", "name": "Boiler relay", "on": true, "online": true, "linked_rooms": 2 }
+      ],
+      "sensors": [
+        { "device_id": "<devId>", "name": "Room sensor", "online": true, "room_id": "13000000",
+          "temperature": 19.5, "humidity": 48.0, "battery": 80.0 }
       ]
     }
   ],
   "totals": {
     "homes": 1, "gateways": 1, "rooms": 2, "heads": 4,
-    "offline": 0, "low_battery": 1, "heating": 1, "faults": 1, "relays_on": 1
+    "offline": 0, "low_battery": 1, "heating": 1, "faults": 1, "relays_on": 1, "sensors": 1
   }
 }
 ```
+- **Room sensors** (`sensors`, unreleased): every room sensor of the fleet, under its home (its
+  own home from the per-home device list, else its room's, else the first home: kept visible).
+  `room_id` is the `id` of the room it measures **when the coordinator knows the link**: the v2
+  Companion does (a native room names its sensor in `bridge/rooms`, a Companion-managed room in
+  its configuration); the direct-cloud coordinator reads no such link, so `room_id` is `null`
+  there. It is never guessed from a name. Offline, `temperature` and `humidity` are `null` (the
+  cloud keeps the last reading, which is stale); `battery` is kept. Read only.
 - **Two kinds of room** (`kind`). `group`: a schedule-group (type 5, `id` = `group_id`), the rooms
   of two heads or more. `single_head` (added after 1.2.0): a head that belongs to **no** schedule-group
   (`id` = `head_id` = its `devId`). A room of the app with a single head has no schedule-group, so
@@ -1016,7 +1027,11 @@ sidebar entry; `require_admin` is false (read-only view). Reads `overview` (§3.
   read-only and says so. A room that is no longer in `overview` shows a notice and the breadcrumb.
 - **Elements** (unreleased): the panel also reads `rooms` (§3.4) for the heads of each room. A
   room page lists its heads (a single-head room: its one head, from `overview`), each a link.
-  Heads, boiler relays and gateways each have a page: `/device/<id>` (`<id>` = the device id of
+  It also lists the room sensors that measure it (`sensors` of §3.6 whose `room_id` is the
+  room); a sensor with no room, or whose room is not in its home, is linked from its home on the
+  building view instead, so none is invisible. A sensor page shows online, temperature and
+  humidity (only when not `null`) and battery, with a breadcrumb through its room when known.
+  Heads, room sensors, boiler relays and gateways each have a page: `/device/<id>` (`<id>` = the device id of
   `overview` / `rooms`), or `/room/<room>/device/<id>` for a head reached from its room (same
   page; the breadcrumb always shows the head's actual room, whatever the address says). Relays
   and gateways are linked from their home on the building view.

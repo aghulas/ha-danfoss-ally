@@ -1115,6 +1115,33 @@ describe("panneau — éléments", () => {
     expect(calls).toEqual([]);
   });
 
+  it("capteurs de pièce : dans leur pièce, en pastille sans pièce, et leur page", () => {
+    const sensors = [
+      { device_id: "s1", name: "Capteur salle", online: true, room_id: "g1", temperature: 19.5, humidity: 48, battery: 80 },
+      { device_id: "s2", name: "Capteur libre", online: false, room_id: null, temperature: null, humidity: null, battery: 60 },
+    ];
+    const withSensors = (path: string): Internals => {
+      const el = panel(path);
+      el._overview = { ...overview, homes: [{ ...overview.homes[0], sensors }] };
+      return el;
+    };
+    const fleet = templateText(withSensors("").render());
+    expect(fleet).toContain("/p/device/s2"); // sans pièce : pastille sur le bâtiment
+    expect(fleet).not.toContain("/p/device/s1"); // rangé dans sa pièce
+    const room = templateText(withSensors("/room/g1").render());
+    expect(room).toContain("/p/device/s1");
+    expect(room).toContain("Room sensor");
+    expect(room).toContain("Humidity 48%");
+    const page = templateText(withSensors("/device/s1").render());
+    expect(page).toContain("/p/room/g1"); // fil d'Ariane vers sa pièce
+    expect(page).toContain("19.5 °C");
+    // Hors ligne : ni température ni humidité (périmées), la batterie reste.
+    const off = templateText(withSensors("/device/s2").render());
+    expect(off).toContain("Offline");
+    expect(off).not.toContain("Humidity");
+    expect(off).toContain("Battery 60%");
+  });
+
   it("un élément disparu se dégrade avec le fil d'Ariane", () => {
     expect(templateText(panel("/device/gone").render())).toContain(
       "no longer in the fleet overview",
