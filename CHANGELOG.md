@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Direct-cloud onboarding with email, password and country only
+## 2.0.10 — Direct-cloud onboarding with email, password and country only
 
 **Changed**
 
@@ -11,10 +11,19 @@
   and reconfigure are unchanged. See `docs/install-material.md`.
 - `danfoss2mqtt` (`bridge_daemon.py`): `sign_key` / `ch_key` default to the derived values when a
   username and password are configured; explicit values still override.
+- `config_flow.py` onboarding UX: country is now a searchable **name** dropdown (a curated ~37-country
+  table in `const.py`) instead of a raw calling code, and the datacenter is derived from the country
+  automatically (`CONF_REGION` defaults to `auto`, resolved via `COUNTRY_TO_REGION`), with an explicit
+  datacenter kept as an advanced override. `reconfigure` uses the same selectors; `strings.json` and
+  the `en`/`fr` translations gained helper descriptions.
 
 **Added**
 
 - `pydanfoss-cloud`: `derive_ch_key`, `app_sign_key`, `generate_device_id`, `app_install_material`.
+
+**Docs**
+
+- Corrected the `CLAUDE.md` note: the repository is public, not private.
 
 ## 2.0.9 — Fix Zigbee2MQTT `weekly_schedule` `dayofweek` encoding
 
