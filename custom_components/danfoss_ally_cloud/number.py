@@ -27,6 +27,7 @@ outside a comfort slot a comfort write causes a few minutes of heat demand.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from homeassistant.components.number import (
     NumberEntity,
@@ -73,7 +74,12 @@ from .const import (
     WRITE_VERIFIED_PRODUCTS,
 )
 from .coordinator import DanfossCoordinator, DanfossLocalCoordinator
-from .entity import DanfossEntity, DanfossLocalTrialEntity, remove_registry_entries
+from .entity import (
+    DanfossEntity,
+    DanfossLocalTrialEntity,
+    companion_write_attrs,
+    remove_registry_entries,
+)
 from .local_write import async_local_write_setting, local_trial_split
 from .mqtt_companion import CompanionBridgeError
 from .mqtt_write import (  # noqa: F401 - block helpers re-exported
@@ -454,16 +460,13 @@ class _HeadMqttNumber(DanfossEntity, NumberEntity):
         return super().available and self._write_path(self.device) != PATH_NONE
 
     @property
-    def extra_state_attributes(self) -> dict[str, str | bool]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         dev = self.device
         path = self._write_path(dev)
-        attrs: dict[str, str | bool] = {"write_path": path}
+        attrs: dict[str, Any] = {"write_path": path}
         if path == "mqtt_companion" and dev is not None:
-            attrs["write_scope"] = "head"
-            companion = getattr(self.coordinator, "companion", None)
-            route = companion.device_route.get(dev.id) if companion is not None else None
-            if route is not None:
-                attrs["mqtt_bridge"] = route[0]
+            # A grouped cloud-bridge head's bound is written on its room: every head takes it.
+            attrs.update(companion_write_attrs(self.coordinator, dev))
         elif path == PATH_MQTT:
             attrs["write_scope"] = "head"
             if any(dp in MQTT_CANDIDATE_DPS for dp in self._dps):

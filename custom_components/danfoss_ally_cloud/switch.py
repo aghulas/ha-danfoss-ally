@@ -73,6 +73,7 @@ from .entity import (
     DanfossEntity,
     DanfossLocalTrialEntity,
     DanfossTrialEntity,
+    companion_write_attrs,
     remove_registry_entries,
 )
 from .local_write import async_local_write_setting, local_trial_split
@@ -461,17 +462,7 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
         path = self._write_path(dev)
         attrs: dict[str, Any] = {"write_path": path}
         if path == PATH_COMPANION and dev is not None:
-            attrs["write_scope"] = "head"
-            companion = getattr(self.coordinator, "companion", None)
-            route = companion.device_route.get(dev.id) if companion is not None else None
-            if route is not None:
-                attrs["mqtt_bridge"] = route[0]
-            group_id = self.coordinator.group_of(dev.id)
-            if companion is not None and companion.is_cloud_bridge_device(dev.id) and group_id:
-                # The cloud bridge writes a grouped head's setting on its room's group publish:
-                # every head of the room takes it, not this one alone (contract §4.2).
-                attrs["write_scope"] = "room"
-                attrs["room_head_count"] = len(self.coordinator.room_members(group_id))
+            attrs.update(companion_write_attrs(self.coordinator, dev))
         elif path == PATH_ROOM and dev is not None:
             group_id = self.coordinator.group_of(dev.id)
             attrs["write_scope"] = "room"
