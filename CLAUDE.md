@@ -10,8 +10,8 @@ compatibility.
 
 - **HA domain**: `danfoss_ally_cloud` (distinct from MTrab's `danfoss_ally`, to coexist; its brand
   icons ship in `custom_components/danfoss_ally_cloud/brand/`).
-- **Repo**: `aghulas/ha-danfoss-ally` (private at first, intended for the HACS Marketplace once
-  hardened). Also packages `custom_components/danfoss_ally_cloud/api/` as `pydanfoss-cloud`
+- **Repo**: `aghulas/ha-danfoss-ally` (**public** on GitHub: every pushed branch and commit is
+  visible; intended for the HACS Marketplace once hardened). Also packages `custom_components/danfoss_ally_cloud/api/` as `pydanfoss-cloud`
   (`pyproject.toml`, including the standalone `danfoss2mqtt` CLI daemon).
 - Public release is intended: bring features to the community **and** exercise the code on other
   installs to make the assumptions more reliable.
