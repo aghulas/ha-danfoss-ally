@@ -381,6 +381,16 @@ def overview_payload(store: dict) -> dict:
                 "linked_rooms": sum(
                     1 for r in coordinator.relay_rooms.get(d.id, []) if r.get("linked")
                 ),
+                # Names of the rooms that drive the relay, for its page (contract §3.6). These are
+                # Tuya *room* names, not schedule-group ids: shown as text, never used as targets.
+                "linked_room_names": sorted(
+                    (
+                        str(r.get("name"))
+                        for r in coordinator.relay_rooms.get(d.id, [])
+                        if r.get("linked") and r.get("name")
+                    ),
+                    key=str.casefold,
+                ),
             }
             for d in relays
             if _relay_home_gid(coordinator, d, home_gids, home_by_name) == gid

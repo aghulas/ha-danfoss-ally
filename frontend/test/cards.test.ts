@@ -1067,6 +1067,25 @@ describe("panneau — éléments", () => {
     expect(text).toContain("2 linked rooms");
   });
 
+  it("la page d'un relais liste les pièces qui le pilotent, en texte", () => {
+    const el = panel("/device/r1");
+    el._overview = {
+      ...overview,
+      homes: [
+        {
+          ...overview.homes[0],
+          relays: [{ ...overview.homes[0].relays[0], linked_room_names: ["Salle 1", "Hall"] }],
+        },
+      ],
+    };
+    const text = templateText(el.render());
+    expect(text).toContain("Rooms driving this relay");
+    expect(text).toContain("Hall");
+    expect(text).not.toContain("/p/room/Hall"); // pas un lien : noms de l'app, pas des ids
+    // Backend plus ancien (pas de noms) : la section est absente.
+    expect(templateText(panel("/device/r1").render())).not.toContain("Rooms driving this relay");
+  });
+
   it("une passerelle dit ce qu'elle porte", () => {
     expect(templateText(panel("/device/gw1").render())).toContain(
       "Carries 2 thermostat(s) and 1 relay(s)",
@@ -1135,6 +1154,12 @@ describe("panneau — éléments", () => {
     const page = templateText(withSensors("/device/s1").render());
     expect(page).toContain("/p/room/g1"); // fil d'Ariane vers sa pièce
     expect(page).toContain("19.5 °C");
+    // Une moyenne non arrondie publiée par un pont est arrondie à l'affichage.
+    const raw = withSensors("/device/s1");
+    raw._overview.homes[0].sensors[0] = { ...sensors[0], temperature: 16.64, humidity: 47.6 };
+    const rawText = templateText(raw.render());
+    expect(rawText).toContain("16.6 °C");
+    expect(rawText).toContain("Humidity 48%");
     // Hors ligne : ni température ni humidité (périmées), la batterie reste.
     const off = templateText(withSensors("/device/s2").render());
     expect(off).toContain("Offline");

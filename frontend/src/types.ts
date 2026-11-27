@@ -267,6 +267,8 @@ export interface FleetRelay {
   on: boolean | null;
   online: boolean;
   linked_rooms: number;
+  /** Noms des pièces liées (optionnel : absent d'un backend plus ancien). Texte seulement. */
+  linked_room_names?: string[];
 }
 
 /**

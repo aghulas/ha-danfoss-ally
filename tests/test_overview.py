@@ -230,6 +230,8 @@ def test_overview_relays_attached_to_their_own_home():
     assert by_home == {"h1": ["r"], "h2": ["r2"]}
     r2 = data["homes"][1]["relays"][0]
     assert r2["linked_rooms"] == 3 and r2["online"] is False
+    # Linked rooms only, sorted without case; the unlinked "Salle 1" is left out.
+    assert r2["linked_room_names"] == ["D-0 Kitchen", "E-0 Hall", "Unknown room"]
 
 
 def test_overview_offline_relay_not_counted_on():
