@@ -27,9 +27,11 @@ async def async_setup_entry(
 ) -> None:
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator: DanfossCoordinator = data[DATA_COORDINATOR]
+    companion: MqttCompanionCoordinator | None = data.get("companion")
     entities: list[BinarySensorEntity] = []
     for dev in coordinator.data.values():
-        if not dev.is_head:
+        # Direct cloud: every head. Companion: the open window only, added below as it arrives.
+        if not dev.is_head or companion is not None:
             continue
         entities.append(DanfossConnectivity(coordinator, dev.id))
         entities.append(DanfossWindow(coordinator, dev.id))
@@ -58,7 +60,6 @@ async def async_setup_entry(
     link: CloudMqttLink | None = data.get(DATA_MQTT_LINK)
     if link is not None:
         entities.append(DanfossCloudMqttConnectivity(entry.entry_id, link))
-    companion: MqttCompanionCoordinator | None = data.get("companion")
     if companion is not None:
         for prefix in companion.prefixes:
             entities.append(DanfossBridgeConnectivity(entry.entry_id, companion, prefix))
@@ -66,20 +67,30 @@ async def async_setup_entry(
 
     if companion is not None:
         # The Companion fleet arrives over MQTT AFTER the platforms are set up: a boiler relay
-        # known only later had no on/off entity (and no device). Add it when it appears.
-        known_relays: set[str] = {dev.id for dev in coordinator.data.values() if dev.is_relay}
+        # known only later had no on/off entity (and no device). Add it when it appears. A head
+        # served by a cloud-only bridge gets its open-window entity the same way (a Zigbee2MQTT
+        # head already has Zigbee2MQTT's); its connectivity is its availability, and heat demand /
+        # mounting mode stay on the room and the side panel.
+        known: set[str] = {dev.id for dev in coordinator.data.values() if dev.is_relay}
 
         @callback
-        def _sync_companion_relays() -> None:
+        def _sync_companion_devices() -> None:
             added: list[BinarySensorEntity] = []
             for dev in list(coordinator.data.values()):
-                if dev.is_relay and dev.id not in known_relays:
-                    known_relays.add(dev.id)
+                if dev.id in known:
+                    continue
+                if dev.is_relay:
                     added.append(DanfossRelay(coordinator, dev.id))
+                elif dev.is_head and companion.is_cloud_bridge_device(dev.id):
+                    added.append(DanfossWindow(coordinator, dev.id))
+                else:
+                    continue
+                known.add(dev.id)
             if added:
                 async_add_entities(added)
 
-        entry.async_on_unload(companion.async_add_listener(_sync_companion_relays))
+        entry.async_on_unload(companion.async_add_listener(_sync_companion_devices))
+        _sync_companion_devices()
 
 
 class DanfossBridgeConnectivity(BinarySensorEntity):

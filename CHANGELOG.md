@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Head readings under the Companion
+
+**Added**
+
+- v2 Companion: a head served by `danfoss2mqtt` gets its temperature, battery, valve opening and
+  open-window entities. Such heads had none (only their four setting entities), while they have
+  no other source of entities. A Zigbee2MQTT head gets none: Zigbee2MQTT already provides them,
+  so they would be duplicates. The fault sensor is not created under the Companion (faults are
+  Repairs issues and are shown on the side panel). On a fleet of about 100 cloud heads this adds
+  about 400 entities.
+
 ## 2.0.14 — Entities for room sensors and relays under the Companion
 
 **Fixed**

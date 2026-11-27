@@ -1011,3 +1011,89 @@ async def test_companion_room_sensors_and_relays_get_entities_when_they_arrive(
     )
     await hass.async_block_till_done()
     assert len(registry.entities) == before
+
+
+async def test_companion_cloud_heads_get_their_readings_z2m_heads_do_not(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A head served by danfoss2mqtt has no other source of entities: it gets its temperature,
+    battery, valve opening and open-window entities. A Zigbee2MQTT head already has
+    Zigbee2MQTT's own, so none is created for it (no duplicate)."""
+    from homeassistant.helpers import entity_registry as er
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from custom_components.danfoss_ally_cloud.const import (
+        CONF_CONNECTION_MODE,
+        CONF_MQTT_PREFIXES,
+        CONNECTION_MODE_MQTT_COMPANION,
+        DOMAIN,
+    )
+
+    monkeypatch.setattr(mqtt_mod, "async_wait_for_mqtt_client", AsyncMock(return_value=True))
+    monkeypatch.setattr(mqtt_mod, "async_subscribe", AsyncMock(return_value=lambda: None))
+    monkeypatch.setattr(mqtt_mod, "async_publish", AsyncMock())
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Companion",
+        data={
+            CONF_CONNECTION_MODE: CONNECTION_MODE_MQTT_COMPANION,
+            CONF_MQTT_PREFIXES: "zigbee2mqtt,danfoss2mqtt",
+        },
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    comp: MqttCompanionCoordinator = hass.data[DOMAIN][entry.entry_id]["companion"]
+    cloud = _head("bf-cloud-1", "Salle Cloud")
+    comp.process_mqtt_message("danfoss2mqtt/bridge/state", '{"state": "online"}')
+    comp.process_mqtt_message(
+        "danfoss2mqtt/bridge/devices", json.dumps([encode_z2m_descriptor(cloud)])
+    )
+    comp.process_mqtt_message(
+        f"danfoss2mqtt/{cloud.name}",
+        json.dumps(
+            {
+                "local_temperature": 19.5,
+                "battery": 64.0,
+                "pi_heating_demand": 12.0,
+                "window_open": True,
+            }
+        ),
+    )
+    comp.process_mqtt_message(f"danfoss2mqtt/{cloud.name}/availability", "online")
+    comp.process_mqtt_message(
+        "zigbee2mqtt/bridge/devices",
+        json.dumps(
+            [
+                {
+                    "ieee_address": "0x842712fffe86dfbd",
+                    "friendly_name": "Salle Zigbee",
+                    "definition": {"vendor": "Danfoss", "model": "014G2461"},
+                }
+            ]
+        ),
+    )
+    comp.process_mqtt_message("zigbee2mqtt/Salle Zigbee", json.dumps({"local_temperature": 18.0}))
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+
+    def state_of(domain: str, unique_id: str) -> str | None:
+        entity_id = registry.async_get_entity_id(domain, DOMAIN, unique_id)
+        assert entity_id is not None, unique_id
+        st = hass.states.get(entity_id)
+        return st.state if st else None
+
+    assert float(state_of("sensor", "bf-cloud-1_temperature") or 0) == 19.5
+    assert float(state_of("sensor", "bf-cloud-1_battery") or 0) == 64.0
+    assert float(state_of("sensor", "bf-cloud-1_valve_opening") or 0) == 12.0
+    assert state_of("binary_sensor", "bf-cloud-1_window") == "on"
+    # Left out on purpose: the fault sensor, and every reading of the Zigbee2MQTT head.
+    assert registry.async_get_entity_id("sensor", DOMAIN, "bf-cloud-1_fault") is None
+    for uid in ("temperature", "battery", "valve_opening"):
+        assert registry.async_get_entity_id("sensor", DOMAIN, f"0x842712fffe86dfbd_{uid}") is None
+    assert (
+        registry.async_get_entity_id("binary_sensor", DOMAIN, "0x842712fffe86dfbd_window") is None
+    )
