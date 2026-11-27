@@ -357,8 +357,42 @@ function simulateJob(roomId: string, kind: string): WriteJob {
 
 // Pour voir la bannière de rechargement : mettre une version différente de celle
 // injectée au build, p. ex. `{ ...INFO, version: "9.9.9" }`.
+// Registres synthétiques : l'appareil HA d'une tête et celui de la pièce, avec quelques entités
+// (dont une indisponible), pour la page élément du panneau.
+const demoEntity = (
+  entity_id: string,
+  device_id: string,
+  name: string,
+  state: string,
+  unit: string | null,
+  category: string | null,
+) => ({
+  entry: { entity_id, device_id, platform: "danfoss_ally_cloud", entity_category: category },
+  state: {
+    entity_id,
+    state,
+    attributes: { friendly_name: name, ...(unit ? { unit_of_measurement: unit } : {}) },
+  },
+});
+const DEMO_ENTITIES = [
+  demoEntity("climate.salle_1_1", "dev-h1", "Salle 1 #1", "heat", null, null),
+  demoEntity("sensor.salle_1_1_battery", "dev-h1", "Salle 1 #1 Batterie", "86", "%", "diagnostic"),
+  demoEntity("sensor.salle_1_1_valve", "dev-h1", "Salle 1 #1 Ouverture de vanne", "35", "%", null),
+  demoEntity("number.salle_1_1_offset", "dev-h1", "Salle 1 #1 Décalage de consigne", "0.5", "°C", "config"),
+  demoEntity("switch.salle_1_1_child_lock", "dev-h1", "Salle 1 #1 Verrouillage enfant", "off", null, "config"),
+  demoEntity("switch.salle_1_1_preheat", "dev-h1", "Salle 1 #1 Préchauffe", "unavailable", null, "config"),
+  demoEntity("climate.salle_1", "dev-room", "Salle 1", "heat", null, null),
+  demoEntity("select.salle_1_mode", "dev-room", "Salle 1 Mode", "at_home", null, "config"),
+];
+
 const fakeHass: HassLike = {
   language: "fr",
+  devices: {
+    "dev-h1": { id: "dev-h1", name: "Salle 1 #1", identifiers: [["danfoss_ally_cloud", "head-synth-1"]] },
+    "dev-room": { id: "dev-room", name: "Salle 1", identifiers: [["danfoss_ally_cloud", "group_13000000"]] },
+  },
+  entities: Object.fromEntries(DEMO_ENTITIES.map((e) => [e.entry.entity_id, e.entry])),
+  states: Object.fromEntries(DEMO_ENTITIES.map((e) => [e.state.entity_id, e.state])),
   connection: {
     async subscribeMessage<T>(
       cb: (msg: T) => void,

@@ -128,6 +128,11 @@ export interface HassLike {
     service: string,
     data?: Record<string, unknown>,
   ) => Promise<unknown>;
+  /**
+   * État d'une entité mis en forme et traduit par Home Assistant (« Arrêt », « 21,5 °C »).
+   * Optionnelle (absente des vieux frontends, de la démo et des tests) : repli sur l'état brut.
+   */
+  formatEntityState?: (stateObj: HassEntityState) => string;
   // Fonction de localisation du frontend HA (clé -> texte). Optionnelle : repli en dur.
   localize?: (key: string, ...args: unknown[]) => string;
   /**
@@ -206,6 +211,8 @@ export interface HassDeviceEntry {
   area_id?: string | null;
   name?: string | null;
   name_by_user?: string | null;
+  /** Paires `[domaine, identifiant]` ; relie un appareil du panneau à son appareil HA. */
+  identifiers?: [string, string][];
 }
 
 /** Entrée du registre des zones (`hass.areas`). */
@@ -221,6 +228,9 @@ export interface FleetGateway {
   device_id: string;
   name: string;
   online: boolean;
+  /** Ce que la passerelle porte (optionnels : absents d'un backend plus ancien). */
+  head_count?: number;
+  relay_count?: number;
 }
 
 /**
