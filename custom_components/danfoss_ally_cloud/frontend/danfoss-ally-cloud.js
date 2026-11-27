@@ -730,6 +730,11 @@ const STRINGS = {
     panel_other_areas_hint: "Climate entities of other integrations, grouped by Home Assistant area. Read only.",
     panel_show_other_areas: "Other areas",
     panel_no_other_areas: "No area holds a thermostat of another integration.",
+    nav_breadcrumb: "Breadcrumb",
+    nav_building: "Building",
+    nav_heads_n: "{n} thermostat(s)",
+    nav_room_not_found: "This room is no longer in the fleet overview.",
+    nav_single_head_note: "This room has a single thermostat and no schedule group: it has no room-level setting. Its settings are those of the thermostat.",
     area_thermostats_n: "{n} thermostats",
     area_heating_n: "{n} heating"
   },
@@ -894,6 +899,11 @@ const STRINGS = {
     panel_other_areas_hint: "Entités climate des autres intégrations, regroupées par zone Home Assistant. Lecture seule.",
     panel_show_other_areas: "Autres zones",
     panel_no_other_areas: "Aucune zone ne contient de thermostat d'une autre intégration.",
+    nav_breadcrumb: "Fil d'Ariane",
+    nav_building: "Bâtiment",
+    nav_heads_n: "{n} tête(s)",
+    nav_room_not_found: "Cette pièce n'est plus dans la vue d'ensemble.",
+    nav_single_head_note: "Cette pièce n'a qu'une tête et pas de groupe-programme : elle n'a aucun réglage de pièce. Ses réglages sont ceux de la tête.",
     area_thermostats_n: "{n} thermostats",
     area_heating_n: "{n} en chauffe"
   }
@@ -3924,6 +3934,32 @@ function climateLine(room) {
   const left = temp === null ? "–" : degrees(temp);
   return setpoint === null ? left : `${left} → ${degrees(setpoint)}`;
 }
+function parsePath(path) {
+  const parts = (path ?? "").split("/").filter((p2) => p2 !== "");
+  if (parts.length === 2 && parts[0] === "room") {
+    try {
+      const roomId = decodeURIComponent(parts[1]);
+      if (roomId) {
+        return { view: "room", roomId };
+      }
+    } catch {
+    }
+  }
+  return { view: "fleet" };
+}
+const FLEET_PATH = "";
+function roomPath(roomId) {
+  return `/room/${encodeURIComponent(roomId)}`;
+}
+function findRoom(overview, roomId) {
+  for (const home of overview?.homes ?? []) {
+    const room = home.rooms.find((r2) => r2.id === roomId);
+    if (room) {
+      return { home, room };
+    }
+  }
+  return null;
+}
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __decorateClass = (decorators, target, key, kind) => {
@@ -3942,6 +3978,12 @@ let DanfossAllyPanel = class extends i {
     this._loaded = false;
     this._refreshing = false;
     this._showOtherAreas = readShowOtherAreas();
+    this._path = FLEET_PATH;
+  }
+  willUpdate(changed) {
+    if (changed.has("route")) {
+      this._path = this.route?.path ?? FLEET_PATH;
+    }
   }
   updated(changed) {
     if (changed.has("hass") && this.hass && !this._loaded) {
@@ -3968,32 +4010,67 @@ let DanfossAllyPanel = class extends i {
       this._refreshing = false;
     }
   }
+  /** Adresse d'un niveau, pour l'attribut `href` (clic milieu, copie du lien). */
+  _href(path) {
+    return this.route ? `${this.route.prefix}${path}` : "#";
+  }
+  /**
+   * Va à un niveau du panneau. Dans Home Assistant : entrée d'historique + événement
+   * `location-changed`, que le routeur de HA traduit en nouvelle `route` (le bouton
+   * retour du navigateur marche donc). Hors HA (démo, tests) : état interne seul.
+   */
+  _navigate(path, ev) {
+    const mouse = ev;
+    if (mouse && (mouse.ctrlKey || mouse.metaKey || mouse.shiftKey || mouse.button > 0)) {
+      return;
+    }
+    ev?.preventDefault();
+    if (path === this._path) {
+      return;
+    }
+    this._path = path;
+    if (this.route && typeof history !== "undefined" && typeof window !== "undefined") {
+      history.pushState(null, "", `${this.route.prefix}${path}`);
+      window.dispatchEvent(
+        new CustomEvent("location-changed", {
+          detail: { replace: false },
+          bubbles: true,
+          composed: true
+        })
+      );
+    }
+  }
   _toggleOtherAreas() {
     this._showOtherAreas = !this._showOtherAreas;
     writeShowOtherAreas(this._showOtherAreas);
   }
   render() {
     const overview = this._overview;
+    const view = parsePath(this._path);
+    if (view.view === "fleet") {
+      this._roomCard = void 0;
+      this._roomCardId = void 0;
+    }
     return b`
       <div class="page">
         <header class="bar">
           <h1>${t(this.hass, "panel_title")}</h1>
           <span class="bar-actions">
-            <button
-              class="refresh toggle ${this._showOtherAreas ? "on" : ""}"
-              role="switch"
-              aria-checked=${this._showOtherAreas ? "true" : "false"}
-              @click=${this._toggleOtherAreas}
-            >
-              ${t(this.hass, "panel_show_other_areas")}
-            </button>
+            ${view.view === "fleet" ? b`<button
+                  class="refresh toggle ${this._showOtherAreas ? "on" : ""}"
+                  role="switch"
+                  aria-checked=${this._showOtherAreas ? "true" : "false"}
+                  @click=${this._toggleOtherAreas}
+                >
+                  ${t(this.hass, "panel_show_other_areas")}
+                </button>` : A}
             <button class="refresh" @click=${this._refresh} ?disabled=${this._refreshing}>
               ${t(this.hass, "refresh")}
             </button>
           </span>
         </header>
-        ${overview ? this._renderBody(overview) : this._renderUnavailable()}
-        ${this._showOtherAreas ? this._renderOtherAreas() : A}
+        ${view.view === "room" ? this._renderRoomPage(overview, view.roomId) : b`${overview ? this._renderBody(overview) : this._renderUnavailable()}
+            ${this._showOtherAreas ? this._renderOtherAreas() : A}`}
         <footer class="foot">${t(this.hass, "version", { version: CARD_VERSION })}</footer>
       </div>
     `;
@@ -4051,8 +4128,13 @@ let DanfossAllyPanel = class extends i {
     const hint = headNameHint(room);
     const climate = climateLine(room);
     const title = hint ? `${room.name} — ${hint}` : room.name;
+    const path = roomPath(room.id);
     return b`
-      <div class="room ${healthy ? "ok" : "attn"} ${single ? "single" : ""}">
+      <a
+        class="room link ${healthy ? "ok" : "attn"} ${single ? "single" : ""}"
+        href=${this._href(path)}
+        @click=${(ev) => this._navigate(path, ev)}
+      >
         <div class="room-top">
           <span class="room-name" title=${title}>${room.name}</span>
           <span class="heads-count">${room.head_count}×</span>
@@ -4062,16 +4144,86 @@ let DanfossAllyPanel = class extends i {
               ${namedAfterHead(room) ? t(this.hass, "room_named_after_head") : t(this.hass, "room_single_head")}
             </div>` : A}
         ${climate ? b`<div class="room-climate">${climate}</div>` : A}
-        <div class="flags">
-          ${room.heating ? b`<span class="flag hot">${t(this.hass, "room_calling")}</span>` : A}
-          ${room.window_open ? b`<span class="flag warn">${t(this.hass, "room_window")}</span>` : A}
-          ${room.offline ? b`<span class="flag warn">${t(this.hass, "room_offline_n", { n: room.offline })}</span>` : A}
-          ${room.low_battery ? b`<span class="flag warn">${t(this.hass, "room_low_battery_n", { n: room.low_battery })}</span>` : A}
-          ${room.faults ? b`<span class="flag bad">${t(this.hass, "room_faults_n", { n: room.faults })}</span>` : A}
-          ${healthy ? b`<span class="flag ok">${t(this.hass, "room_ok")}</span>` : A}
-        </div>
+        ${this._renderFlags(room)}
+      </a>
+    `;
+  }
+  _renderFlags(room) {
+    return b`
+      <div class="flags">
+        ${room.heating ? b`<span class="flag hot">${t(this.hass, "room_calling")}</span>` : A}
+        ${room.window_open ? b`<span class="flag warn">${t(this.hass, "room_window")}</span>` : A}
+        ${room.offline ? b`<span class="flag warn">${t(this.hass, "room_offline_n", { n: room.offline })}</span>` : A}
+        ${room.low_battery ? b`<span class="flag warn">${t(this.hass, "room_low_battery_n", { n: room.low_battery })}</span>` : A}
+        ${room.faults ? b`<span class="flag bad">${t(this.hass, "room_faults_n", { n: room.faults })}</span>` : A}
+        ${isHealthy(room) ? b`<span class="flag ok">${t(this.hass, "room_ok")}</span>` : A}
       </div>
     `;
+  }
+  /** Fil d'Ariane : bâtiment (lien) › maison › pièce. */
+  _renderCrumbs(trail) {
+    return b`
+      <nav class="crumbs" aria-label=${t(this.hass, "nav_breadcrumb")}>
+        <a
+          class="crumb-link"
+          href=${this._href(FLEET_PATH)}
+          @click=${(ev) => this._navigate(FLEET_PATH, ev)}
+          >${t(this.hass, "nav_building")}</a
+        >
+        ${trail.map(
+      (label, i2) => b`<span class="crumb-sep" aria-hidden="true">›</span>
+              <span class="crumb" aria-current=${i2 === trail.length - 1 ? "page" : A}
+                >${label}</span
+              >`
+    )}
+      </nav>
+    `;
+  }
+  /** Page d'une pièce (§8.2) : fil d'Ariane, santé, puis la carte pièce (§8.1) si elle a un groupe. */
+  _renderRoomPage(overview, roomId) {
+    if (!overview) {
+      return b`${this._renderCrumbs([])}${this._renderUnavailable()}`;
+    }
+    const found = findRoom(overview, roomId);
+    if (!found) {
+      return b`${this._renderCrumbs([])}
+        <div class="unavailable">${t(this.hass, "nav_room_not_found")}</div>`;
+    }
+    const { home, room } = found;
+    const single = isSingleHead(room);
+    const hint = headNameHint(room);
+    const climate = climateLine(room);
+    return b`
+      ${this._renderCrumbs([home.name, room.name])}
+      <section class="home room-page">
+        <div class="home-head">
+          <h2>${room.name}</h2>
+          <span class="heads-count">${t(this.hass, "nav_heads_n", { n: room.head_count })}</span>
+        </div>
+        ${hint ? b`<div class="room-sub">${hint}</div>` : A}
+        ${climate ? b`<div class="room-climate">${climate}</div>` : A}
+        ${this._renderFlags(room)}
+        ${single ? b`<div class="room-sub wrap note">${t(this.hass, "nav_single_head_note")}</div>` : A}
+      </section>
+      ${single ? A : b`<div class="room-card-slot">${this._embeddedRoomCard(room.id)}</div>`}
+    `;
+  }
+  /**
+   * Carte pièce de la page : une seule instance par pièce affichée (créée à la main car
+   * sa configuration passe par `setConfig`), à qui `hass` est repassé à chaque rendu.
+   */
+  _embeddedRoomCard(roomId) {
+    if (typeof document === "undefined") {
+      return A;
+    }
+    if (!this._roomCard || this._roomCardId !== roomId) {
+      const card = document.createElement("danfoss-ally-room-card");
+      card.setConfig({ room_id: roomId });
+      this._roomCard = card;
+      this._roomCardId = roomId;
+    }
+    this._roomCard.hass = this.hass;
+    return this._roomCard;
   }
   /** Zones qui contiennent des climates d'autres intégrations (lecture seule). */
   _renderOtherAreas() {
@@ -4264,6 +4416,55 @@ DanfossAllyPanel.styles = i$3`
     .room.attn {
       border-color: var(--warning-color, #ffa600);
     }
+    a.room.link {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      cursor: pointer;
+      transition: box-shadow 0.12s ease;
+    }
+    a.room.link:hover {
+      box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+    }
+    a.room.link:focus-visible,
+    .crumb-link:focus-visible {
+      outline: 2px solid var(--primary-color, #03a9f4);
+      outline-offset: 2px;
+    }
+    .crumbs {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 6px;
+      margin: 0 0 12px;
+      font-size: 0.9rem;
+      color: var(--secondary-text-color);
+    }
+    .crumb-link {
+      color: var(--primary-color, #03a9f4);
+      text-decoration: none;
+    }
+    .crumb-link:hover {
+      text-decoration: underline;
+    }
+    .crumb[aria-current="page"] {
+      color: var(--primary-text-color);
+      font-weight: 500;
+    }
+    .room-page h2 {
+      margin-bottom: 4px;
+    }
+    .room-sub.note {
+      margin: 10px 0 0;
+    }
+    .room-card-slot {
+      max-width: 520px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      a.room.link {
+        transition: none;
+      }
+    }
     .room-top {
       display: flex;
       align-items: baseline;
@@ -4383,6 +4584,9 @@ __decorateClass([
   n2({ type: Boolean })
 ], DanfossAllyPanel.prototype, "narrow", 2);
 __decorateClass([
+  n2({ attribute: false })
+], DanfossAllyPanel.prototype, "route", 2);
+__decorateClass([
   r()
 ], DanfossAllyPanel.prototype, "_overview", 2);
 __decorateClass([
@@ -4394,6 +4598,9 @@ __decorateClass([
 __decorateClass([
   r()
 ], DanfossAllyPanel.prototype, "_showOtherAreas", 2);
+__decorateClass([
+  r()
+], DanfossAllyPanel.prototype, "_path", 2);
 DanfossAllyPanel = __decorateClass([
   t$1("danfoss-ally-panel")
 ], DanfossAllyPanel);

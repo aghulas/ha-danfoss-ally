@@ -28,6 +28,10 @@
 
 **Added**
 
+- Side panel: navigation (contract §8.2). Every room tile is a link to a room page (`/room/<id>`
+  under the panel URL) with a breadcrumb back to the building; the browser's back button and a
+  copied link work. A grouped room's page embeds the room card unchanged (same reads, actions and
+  rules); a single-head room's page is read-only. The panel adds no write path of its own.
 - `pydanfoss-cloud`: `derive_ch_key`, `app_sign_key`, `generate_device_id`, `app_install_material`.
 
 **Docs**

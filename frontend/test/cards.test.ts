@@ -834,6 +834,118 @@ describe("panneau — autres zones", () => {
   });
 });
 
+describe("panneau — navigation", () => {
+  const fleetRoom = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    name,
+    kind: "group",
+    head_count: 2,
+    offline: 1,
+    low_battery: 0,
+    heating: true,
+    window_open: false,
+    inconsistent: 0,
+    faults: 0,
+    temperature: 19.5,
+    setpoint: 21,
+    ...extra,
+  });
+  const overview = {
+    homes: [
+      {
+        gid: "h1",
+        name: "École",
+        holiday_active: false,
+        gateways: [],
+        relays: [],
+        rooms: [
+          fleetRoom("g1", "Salle 1"),
+          fleetRoom("head-9", "Bureau", { kind: "single_head", head_count: 1, offline: 0 }),
+        ],
+      },
+    ],
+    totals: {},
+  };
+
+  function panel(route?: { prefix: string; path: string }): Internals {
+    const el = new DanfossAllyPanel() as Internals;
+    el.hass = { callWS: async () => ({}), language: "en" };
+    el._overview = overview;
+    if (route) {
+      el.route = route;
+      el.willUpdate(new Map([["route", undefined]]));
+    }
+    return el;
+  }
+
+  it("suit la route de Home Assistant et montre la page de la pièce", () => {
+    const el = panel({ prefix: "/danfoss-ally-cloud", path: "/room/g1" });
+    const text = templateText(el.render());
+    expect(text).toContain("Building");
+    expect(text).toContain("École");
+    expect(text).toContain("Salle 1");
+    expect(text).toContain("19.5 °C → 21 °C");
+    expect(text).toContain("1 offline");
+    expect(text).not.toContain("Other areas"); // bouton réservé au bâtiment
+  });
+
+  it("une tuile de pièce est un lien vers sa page", () => {
+    const el = panel({ prefix: "/danfoss-ally-cloud", path: "" });
+    expect(templateText(el.render())).toContain("/danfoss-ally-cloud/room/g1");
+    expect(el._href("/room/a%2Fb")).toBe("/danfoss-ally-cloud/room/a%2Fb");
+  });
+
+  it("naviguer pousse une entrée d'historique et prévient Home Assistant", () => {
+    const pushed: string[] = [];
+    const events: string[] = [];
+    vi.stubGlobal("history", { pushState: (_s: unknown, _t: string, url: string) => pushed.push(url) });
+    vi.stubGlobal("window", { dispatchEvent: (ev: Event) => events.push(ev.type) });
+    const el = panel({ prefix: "/danfoss-ally-cloud", path: "" });
+    let prevented = false;
+    el._navigate("/room/g1", { preventDefault: () => (prevented = true) });
+    expect(prevented).toBe(true);
+    expect(el._path).toBe("/room/g1");
+    expect(pushed).toEqual(["/danfoss-ally-cloud/room/g1"]);
+    expect(events).toEqual(["location-changed"]);
+    // Même adresse : rien de plus.
+    el._navigate("/room/g1");
+    expect(pushed).toHaveLength(1);
+  });
+
+  it("un clic avec modificateur laisse le navigateur ouvrir le lien", () => {
+    const el = panel({ prefix: "/p", path: "" });
+    let prevented = false;
+    el._navigate("/room/g1", { ctrlKey: true, preventDefault: () => (prevented = true) });
+    expect(prevented).toBe(false);
+    expect(el._path).toBe("");
+  });
+
+  it("hors Home Assistant (sans route), la navigation reste interne", () => {
+    const el = panel();
+    el._navigate("/room/g1");
+    expect(el._path).toBe("/room/g1");
+    expect(el._href("/room/g1")).toBe("#");
+  });
+
+  it("une pièce d'une seule tête a une page en lecture seule, sans carte pièce", () => {
+    const el = panel({ prefix: "/p", path: "/room/head-9" });
+    const text = templateText(el.render());
+    expect(text).toContain("Bureau");
+    expect(text).toContain("no room-level setting");
+    expect(text).not.toContain("room-card-slot");
+  });
+
+  it("une pièce disparue ou une vue d'ensemble absente se dégrade, avec le fil d'Ariane", () => {
+    const gone = panel({ prefix: "/p", path: "/room/gone" });
+    expect(templateText(gone.render())).toContain("no longer in the fleet overview");
+    const empty = panel({ prefix: "/p", path: "/room/g1" });
+    empty._overview = null;
+    const text = templateText(empty.render());
+    expect(text).toContain("Building");
+    expect(text).toContain("Fleet overview unavailable");
+  });
+});
+
 describe("abonnement aux lots", () => {
   function subscribingHass(): { hass: HassLike; active: () => number } {
     let active = 0;

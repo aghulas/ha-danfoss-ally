@@ -991,7 +991,7 @@ One room at a glance and its day-to-day actions. Configured by `room_id` (= `gro
 
 ### 8.2 Side panel (`danfoss-ally-panel`)
 
-A building / fleet overview, **read-first**. Registered as a `panel_custom` from the integration
+A building / fleet overview, **read-first**, that drills down to a room. Registered as a `panel_custom` from the integration
 (`frontend.py`, once per instance, best-effort — a registration failure never blocks setup), with a
 sidebar entry; `require_admin` is false (read-only view). Reads `overview` (§3.6) and `info`.
 
@@ -1002,7 +1002,20 @@ sidebar entry; `require_admin` is false (read-only view). Reads `overview` (§3.
   room named after its head (no app room matched) says so. No room write is offered for them (they
   have none); the boiler relays (on/off, online, number of rooms calling for heat). A
   totals header gives building-wide health at a glance.
-- Read-only: it surfaces state and links out; any change is made from the room card or the entities.
+- **Navigation** (unreleased): the panel has one address per level under its URL prefix, read from
+  the `route` Home Assistant gives a custom panel (`{ prefix, path }`): an empty path is the
+  building (the overview above), `/room/<id>` is a room, `<id>` being the room's `id` in `overview`
+  (the group id, or the head id for a single-head room). An unknown or malformed path falls back to
+  the building. Every room tile is a link to its room page; a breadcrumb (building › home › room)
+  leads back. Moving pushes a history entry and fires `location-changed`, so the browser's back
+  button and a copied link work.
+- **Room page**: the room's name, head count, temperature / active setpoint and health flags, from
+  `overview`. For a grouped room, the page then embeds the room card of §8.1 unchanged, configured
+  with that `room_id`: its reads, its actions and its rules (administrator only, `writable`, write
+  jobs) are exactly those of §8.1. A single-head room has no room-level setting: its page is
+  read-only and says so. A room that is no longer in `overview` shows a notice and the breadcrumb.
+- **No write of its own**: the panel adds no write path and calls no command beyond `overview`;
+  the only actions reachable from it are those of the embedded room card.
 
 ### 8.3 Any climate, by Home Assistant area (1.3.0)
 

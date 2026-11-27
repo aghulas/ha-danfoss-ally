@@ -6,10 +6,16 @@
  * têtes, hors ligne, batterie faible, demande de chauffe, fenêtre, incohérence,
  * défauts, température → consigne), relais de chaudière. Les pièces d'une seule
  * tête (sans groupe, contrat §3.6) sont dans la même grille, marquées « 1× » et
- * « tête seule » ; le panneau ne propose aucune écriture, pour elles comme pour
- * les autres. Un bandeau de totaux donne la santé du bâtiment
- * d'un coup d'œil. N'appelle que la commande WebSocket `overview` (§5.3), jamais le
- * cloud, et se dégrade proprement.
+ * « tête seule ». Un bandeau de totaux donne la santé du bâtiment d'un coup d'œil.
+ * N'appelle que la commande WebSocket `overview` (§5.3), jamais le cloud, et se
+ * dégrade proprement.
+ *
+ * Navigation (§8.2) : chaque tuile de pièce est un lien vers la page de la pièce
+ * (`/room/<id>` sous le préfixe du panneau), avec un fil d'Ariane pour revenir. La
+ * page d'une pièce groupée embarque la carte pièce (§8.1) telle quelle : le panneau
+ * n'ajoute AUCUN chemin d'écriture, les seules actions sont celles de cette carte,
+ * avec ses règles. Une pièce d'une seule tête n'a pas de réglage de pièce : sa page
+ * est en lecture seule.
  *
  * Sous les pièces de l'intégration, une section « autres zones » (§8.3, affichable
  * ou non par un bouton, affichée par défaut) résume, zone HA par zone, les `climate`
@@ -22,7 +28,16 @@ import { customElement, property, state } from "lit/decorators.js";
 import { type AreaClimates, areaClimateLine, areaSummary, areasWithClimates } from "./area";
 import { climateLine, headNameHint, isHealthy, isSingleHead, namedAfterHead } from "./fleet";
 import { t } from "./localize";
-import type { FleetHome, FleetOverview, FleetRelay, FleetRoom, HassLike } from "./types";
+import { FLEET_PATH, type PanelRoute, findRoom, parsePath, roomPath } from "./nav";
+import "./room-card";
+import type {
+  FleetHome,
+  FleetOverview,
+  FleetRelay,
+  FleetRoom,
+  HassLike,
+  RoomCardConfig,
+} from "./types";
 import { CARD_VERSION } from "./version";
 import { fetchOverview } from "./ws";
 
@@ -30,11 +45,24 @@ import { fetchOverview } from "./ws";
 export class DanfossAllyPanel extends LitElement {
   @property({ attribute: false }) public hass?: HassLike;
   @property({ type: Boolean }) public narrow = false;
+  /** Route donnée par Home Assistant (`{ prefix, path }`) ; absente dans la démo. */
+  @property({ attribute: false }) public route?: PanelRoute;
 
   @state() private _overview: FleetOverview | null = null;
   @state() private _loaded = false;
   @state() private _refreshing = false;
   @state() private _showOtherAreas = readShowOtherAreas();
+  /** `path` courant sous le préfixe du panneau (suit `route`, ou la navigation interne). */
+  @state() private _path = FLEET_PATH;
+  /** Carte pièce embarquée dans la page d'une pièce, et la pièce qu'elle montre. */
+  private _roomCard?: EmbeddedRoomCard;
+  private _roomCardId?: string;
+
+  protected willUpdate(changed: Map<string, unknown>): void {
+    if (changed.has("route")) {
+      this._path = this.route?.path ?? FLEET_PATH;
+    }
+  }
 
   protected updated(changed: Map<string, unknown>): void {
     if (changed.has("hass") && this.hass && !this._loaded) {
@@ -64,6 +92,38 @@ export class DanfossAllyPanel extends LitElement {
     }
   }
 
+  /** Adresse d'un niveau, pour l'attribut `href` (clic milieu, copie du lien). */
+  private _href(path: string): string {
+    return this.route ? `${this.route.prefix}${path}` : "#";
+  }
+
+  /**
+   * Va à un niveau du panneau. Dans Home Assistant : entrée d'historique + événement
+   * `location-changed`, que le routeur de HA traduit en nouvelle `route` (le bouton
+   * retour du navigateur marche donc). Hors HA (démo, tests) : état interne seul.
+   */
+  private _navigate(path: string, ev?: Event): void {
+    const mouse = ev as MouseEvent | undefined;
+    if (mouse && (mouse.ctrlKey || mouse.metaKey || mouse.shiftKey || mouse.button > 0)) {
+      return; // nouvel onglet / fenêtre : laisser faire le navigateur
+    }
+    ev?.preventDefault();
+    if (path === this._path) {
+      return;
+    }
+    this._path = path;
+    if (this.route && typeof history !== "undefined" && typeof window !== "undefined") {
+      history.pushState(null, "", `${this.route.prefix}${path}`);
+      window.dispatchEvent(
+        new CustomEvent("location-changed", {
+          detail: { replace: false },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    }
+  }
+
   private _toggleOtherAreas(): void {
     this._showOtherAreas = !this._showOtherAreas;
     writeShowOtherAreas(this._showOtherAreas);
@@ -71,26 +131,35 @@ export class DanfossAllyPanel extends LitElement {
 
   protected render(): TemplateResult {
     const overview = this._overview;
+    const view = parsePath(this._path);
+    if (view.view === "fleet") {
+      this._roomCard = undefined;
+      this._roomCardId = undefined;
+    }
     return html`
       <div class="page">
         <header class="bar">
           <h1>${t(this.hass, "panel_title")}</h1>
           <span class="bar-actions">
-            <button
-              class="refresh toggle ${this._showOtherAreas ? "on" : ""}"
-              role="switch"
-              aria-checked=${this._showOtherAreas ? "true" : "false"}
-              @click=${this._toggleOtherAreas}
-            >
-              ${t(this.hass, "panel_show_other_areas")}
-            </button>
+            ${view.view === "fleet"
+              ? html`<button
+                  class="refresh toggle ${this._showOtherAreas ? "on" : ""}"
+                  role="switch"
+                  aria-checked=${this._showOtherAreas ? "true" : "false"}
+                  @click=${this._toggleOtherAreas}
+                >
+                  ${t(this.hass, "panel_show_other_areas")}
+                </button>`
+              : nothing}
             <button class="refresh" @click=${this._refresh} ?disabled=${this._refreshing}>
               ${t(this.hass, "refresh")}
             </button>
           </span>
         </header>
-        ${overview ? this._renderBody(overview) : this._renderUnavailable()}
-        ${this._showOtherAreas ? this._renderOtherAreas() : nothing}
+        ${view.view === "room"
+          ? this._renderRoomPage(overview, view.roomId)
+          : html`${overview ? this._renderBody(overview) : this._renderUnavailable()}
+            ${this._showOtherAreas ? this._renderOtherAreas() : nothing}`}
         <footer class="foot">${t(this.hass, "version", { version: CARD_VERSION })}</footer>
       </div>
     `;
@@ -159,8 +228,13 @@ export class DanfossAllyPanel extends LitElement {
     const hint = headNameHint(room);
     const climate = climateLine(room);
     const title = hint ? `${room.name} — ${hint}` : room.name;
+    const path = roomPath(room.id);
     return html`
-      <div class="room ${healthy ? "ok" : "attn"} ${single ? "single" : ""}">
+      <a
+        class="room link ${healthy ? "ok" : "attn"} ${single ? "single" : ""}"
+        href=${this._href(path)}
+        @click=${(ev: Event) => this._navigate(path, ev)}
+      >
         <div class="room-top">
           <span class="room-name" title=${title}>${room.name}</span>
           <span class="heads-count">${room.head_count}×</span>
@@ -174,16 +248,93 @@ export class DanfossAllyPanel extends LitElement {
             </div>`
           : nothing}
         ${climate ? html`<div class="room-climate">${climate}</div>` : nothing}
-        <div class="flags">
-          ${room.heating ? html`<span class="flag hot">${t(this.hass, "room_calling")}</span>` : nothing}
-          ${room.window_open ? html`<span class="flag warn">${t(this.hass, "room_window")}</span>` : nothing}
-          ${room.offline ? html`<span class="flag warn">${t(this.hass, "room_offline_n", { n: room.offline })}</span>` : nothing}
-          ${room.low_battery ? html`<span class="flag warn">${t(this.hass, "room_low_battery_n", { n: room.low_battery })}</span>` : nothing}
-          ${room.faults ? html`<span class="flag bad">${t(this.hass, "room_faults_n", { n: room.faults })}</span>` : nothing}
-          ${healthy ? html`<span class="flag ok">${t(this.hass, "room_ok")}</span>` : nothing}
-        </div>
+        ${this._renderFlags(room)}
+      </a>
+    `;
+  }
+
+  private _renderFlags(room: FleetRoom): TemplateResult {
+    return html`
+      <div class="flags">
+        ${room.heating ? html`<span class="flag hot">${t(this.hass, "room_calling")}</span>` : nothing}
+        ${room.window_open ? html`<span class="flag warn">${t(this.hass, "room_window")}</span>` : nothing}
+        ${room.offline ? html`<span class="flag warn">${t(this.hass, "room_offline_n", { n: room.offline })}</span>` : nothing}
+        ${room.low_battery ? html`<span class="flag warn">${t(this.hass, "room_low_battery_n", { n: room.low_battery })}</span>` : nothing}
+        ${room.faults ? html`<span class="flag bad">${t(this.hass, "room_faults_n", { n: room.faults })}</span>` : nothing}
+        ${isHealthy(room) ? html`<span class="flag ok">${t(this.hass, "room_ok")}</span>` : nothing}
       </div>
     `;
+  }
+
+  /** Fil d'Ariane : bâtiment (lien) › maison › pièce. */
+  private _renderCrumbs(trail: string[]): TemplateResult {
+    return html`
+      <nav class="crumbs" aria-label=${t(this.hass, "nav_breadcrumb")}>
+        <a
+          class="crumb-link"
+          href=${this._href(FLEET_PATH)}
+          @click=${(ev: Event) => this._navigate(FLEET_PATH, ev)}
+          >${t(this.hass, "nav_building")}</a
+        >
+        ${trail.map(
+          (label, i) =>
+            html`<span class="crumb-sep" aria-hidden="true">›</span>
+              <span class="crumb" aria-current=${i === trail.length - 1 ? "page" : nothing}
+                >${label}</span
+              >`,
+        )}
+      </nav>
+    `;
+  }
+
+  /** Page d'une pièce (§8.2) : fil d'Ariane, santé, puis la carte pièce (§8.1) si elle a un groupe. */
+  private _renderRoomPage(overview: FleetOverview | null, roomId: string): TemplateResult {
+    if (!overview) {
+      return html`${this._renderCrumbs([])}${this._renderUnavailable()}`;
+    }
+    const found = findRoom(overview, roomId);
+    if (!found) {
+      return html`${this._renderCrumbs([])}
+        <div class="unavailable">${t(this.hass, "nav_room_not_found")}</div>`;
+    }
+    const { home, room } = found;
+    const single = isSingleHead(room);
+    const hint = headNameHint(room);
+    const climate = climateLine(room);
+    return html`
+      ${this._renderCrumbs([home.name, room.name])}
+      <section class="home room-page">
+        <div class="home-head">
+          <h2>${room.name}</h2>
+          <span class="heads-count">${t(this.hass, "nav_heads_n", { n: room.head_count })}</span>
+        </div>
+        ${hint ? html`<div class="room-sub">${hint}</div>` : nothing}
+        ${climate ? html`<div class="room-climate">${climate}</div>` : nothing}
+        ${this._renderFlags(room)}
+        ${single
+          ? html`<div class="room-sub wrap note">${t(this.hass, "nav_single_head_note")}</div>`
+          : nothing}
+      </section>
+      ${single ? nothing : html`<div class="room-card-slot">${this._embeddedRoomCard(room.id)}</div>`}
+    `;
+  }
+
+  /**
+   * Carte pièce de la page : une seule instance par pièce affichée (créée à la main car
+   * sa configuration passe par `setConfig`), à qui `hass` est repassé à chaque rendu.
+   */
+  private _embeddedRoomCard(roomId: string): EmbeddedRoomCard | typeof nothing {
+    if (typeof document === "undefined") {
+      return nothing;
+    }
+    if (!this._roomCard || this._roomCardId !== roomId) {
+      const card = document.createElement("danfoss-ally-room-card") as EmbeddedRoomCard;
+      card.setConfig({ room_id: roomId });
+      this._roomCard = card;
+      this._roomCardId = roomId;
+    }
+    this._roomCard.hass = this.hass;
+    return this._roomCard;
   }
 
   /** Zones qui contiennent des climates d'autres intégrations (lecture seule). */
@@ -384,6 +535,55 @@ export class DanfossAllyPanel extends LitElement {
     .room.attn {
       border-color: var(--warning-color, #ffa600);
     }
+    a.room.link {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      cursor: pointer;
+      transition: box-shadow 0.12s ease;
+    }
+    a.room.link:hover {
+      box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+    }
+    a.room.link:focus-visible,
+    .crumb-link:focus-visible {
+      outline: 2px solid var(--primary-color, #03a9f4);
+      outline-offset: 2px;
+    }
+    .crumbs {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 6px;
+      margin: 0 0 12px;
+      font-size: 0.9rem;
+      color: var(--secondary-text-color);
+    }
+    .crumb-link {
+      color: var(--primary-color, #03a9f4);
+      text-decoration: none;
+    }
+    .crumb-link:hover {
+      text-decoration: underline;
+    }
+    .crumb[aria-current="page"] {
+      color: var(--primary-text-color);
+      font-weight: 500;
+    }
+    .room-page h2 {
+      margin-bottom: 4px;
+    }
+    .room-sub.note {
+      margin: 10px 0 0;
+    }
+    .room-card-slot {
+      max-width: 520px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      a.room.link {
+        transition: none;
+      }
+    }
     .room-top {
       display: flex;
       align-items: baseline;
@@ -520,6 +720,11 @@ function writeShowOtherAreas(show: boolean): void {
     // Stockage indisponible (navigation privée) : le choix vaut pour la session.
   }
 }
+
+type EmbeddedRoomCard = HTMLElement & {
+  hass?: HassLike;
+  setConfig(config: RoomCardConfig): void;
+};
 
 declare global {
   interface HTMLElementTagNameMap {
