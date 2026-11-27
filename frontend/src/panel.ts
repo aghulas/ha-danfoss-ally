@@ -17,6 +17,12 @@
  * avec ses règles. Une pièce d'une seule tête n'a pas de réglage de pièce : sa page
  * est en lecture seule.
  *
+ * Éléments (§8.2) : la page d'une pièce liste ses têtes ; têtes, relais et passerelles
+ * ont chacun une page (`/device/<id>`) avec leur état connu et les entités de leur
+ * appareil Home Assistant, par groupe (commandes et mesures, réglages, diagnostic).
+ * Une ligne d'entité n'écrit rien : elle ouvre la fenêtre d'entité de Home Assistant
+ * (`hass-more-info`), où l'entité garde ses propres règles.
+ *
  * Sous les pièces de l'intégration, une section « autres zones » (§8.3, affichable
  * ou non par un bouton, affichée par défaut) résume, zone HA par zone, les `climate`
  * des AUTRES intégrations (p. ex. des têtes appairées à Zigbee2MQTT), lus dans les
@@ -27,8 +33,26 @@ import { customElement, property, state } from "lit/decorators.js";
 
 import { type AreaClimates, areaClimateLine, areaSummary, areasWithClimates } from "./area";
 import { climateLine, headNameHint, isHealthy, isSingleHead, namedAfterHead } from "./fleet";
-import { t } from "./localize";
-import { FLEET_PATH, type PanelRoute, findRoom, parsePath, roomPath } from "./nav";
+import {
+  ENTITY_GROUPS,
+  type EntityRow,
+  type PanelElement,
+  deviceEntities,
+  entityCount,
+  findElement,
+  haDeviceId,
+  roomDeviceIdent,
+  roomHeads,
+} from "./element";
+import { modeLabel, t } from "./localize";
+import {
+  FLEET_PATH,
+  type PanelRoute,
+  elementPath,
+  findRoom,
+  parsePath,
+  roomPath,
+} from "./nav";
 import "./room-card";
 import type {
   FleetHome,
@@ -36,10 +60,11 @@ import type {
   FleetRelay,
   FleetRoom,
   HassLike,
+  Room,
   RoomCardConfig,
 } from "./types";
 import { CARD_VERSION } from "./version";
-import { fetchOverview } from "./ws";
+import { fetchOverview, fetchRooms } from "./ws";
 
 @customElement("danfoss-ally-panel")
 export class DanfossAllyPanel extends LitElement {
@@ -49,6 +74,8 @@ export class DanfossAllyPanel extends LitElement {
   @property({ attribute: false }) public route?: PanelRoute;
 
   @state() private _overview: FleetOverview | null = null;
+  /** Pièces et leurs têtes (`rooms`) : alimente les pages de pièce et d'élément. */
+  @state() private _rooms: Room[] = [];
   @state() private _loaded = false;
   @state() private _refreshing = false;
   @state() private _showOtherAreas = readShowOtherAreas();
@@ -73,7 +100,9 @@ export class DanfossAllyPanel extends LitElement {
 
   private async _load(): Promise<void> {
     if (this.hass) {
-      this._overview = await fetchOverview(this.hass);
+      const [overview, rooms] = await Promise.all([fetchOverview(this.hass), fetchRooms(this.hass)]);
+      this._overview = overview;
+      this._rooms = rooms;
     }
   }
 
@@ -83,9 +112,13 @@ export class DanfossAllyPanel extends LitElement {
     }
     this._refreshing = true;
     try {
-      const overview = await fetchOverview(this.hass);
+      const [overview, rooms] = await Promise.all([
+        fetchOverview(this.hass),
+        fetchRooms(this.hass),
+      ]);
       if (overview) {
         this._overview = overview;
+        this._rooms = rooms;
       }
     } finally {
       this._refreshing = false;
@@ -132,7 +165,7 @@ export class DanfossAllyPanel extends LitElement {
   protected render(): TemplateResult {
     const overview = this._overview;
     const view = parsePath(this._path);
-    if (view.view === "fleet") {
+    if (view.view !== "room") {
       this._roomCard = undefined;
       this._roomCardId = undefined;
     }
@@ -158,7 +191,9 @@ export class DanfossAllyPanel extends LitElement {
         </header>
         ${view.view === "room"
           ? this._renderRoomPage(overview, view.roomId)
-          : html`${overview ? this._renderBody(overview) : this._renderUnavailable()}
+          : view.view === "element"
+            ? this._renderElementPage(overview, view.deviceId)
+            : html`${overview ? this._renderBody(overview) : this._renderUnavailable()}
             ${this._showOtherAreas ? this._renderOtherAreas() : nothing}`}
         <footer class="foot">${t(this.hass, "version", { version: CARD_VERSION })}</footer>
       </div>
@@ -218,6 +253,19 @@ export class DanfossAllyPanel extends LitElement {
         ${home.relays.length > 0
           ? html`<div class="relays">${home.relays.map((relay) => this._renderRelay(relay))}</div>`
           : nothing}
+        ${home.gateways.length > 0
+          ? html`<div class="relays">
+              ${home.gateways.map((gw) =>
+                this._renderChip(
+                  gw.device_id,
+                  gw.online ? "on-ok" : "offline",
+                  gw.name,
+                  t(this.hass, gw.online ? "head_online" : "head_offline"),
+                  !gw.online,
+                ),
+              )}
+            </div>`
+          : nothing}
       </section>
     `;
   }
@@ -267,7 +315,7 @@ export class DanfossAllyPanel extends LitElement {
   }
 
   /** Fil d'Ariane : bâtiment (lien) › maison › pièce. */
-  private _renderCrumbs(trail: string[]): TemplateResult {
+  private _renderCrumbs(trail: Crumb[]): TemplateResult {
     return html`
       <nav class="crumbs" aria-label=${t(this.hass, "nav_breadcrumb")}>
         <a
@@ -276,13 +324,20 @@ export class DanfossAllyPanel extends LitElement {
           @click=${(ev: Event) => this._navigate(FLEET_PATH, ev)}
           >${t(this.hass, "nav_building")}</a
         >
-        ${trail.map(
-          (label, i) =>
-            html`<span class="crumb-sep" aria-hidden="true">›</span>
-              <span class="crumb" aria-current=${i === trail.length - 1 ? "page" : nothing}
-                >${label}</span
-              >`,
-        )}
+        ${trail.map((crumb, i) => {
+          const path = crumb.path;
+          return html`<span class="crumb-sep" aria-hidden="true">›</span>
+            ${path !== undefined
+              ? html`<a
+                  class="crumb-link"
+                  href=${this._href(path)}
+                  @click=${(ev: Event) => this._navigate(path, ev)}
+                  >${crumb.label}</a
+                >`
+              : html`<span class="crumb" aria-current=${i === trail.length - 1 ? "page" : nothing}
+                  >${crumb.label}</span
+                >`}`;
+        })}
       </nav>
     `;
   }
@@ -302,7 +357,7 @@ export class DanfossAllyPanel extends LitElement {
     const hint = headNameHint(room);
     const climate = climateLine(room);
     return html`
-      ${this._renderCrumbs([home.name, room.name])}
+      ${this._renderCrumbs([{ label: home.name }, { label: room.name }])}
       <section class="home room-page">
         <div class="home-head">
           <h2>${room.name}</h2>
@@ -316,6 +371,241 @@ export class DanfossAllyPanel extends LitElement {
           : nothing}
       </section>
       ${single ? nothing : html`<div class="room-card-slot">${this._embeddedRoomCard(room.id)}</div>`}
+      ${this._renderRoomElements(room)}
+      ${single
+        ? nothing
+        : this._renderEntities(haDeviceId(this.hass, roomDeviceIdent(room.id)), "el_room_entities", false)}
+    `;
+  }
+
+  /** Têtes de la pièce, chacune un lien vers sa page. */
+  private _renderRoomElements(room: FleetRoom): TemplateResult | typeof nothing {
+    const heads = roomHeads(room, this._rooms);
+    if (heads.length === 0) {
+      return nothing;
+    }
+    return html`
+      <section class="home">
+        <div class="home-head"><h2>${t(this.hass, "el_elements")}</h2></div>
+        <div class="rooms">
+          ${heads.map((h) => {
+            const path = elementPath(h.id, room.id);
+            const head = h.head;
+            return html`
+              <a
+                class="room link ${h.online ? "ok" : "attn"}"
+                href=${this._href(path)}
+                @click=${(ev: Event) => this._navigate(path, ev)}
+              >
+                <div class="room-top">
+                  <span class="room-name" title=${h.name}>${h.name}</span>
+                </div>
+                <div class="room-sub">${t(this.hass, "el_kind_head")}</div>
+                <div class="flags">
+                  ${h.online
+                    ? html`<span class="flag ok">${t(this.hass, "head_online")}</span>`
+                    : html`<span class="flag warn">${t(this.hass, "head_offline")}</span>`}
+                  ${head && head.battery !== null
+                    ? html`<span class="flag">${t(this.hass, "head_battery", { value: head.battery })}</span>`
+                    : nothing}
+                  ${head?.window_open
+                    ? html`<span class="flag warn">${t(this.hass, "head_window_open")}</span>`
+                    : nothing}
+                  ${head && head.faults.length > 0
+                    ? html`<span class="flag bad">${t(this.hass, "room_faults_n", { n: head.faults.length })}</span>`
+                    : nothing}
+                </div>
+              </a>
+            `;
+          })}
+        </div>
+      </section>
+    `;
+  }
+
+  /** Page d'un élément (§8.2) : fil d'Ariane, état connu, entités de son appareil HA. */
+  private _renderElementPage(
+    overview: FleetOverview | null,
+    deviceId: string,
+  ): TemplateResult {
+    if (!overview) {
+      return html`${this._renderCrumbs([])}${this._renderUnavailable()}`;
+    }
+    const el = findElement(overview, this._rooms, deviceId);
+    if (!el) {
+      return html`${this._renderCrumbs([])}
+        <div class="unavailable">${t(this.hass, "nav_element_not_found")}</div>`;
+    }
+    const trail: Crumb[] = [{ label: el.home.name }];
+    if (el.kind === "head") {
+      // La pièce de la tête fait foi, pas celle de l'adresse (lien périmé, tête déplacée).
+      trail.push({ label: el.room.name, path: roomPath(el.room.id) });
+    }
+    trail.push({ label: el.name });
+    const kindKey =
+      el.kind === "head" ? "el_kind_head" : el.kind === "relay" ? "el_kind_relay" : "el_kind_gateway";
+    return html`
+      ${this._renderCrumbs(trail)}
+      <section class="home room-page">
+        <div class="home-head">
+          <h2>${el.name}</h2>
+          <span class="heads-count">${t(this.hass, kindKey)}</span>
+        </div>
+        <div class="flags">${this._elementFlags(el)}</div>
+      </section>
+      ${this._renderEntities(haDeviceId(this.hass, el.id), "el_state", true)}
+    `;
+  }
+
+  /** État connu d'un élément, tiré de `overview` / `rooms` (jamais supposé). */
+  private _elementFlags(el: PanelElement): TemplateResult {
+    const online = el.online
+      ? html`<span class="flag ok">${t(this.hass, "head_online")}</span>`
+      : html`<span class="flag warn">${t(this.hass, "head_offline")}</span>`;
+    if (el.kind === "relay") {
+      // Hors ligne, le marche/arrêt est le dernier état connu : il n'est pas affiché.
+      return html`${online}
+        ${el.online && el.relay.on !== null
+          ? html`<span class="flag ${el.relay.on ? "hot" : ""}"
+              >${t(this.hass, el.relay.on ? "relay_on" : "relay_off")}</span
+            >`
+          : nothing}
+        <span class="flag">${t(this.hass, "rooms_linked", { n: el.relay.linked_rooms })}</span>`;
+    }
+    if (el.kind === "gateway") {
+      const gw = el.gateway;
+      return html`${online}
+        ${gw.head_count !== undefined || gw.relay_count !== undefined
+          ? html`<span class="flag"
+              >${t(this.hass, "el_carries", {
+                heads: gw.head_count ?? 0,
+                relays: gw.relay_count ?? 0,
+              })}</span
+            >`
+          : nothing}`;
+    }
+    const head = el.head;
+    if (!head) {
+      return html`${online}`;
+    }
+    return html`${online}
+      <span class="flag">${modeLabel(this.hass, head.mode_displayed)}</span>
+      ${head.schedule_active === null
+        ? nothing
+        : html`<span class="flag ${head.schedule_active ? "" : "warn"}"
+            >${t(this.hass, head.schedule_active ? "head_schedule_on" : "head_schedule_off")}</span
+          >`}
+      ${head.inconsistent
+        ? html`<span class="flag warn">${t(this.hass, "head_inconsistent")}</span>`
+        : nothing}
+      ${head.mounting ? html`<span class="flag warn">${t(this.hass, "head_mounting")}</span>` : nothing}
+      ${head.battery !== null
+        ? html`<span class="flag">${t(this.hass, "head_battery", { value: head.battery })}</span>`
+        : nothing}
+      ${head.valve_opening !== null
+        ? html`<span class="flag">${t(this.hass, "head_valve", { value: head.valve_opening })}</span>`
+        : nothing}
+      ${head.heat_request === null
+        ? nothing
+        : html`<span class="flag ${head.heat_request ? "hot" : ""}"
+            >${t(this.hass, head.heat_request ? "el_heat_request" : "el_no_heat_request")}</span
+          >`}
+      ${head.window_open === null
+        ? nothing
+        : html`<span class="flag ${head.window_open ? "warn" : ""}"
+            >${t(this.hass, head.window_open ? "head_window_open" : "el_window_closed")}</span
+          >`}
+      ${head.child_lock ? html`<span class="flag">${t(this.hass, "head_child_lock")}</span>` : nothing}
+      ${head.faults.map(
+        (f) =>
+          html`<span class="flag bad" title=${f.action ?? ""}
+            >${t(this.hass, "head_fault", { code: f.code })}${f.label ? ` — ${f.label}` : ""}</span
+          >`,
+      )}`;
+  }
+
+  /**
+   * Entités d'un appareil HA, par groupe. `explain` : dit pourquoi il n'y a rien (pas
+   * d'appareil, pas d'entité) ; sinon la section est simplement absente.
+   */
+  private _renderEntities(
+    deviceId: string | null,
+    titleKey: "el_state" | "el_room_entities",
+    explain: boolean,
+  ): TemplateResult | typeof nothing {
+    const groups = deviceId ? deviceEntities(this.hass, deviceId) : null;
+    if (!groups || entityCount(groups) === 0) {
+      return explain
+        ? html`<div class="unavailable">
+            ${t(this.hass, deviceId ? "el_no_entities" : "el_no_device")}
+          </div>`
+        : nothing;
+    }
+    const titled = titleKey === "el_room_entities";
+    return html`
+      ${titled ? html`<h2 class="section-title">${t(this.hass, titleKey)}</h2>` : nothing}
+      <div class="room-sub wrap">${t(this.hass, "el_entities_hint")}</div>
+      ${ENTITY_GROUPS.filter((g) => groups[g].length > 0).map(
+        (g) => html`
+          <section class="home">
+            <div class="home-head"><h2>${t(this.hass, `el_group_${g}`)}</h2></div>
+            <div class="ent-list">${groups[g].map((row) => this._renderEntityRow(row))}</div>
+          </section>
+        `,
+      )}
+    `;
+  }
+
+  private _renderEntityRow(row: EntityRow): TemplateResult {
+    const stateObj = this.hass?.states?.[row.entity_id];
+    const value = !row.available
+      ? t(this.hass, "el_unavailable")
+      : stateObj && this.hass?.formatEntityState
+        ? this.hass.formatEntityState(stateObj)
+        : `${row.state}${row.unit ? ` ${row.unit}` : ""}`;
+    return html`
+      <button
+        class="ent-row ${row.available ? "" : "ent-off"}"
+        @click=${() => this._moreInfo(row.entity_id)}
+      >
+        <span class="ent-name">${row.name}</span>
+        <span class="ent-state">${value}</span>
+      </button>
+    `;
+  }
+
+  /** Ouvre la fenêtre d'entité de Home Assistant (lecture, et réglage par l'entité elle-même). */
+  private _moreInfo(entityId: string): void {
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        detail: { entityId },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  /** Pastille d'un relais ou d'une passerelle : lien vers sa page. */
+  private _renderChip(
+    deviceId: string,
+    dot: string,
+    name: string,
+    stateLabel: string,
+    offline: boolean,
+    extra: string | null = null,
+  ): TemplateResult {
+    const path = elementPath(deviceId);
+    return html`
+      <a
+        class="relay chip ${offline ? "relay-offline" : ""}"
+        href=${this._href(path)}
+        @click=${(ev: Event) => this._navigate(path, ev)}
+      >
+        <span class="relay-dot ${dot}"></span>
+        <span class="relay-name">${name}</span>
+        <span class="relay-state">${stateLabel}</span>
+        ${extra ? html`<span class="relay-rooms">${extra}</span>` : nothing}
+      </a>
     `;
   }
 
@@ -383,14 +673,14 @@ export class DanfossAllyPanel extends LitElement {
     const on = !offline && relay.on === true;
     const state = offline ? "offline" : on ? "on" : "off";
     const label = offline ? "relay_offline" : on ? "relay_on" : "relay_off";
-    return html`
-      <div class="relay ${offline ? "relay-offline" : ""}">
-        <span class="relay-dot ${state}"></span>
-        <span class="relay-name">${relay.name}</span>
-        <span class="relay-state">${t(this.hass, label)}</span>
-        <span class="relay-rooms">${t(this.hass, "rooms_linked", { n: relay.linked_rooms })}</span>
-      </div>
-    `;
+    return this._renderChip(
+      relay.device_id,
+      state,
+      relay.name,
+      t(this.hass, label),
+      offline,
+      t(this.hass, "rooms_linked", { n: relay.linked_rooms }),
+    );
   }
 
   static styles = css`
@@ -545,7 +835,60 @@ export class DanfossAllyPanel extends LitElement {
     a.room.link:hover {
       box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
     }
+    a.relay.chip {
+      text-decoration: none;
+      border: 1px solid var(--divider-color, #e8e8e8);
+      border-radius: 14px;
+      padding: 3px 10px;
+      cursor: pointer;
+    }
+    a.relay.chip:hover {
+      box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+    }
+    .relay-dot.on-ok {
+      background: var(--success-color, #2e7d32);
+    }
+    .section-title {
+      margin: 18px 0 6px;
+    }
+    .ent-list {
+      display: flex;
+      flex-direction: column;
+    }
+    .ent-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      width: 100%;
+      padding: 9px 4px;
+      border: 0;
+      border-top: 1px solid var(--divider-color, #eee);
+      background: none;
+      color: var(--primary-text-color);
+      font: inherit;
+      font-size: 0.9rem;
+      text-align: left;
+      cursor: pointer;
+    }
+    .ent-row:first-child {
+      border-top: 0;
+    }
+    .ent-row:hover {
+      background: var(--secondary-background-color, #f5f5f5);
+    }
+    .ent-state {
+      font-variant-numeric: tabular-nums;
+      color: var(--secondary-text-color);
+      text-align: right;
+    }
+    .ent-off .ent-state {
+      color: var(--warning-color, #ffa600);
+      font-style: italic;
+    }
     a.room.link:focus-visible,
+    a.relay.chip:focus-visible,
+    .ent-row:focus-visible,
     .crumb-link:focus-visible {
       outline: 2px solid var(--primary-color, #03a9f4);
       outline-offset: 2px;
@@ -719,6 +1062,12 @@ function writeShowOtherAreas(show: boolean): void {
   } catch {
     // Stockage indisponible (navigation privée) : le choix vaut pour la session.
   }
+}
+
+/** Maillon du fil d'Ariane ; sans `path`, c'est du texte (maison, niveau courant). */
+interface Crumb {
+  label: string;
+  path?: string;
 }
 
 type EmbeddedRoomCard = HTMLElement & {
