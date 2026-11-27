@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Room scope on cloud-bridge bounds
+
+**Fixed**
+
+- v2 Companion: a grouped `danfoss2mqtt` head's setpoint bounds now say `write_scope: room` and
+  `room_head_count`, like its switches. The cloud bridge writes them on the room's group publish,
+  so every head of the room takes the value; the numbers said `head` (seen on real hardware,
+  2026-11-27, once the bridge's head-setting writes were opened to every head).
+
 ## 2.0.16 — Head settings through the cloud bridge
 
 **Added**

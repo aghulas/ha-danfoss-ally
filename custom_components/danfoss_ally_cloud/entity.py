@@ -50,6 +50,25 @@ def remove_registry_entries(
             registry.async_remove(entity_id)
 
 
+def companion_write_attrs(coordinator: DanfossCoordinator, dev: DanfossDevice) -> dict[str, Any]:
+    """Scope attributes of a head setting written through an MQTT bridge (``mqtt_companion``).
+
+    ``write_scope`` is ``head``, except for a grouped head served by a cloud-only bridge: that
+    bridge writes the setting on the room's group publish, so every head of the room takes it
+    (``write_scope: room`` and ``room_head_count``). ``mqtt_bridge`` names the bridge.
+    """
+    attrs: dict[str, Any] = {"write_scope": "head"}
+    companion = getattr(coordinator, "companion", None)
+    route = companion.device_route.get(dev.id) if companion is not None else None
+    if route is not None:
+        attrs["mqtt_bridge"] = route[0]
+    group_id = coordinator.group_of(dev.id)
+    if companion is not None and companion.is_cloud_bridge_device(dev.id) and group_id:
+        attrs["write_scope"] = "room"
+        attrs["room_head_count"] = len(coordinator.room_members(group_id))
+    return attrs
+
+
 class DanfossEntity(CoordinatorEntity[DanfossCoordinator]):
     """Entity attached to a Danfoss device, driven by the coordinator."""
 

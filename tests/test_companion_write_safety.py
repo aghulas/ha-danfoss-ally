@@ -223,3 +223,61 @@ async def test_cloud_bridge_head_settings_follow_the_keys_the_bridge_advertises(
     comp.process_mqtt_message("danfoss2mqtt/bridge/devices", "[]")
     assert comp.supports_device_set(D2M_HEAD, "keypad_lockout") is False
     pub.assert_not_awaited()
+
+
+async def test_grouped_cloud_bridge_head_settings_say_room_scope(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cloud bridge writes a grouped head's setting on its room: the switch AND the bound
+    numbers must say so (``write_scope: room``, ``room_head_count``); an isolated head's say
+    head."""
+    monkeypatch.setattr(mqtt_mod, "async_publish", AsyncMock())
+    comp = MqttCompanionCoordinator(hass, prefixes=("danfoss2mqtt",))
+    keys = [
+        "keypad_lockout",
+        "max_heat_setpoint_limit",
+        "min_heat_setpoint_limit",
+        "occupied_heating_setpoint",
+        "window_open_feature",
+    ]
+    heads = [("bf_g1", "Salle #1"), ("bf_g2", "Salle #2"), ("bf_iso", "Bureau")]
+    comp.process_mqtt_message(
+        "danfoss2mqtt/bridge/devices",
+        json.dumps(
+            [
+                {
+                    "ieee_address": dev_id,
+                    "friendly_name": name,
+                    "definition": {"vendor": "Danfoss", "model": "03wvrwpv"},
+                    "danfoss": {"dev_id": dev_id, "set_keys": keys},
+                }
+                for dev_id, name in heads
+            ]
+        ),
+    )
+    for _dev_id, name in heads:
+        comp.process_mqtt_message(
+            f"danfoss2mqtt/{name}",
+            json.dumps({"local_temperature": 19.0, "max_heat_setpoint_limit": 28.0}),
+        )
+        comp.process_mqtt_message(f"danfoss2mqtt/{name}/availability", "online")
+    comp.process_mqtt_message(
+        "danfoss2mqtt/bridge/rooms",
+        json.dumps(
+            [{"group_id": "g1", "name": "Salle", "home_id": "h1", "members": ["bf_g1", "bf_g2"]}]
+        ),
+    )
+    store = build_companion_store(comp, CompanionRoomManager(comp))
+    coord = store[DATA_COORDINATOR]
+    upper = next(d for d in HEAD_BOUNDS if d.bound == "upper")
+    lock = next(d for d in SWITCHES if d.key == "child_lock")
+
+    grouped_bound = DanfossHeadBound(coord, "bf_g1", upper, None).extra_state_attributes
+    assert grouped_bound["write_path"] == "mqtt_companion"
+    assert grouped_bound["write_scope"] == "room" and grouped_bound["room_head_count"] == 2
+    grouped_switch = DanfossSwitch(coord, "bf_g1", lock).extra_state_attributes
+    assert grouped_switch["write_scope"] == "room" and grouped_switch["room_head_count"] == 2
+
+    isolated_bound = DanfossHeadBound(coord, "bf_iso", upper, None).extra_state_attributes
+    assert isolated_bound["write_scope"] == "head" and "room_head_count" not in isolated_bound
+    assert isolated_bound["mqtt_bridge"] == "danfoss2mqtt"
