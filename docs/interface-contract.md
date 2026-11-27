@@ -1014,8 +1014,31 @@ sidebar entry; `require_admin` is false (read-only view). Reads `overview` (§3.
   with that `room_id`: its reads, its actions and its rules (administrator only, `writable`, write
   jobs) are exactly those of §8.1. A single-head room has no room-level setting: its page is
   read-only and says so. A room that is no longer in `overview` shows a notice and the breadcrumb.
-- **No write of its own**: the panel adds no write path and calls no command beyond `overview`;
-  the only actions reachable from it are those of the embedded room card.
+- **Elements** (unreleased): the panel also reads `rooms` (§3.4) for the heads of each room. A
+  room page lists its heads (a single-head room: its one head, from `overview`), each a link.
+  Heads, boiler relays and gateways each have a page: `/device/<id>` (`<id>` = the device id of
+  `overview` / `rooms`), or `/room/<room>/device/<id>` for a head reached from its room (same
+  page; the breadcrumb always shows the head's actual room, whatever the address says). Relays
+  and gateways are linked from their home on the building view.
+  - **Known state**, never assumed: online; for a head (from `rooms`) displayed mode, schedule
+    followed or not, inconsistent, mounting, battery, valve, heat request, window, child lock and
+    decoded faults, each shown only when the field is not `null`; for a relay, on/off only while
+    online (offline, the last value is stale and is not shown) and its linked-room count; for a
+    gateway, what it carries when `overview` says so (`head_count`, `relay_count`).
+  - **Entities**: the Home Assistant device of the element is the one whose registry
+    `identifiers` hold `["danfoss_ally_cloud", <id>]` (a grouped room: `group_<room id>`, listed
+    on the room page). Its entities are listed in three groups by `entity_category`: none
+    (controls and readings), `config` (settings), `diagnostic`. Hidden entities and entities
+    without a state (disabled) are skipped. An **unavailable entity stays listed, marked
+    unavailable**: it is never hidden nor replaced by a guessed value. No matching device, or no
+    entity: the page says so. A value is the entity's state as Home Assistant formats it
+    (`hass.formatEntityState`), else the raw state and unit.
+  - A row **writes nothing**: selecting it fires `hass-more-info` for that entity, and Home
+    Assistant's own dialog shows it. A setting is changed there, through the entity, under that
+    entity's rules (value validation, availability, proven channel only).
+- **No write of its own**: the panel adds no write path and calls no command beyond `overview`
+  and `rooms`; the only actions reachable from it are those of the embedded room card and of the
+  entities' own Home Assistant dialogs.
 
 ### 8.3 Any climate, by Home Assistant area (1.3.0)
 

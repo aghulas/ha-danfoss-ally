@@ -735,6 +735,25 @@ const STRINGS = {
     nav_heads_n: "{n} thermostat(s)",
     nav_room_not_found: "This room is no longer in the fleet overview.",
     nav_single_head_note: "This room has a single thermostat and no schedule group: it has no room-level setting. Its settings are those of the thermostat.",
+    nav_element_not_found: "This element is no longer in the fleet overview.",
+    el_elements: "Elements",
+    el_gateways: "Gateways",
+    el_kind_head: "Thermostat",
+    el_kind_relay: "Boiler relay",
+    el_kind_gateway: "Gateway",
+    el_state: "State",
+    el_room_entities: "Room entities",
+    el_group_controls: "Controls and readings",
+    el_group_config: "Settings",
+    el_group_diagnostic: "Diagnostics",
+    el_entities_hint: "Select a line to open it in Home Assistant. A setting is changed there, through its own entity; an unavailable one cannot be changed.",
+    el_no_device: "No Home Assistant device matches this element: there is nothing to configure here.",
+    el_no_entities: "This device has no visible entity.",
+    el_unavailable: "Unavailable",
+    el_window_closed: "Window closed",
+    el_heat_request: "Calling for heat",
+    el_no_heat_request: "Not calling for heat",
+    el_carries: "Carries {heads} thermostat(s) and {relays} relay(s)",
     area_thermostats_n: "{n} thermostats",
     area_heating_n: "{n} heating"
   },
@@ -904,6 +923,25 @@ const STRINGS = {
     nav_heads_n: "{n} tête(s)",
     nav_room_not_found: "Cette pièce n'est plus dans la vue d'ensemble.",
     nav_single_head_note: "Cette pièce n'a qu'une tête et pas de groupe-programme : elle n'a aucun réglage de pièce. Ses réglages sont ceux de la tête.",
+    nav_element_not_found: "Cet élément n'est plus dans la vue d'ensemble.",
+    el_elements: "Éléments",
+    el_gateways: "Passerelles",
+    el_kind_head: "Tête thermostatique",
+    el_kind_relay: "Relais de chaudière",
+    el_kind_gateway: "Passerelle",
+    el_state: "État",
+    el_room_entities: "Entités de la pièce",
+    el_group_controls: "Commandes et mesures",
+    el_group_config: "Réglages",
+    el_group_diagnostic: "Diagnostic",
+    el_entities_hint: "Sélectionnez une ligne pour l'ouvrir dans Home Assistant. Un réglage s'y modifie, par sa propre entité ; un réglage indisponible ne peut pas être modifié.",
+    el_no_device: "Aucun appareil Home Assistant ne correspond à cet élément : rien à configurer ici.",
+    el_no_entities: "Cet appareil n'a aucune entité visible.",
+    el_unavailable: "Indisponible",
+    el_window_closed: "Fenêtre fermée",
+    el_heat_request: "Demande de chauffe",
+    el_no_heat_request: "Pas de demande de chauffe",
+    el_carries: "Porte {heads} tête(s) et {relays} relais",
     area_thermostats_n: "{n} thermostats",
     area_heating_n: "{n} en chauffe"
   }
@@ -2888,7 +2926,7 @@ const KEYS_EXTERNAL = ["external_measured_room_sensor"];
 const EXTERNAL_NONE = -8e3;
 const EXTERNAL_MAX = 3500;
 const WINDOW_OPEN_STATES = /* @__PURE__ */ new Set(["open", "external_open"]);
-const UNAVAILABLE = /* @__PURE__ */ new Set(["unavailable", "unknown", ""]);
+const UNAVAILABLE$1 = /* @__PURE__ */ new Set(["unavailable", "unknown", ""]);
 function domainOf(entityId) {
   return entityId.split(".", 1)[0];
 }
@@ -2977,7 +3015,7 @@ function siblings(hass, entityId) {
       continue;
     }
     const state = hass.states?.[entry.entity_id];
-    if (state && !UNAVAILABLE.has(state.state)) {
+    if (state && !UNAVAILABLE$1.has(state.state)) {
       out.push({ entry, state });
     }
   }
@@ -3036,7 +3074,7 @@ function climateView(hass, entityId) {
     return null;
   }
   const a2 = st.attributes;
-  const available = !UNAVAILABLE.has(st.state);
+  const available = !UNAVAILABLE$1.has(st.state);
   const features = num(a2.supported_features) ?? 0;
   const step = num(a2.target_temp_step) ?? DEFAULT_STEP;
   return {
@@ -3075,7 +3113,7 @@ function roomSensors(hass, areaId) {
       continue;
     }
     const st = hass.states?.[entry.entity_id];
-    const value = st && !UNAVAILABLE.has(st.state) ? num(st.state) : null;
+    const value = st && !UNAVAILABLE$1.has(st.state) ? num(st.state) : null;
     if (value === null) {
       continue;
     }
@@ -3934,22 +3972,118 @@ function climateLine(room) {
   const left = temp === null ? "–" : degrees(temp);
   return setpoint === null ? left : `${left} → ${degrees(setpoint)}`;
 }
+function roomHeads(room, rooms) {
+  if (room.kind === "single_head") {
+    const id = room.head_id ?? room.id;
+    return [{ id, name: room.head_name ?? room.name, online: room.online !== false, head: null }];
+  }
+  const full = rooms.find((r2) => r2.id === room.id);
+  return (full?.heads ?? []).map((head) => ({
+    id: head.device_id,
+    name: head.name,
+    online: head.online,
+    head
+  }));
+}
+function findElement(overview, rooms, deviceId) {
+  for (const home of overview?.homes ?? []) {
+    for (const room of home.rooms) {
+      const hit = roomHeads(room, rooms).find((h2) => h2.id === deviceId);
+      if (hit) {
+        return { kind: "head", id: hit.id, name: hit.name, online: hit.online, home, room, head: hit.head };
+      }
+    }
+    const relay = home.relays.find((r2) => r2.device_id === deviceId);
+    if (relay) {
+      return { kind: "relay", id: deviceId, name: relay.name, online: relay.online !== false, home, relay };
+    }
+    const gateway = home.gateways.find((g2) => g2.device_id === deviceId);
+    if (gateway) {
+      return { kind: "gateway", id: deviceId, name: gateway.name, online: gateway.online, home, gateway };
+    }
+  }
+  return null;
+}
+function roomDeviceIdent(groupId) {
+  return `group_${groupId}`;
+}
+function haDeviceId(hass, ident) {
+  for (const device of Object.values(hass?.devices ?? {})) {
+    if ((device.identifiers ?? []).some(([domain, id]) => domain === ALLY_PLATFORM && id === ident)) {
+      return device.id;
+    }
+  }
+  return null;
+}
+const ENTITY_GROUPS = ["controls", "config", "diagnostic"];
+const UNAVAILABLE = /* @__PURE__ */ new Set(["unavailable", "unknown", ""]);
+function shortName(friendly, deviceName) {
+  if (deviceName && friendly.toLowerCase().startsWith(`${deviceName.toLowerCase()} `)) {
+    const rest = friendly.slice(deviceName.length + 1).trim();
+    if (rest) {
+      return rest.charAt(0).toUpperCase() + rest.slice(1);
+    }
+  }
+  return friendly;
+}
+function deviceEntities(hass, deviceId) {
+  const out = { controls: [], config: [], diagnostic: [] };
+  const device = hass?.devices?.[deviceId];
+  const deviceName = device?.name_by_user || device?.name || null;
+  for (const entry of Object.values(hass?.entities ?? {})) {
+    if (entry.device_id !== deviceId || entry.hidden) {
+      continue;
+    }
+    const st = hass?.states?.[entry.entity_id];
+    if (!st) {
+      continue;
+    }
+    const friendly = st.attributes.friendly_name;
+    const unit = st.attributes.unit_of_measurement;
+    const group = entry.entity_category === "config" ? "config" : entry.entity_category === "diagnostic" ? "diagnostic" : "controls";
+    out[group].push({
+      entity_id: entry.entity_id,
+      name: shortName(
+        typeof friendly === "string" && friendly ? friendly : entry.name || entry.entity_id,
+        deviceName
+      ),
+      state: st.state,
+      unit: typeof unit === "string" && unit ? unit : null,
+      available: !UNAVAILABLE.has(st.state)
+    });
+  }
+  for (const group of ENTITY_GROUPS) {
+    out[group].sort((a2, b2) => a2.name.localeCompare(b2.name) || a2.entity_id.localeCompare(b2.entity_id));
+  }
+  return out;
+}
+function entityCount(groups) {
+  return ENTITY_GROUPS.reduce((n3, g2) => n3 + groups[g2].length, 0);
+}
 function parsePath(path) {
   const parts = (path ?? "").split("/").filter((p2) => p2 !== "");
-  if (parts.length === 2 && parts[0] === "room") {
-    try {
-      const roomId = decodeURIComponent(parts[1]);
-      if (roomId) {
-        return { view: "room", roomId };
-      }
-    } catch {
+  try {
+    const ids = parts.map((p2, i2) => i2 % 2 === 1 ? decodeURIComponent(p2) : p2);
+    if (ids.length === 2 && ids[0] === "room" && ids[1]) {
+      return { view: "room", roomId: ids[1] };
     }
+    if (ids.length === 2 && ids[0] === "device" && ids[1]) {
+      return { view: "element", deviceId: ids[1] };
+    }
+    if (ids.length === 4 && ids[0] === "room" && ids[2] === "device" && ids[1] && ids[3]) {
+      return { view: "element", roomId: ids[1], deviceId: ids[3] };
+    }
+  } catch {
   }
   return { view: "fleet" };
 }
 const FLEET_PATH = "";
 function roomPath(roomId) {
   return `/room/${encodeURIComponent(roomId)}`;
+}
+function elementPath(deviceId, roomId) {
+  const tail = `/device/${encodeURIComponent(deviceId)}`;
+  return roomId ? `${roomPath(roomId)}${tail}` : tail;
 }
 function findRoom(overview, roomId) {
   for (const home of overview?.homes ?? []) {
@@ -3975,6 +4109,7 @@ let DanfossAllyPanel = class extends i {
     super(...arguments);
     this.narrow = false;
     this._overview = null;
+    this._rooms = [];
     this._loaded = false;
     this._refreshing = false;
     this._showOtherAreas = readShowOtherAreas();
@@ -3993,7 +4128,9 @@ let DanfossAllyPanel = class extends i {
   }
   async _load() {
     if (this.hass) {
-      this._overview = await fetchOverview(this.hass);
+      const [overview, rooms] = await Promise.all([fetchOverview(this.hass), fetchRooms(this.hass)]);
+      this._overview = overview;
+      this._rooms = rooms;
     }
   }
   async _refresh() {
@@ -4002,9 +4139,13 @@ let DanfossAllyPanel = class extends i {
     }
     this._refreshing = true;
     try {
-      const overview = await fetchOverview(this.hass);
+      const [overview, rooms] = await Promise.all([
+        fetchOverview(this.hass),
+        fetchRooms(this.hass)
+      ]);
       if (overview) {
         this._overview = overview;
+        this._rooms = rooms;
       }
     } finally {
       this._refreshing = false;
@@ -4047,7 +4188,7 @@ let DanfossAllyPanel = class extends i {
   render() {
     const overview = this._overview;
     const view = parsePath(this._path);
-    if (view.view === "fleet") {
+    if (view.view !== "room") {
       this._roomCard = void 0;
       this._roomCardId = void 0;
     }
@@ -4069,7 +4210,7 @@ let DanfossAllyPanel = class extends i {
             </button>
           </span>
         </header>
-        ${view.view === "room" ? this._renderRoomPage(overview, view.roomId) : b`${overview ? this._renderBody(overview) : this._renderUnavailable()}
+        ${view.view === "room" ? this._renderRoomPage(overview, view.roomId) : view.view === "element" ? this._renderElementPage(overview, view.deviceId) : b`${overview ? this._renderBody(overview) : this._renderUnavailable()}
             ${this._showOtherAreas ? this._renderOtherAreas() : A}`}
         <footer class="foot">${t(this.hass, "version", { version: CARD_VERSION })}</footer>
       </div>
@@ -4119,6 +4260,17 @@ let DanfossAllyPanel = class extends i {
         </div>
         <div class="rooms">${home.rooms.map((room) => this._renderRoom(room))}</div>
         ${home.relays.length > 0 ? b`<div class="relays">${home.relays.map((relay) => this._renderRelay(relay))}</div>` : A}
+        ${home.gateways.length > 0 ? b`<div class="relays">
+              ${home.gateways.map(
+      (gw) => this._renderChip(
+        gw.device_id,
+        gw.online ? "on-ok" : "offline",
+        gw.name,
+        t(this.hass, gw.online ? "head_online" : "head_offline"),
+        !gw.online
+      )
+    )}
+            </div>` : A}
       </section>
     `;
   }
@@ -4170,12 +4322,18 @@ let DanfossAllyPanel = class extends i {
           @click=${(ev) => this._navigate(FLEET_PATH, ev)}
           >${t(this.hass, "nav_building")}</a
         >
-        ${trail.map(
-      (label, i2) => b`<span class="crumb-sep" aria-hidden="true">›</span>
-              <span class="crumb" aria-current=${i2 === trail.length - 1 ? "page" : A}
-                >${label}</span
-              >`
-    )}
+        ${trail.map((crumb, i2) => {
+      const path = crumb.path;
+      return b`<span class="crumb-sep" aria-hidden="true">›</span>
+            ${path !== void 0 ? b`<a
+                  class="crumb-link"
+                  href=${this._href(path)}
+                  @click=${(ev) => this._navigate(path, ev)}
+                  >${crumb.label}</a
+                >` : b`<span class="crumb" aria-current=${i2 === trail.length - 1 ? "page" : A}
+                  >${crumb.label}</span
+                >`}`;
+    })}
       </nav>
     `;
   }
@@ -4194,7 +4352,7 @@ let DanfossAllyPanel = class extends i {
     const hint = headNameHint(room);
     const climate = climateLine(room);
     return b`
-      ${this._renderCrumbs([home.name, room.name])}
+      ${this._renderCrumbs([{ label: home.name }, { label: room.name }])}
       <section class="home room-page">
         <div class="home-head">
           <h2>${room.name}</h2>
@@ -4206,6 +4364,182 @@ let DanfossAllyPanel = class extends i {
         ${single ? b`<div class="room-sub wrap note">${t(this.hass, "nav_single_head_note")}</div>` : A}
       </section>
       ${single ? A : b`<div class="room-card-slot">${this._embeddedRoomCard(room.id)}</div>`}
+      ${this._renderRoomElements(room)}
+      ${single ? A : this._renderEntities(haDeviceId(this.hass, roomDeviceIdent(room.id)), "el_room_entities", false)}
+    `;
+  }
+  /** Têtes de la pièce, chacune un lien vers sa page. */
+  _renderRoomElements(room) {
+    const heads = roomHeads(room, this._rooms);
+    if (heads.length === 0) {
+      return A;
+    }
+    return b`
+      <section class="home">
+        <div class="home-head"><h2>${t(this.hass, "el_elements")}</h2></div>
+        <div class="rooms">
+          ${heads.map((h2) => {
+      const path = elementPath(h2.id, room.id);
+      const head = h2.head;
+      return b`
+              <a
+                class="room link ${h2.online ? "ok" : "attn"}"
+                href=${this._href(path)}
+                @click=${(ev) => this._navigate(path, ev)}
+              >
+                <div class="room-top">
+                  <span class="room-name" title=${h2.name}>${h2.name}</span>
+                </div>
+                <div class="room-sub">${t(this.hass, "el_kind_head")}</div>
+                <div class="flags">
+                  ${h2.online ? b`<span class="flag ok">${t(this.hass, "head_online")}</span>` : b`<span class="flag warn">${t(this.hass, "head_offline")}</span>`}
+                  ${head && head.battery !== null ? b`<span class="flag">${t(this.hass, "head_battery", { value: head.battery })}</span>` : A}
+                  ${head?.window_open ? b`<span class="flag warn">${t(this.hass, "head_window_open")}</span>` : A}
+                  ${head && head.faults.length > 0 ? b`<span class="flag bad">${t(this.hass, "room_faults_n", { n: head.faults.length })}</span>` : A}
+                </div>
+              </a>
+            `;
+    })}
+        </div>
+      </section>
+    `;
+  }
+  /** Page d'un élément (§8.2) : fil d'Ariane, état connu, entités de son appareil HA. */
+  _renderElementPage(overview, deviceId) {
+    if (!overview) {
+      return b`${this._renderCrumbs([])}${this._renderUnavailable()}`;
+    }
+    const el = findElement(overview, this._rooms, deviceId);
+    if (!el) {
+      return b`${this._renderCrumbs([])}
+        <div class="unavailable">${t(this.hass, "nav_element_not_found")}</div>`;
+    }
+    const trail = [{ label: el.home.name }];
+    if (el.kind === "head") {
+      trail.push({ label: el.room.name, path: roomPath(el.room.id) });
+    }
+    trail.push({ label: el.name });
+    const kindKey = el.kind === "head" ? "el_kind_head" : el.kind === "relay" ? "el_kind_relay" : "el_kind_gateway";
+    return b`
+      ${this._renderCrumbs(trail)}
+      <section class="home room-page">
+        <div class="home-head">
+          <h2>${el.name}</h2>
+          <span class="heads-count">${t(this.hass, kindKey)}</span>
+        </div>
+        <div class="flags">${this._elementFlags(el)}</div>
+      </section>
+      ${this._renderEntities(haDeviceId(this.hass, el.id), "el_state", true)}
+    `;
+  }
+  /** État connu d'un élément, tiré de `overview` / `rooms` (jamais supposé). */
+  _elementFlags(el) {
+    const online = el.online ? b`<span class="flag ok">${t(this.hass, "head_online")}</span>` : b`<span class="flag warn">${t(this.hass, "head_offline")}</span>`;
+    if (el.kind === "relay") {
+      return b`${online}
+        ${el.online && el.relay.on !== null ? b`<span class="flag ${el.relay.on ? "hot" : ""}"
+              >${t(this.hass, el.relay.on ? "relay_on" : "relay_off")}</span
+            >` : A}
+        <span class="flag">${t(this.hass, "rooms_linked", { n: el.relay.linked_rooms })}</span>`;
+    }
+    if (el.kind === "gateway") {
+      const gw = el.gateway;
+      return b`${online}
+        ${gw.head_count !== void 0 || gw.relay_count !== void 0 ? b`<span class="flag"
+              >${t(this.hass, "el_carries", {
+        heads: gw.head_count ?? 0,
+        relays: gw.relay_count ?? 0
+      })}</span
+            >` : A}`;
+    }
+    const head = el.head;
+    if (!head) {
+      return b`${online}`;
+    }
+    return b`${online}
+      <span class="flag">${modeLabel(this.hass, head.mode_displayed)}</span>
+      ${head.schedule_active === null ? A : b`<span class="flag ${head.schedule_active ? "" : "warn"}"
+            >${t(this.hass, head.schedule_active ? "head_schedule_on" : "head_schedule_off")}</span
+          >`}
+      ${head.inconsistent ? b`<span class="flag warn">${t(this.hass, "head_inconsistent")}</span>` : A}
+      ${head.mounting ? b`<span class="flag warn">${t(this.hass, "head_mounting")}</span>` : A}
+      ${head.battery !== null ? b`<span class="flag">${t(this.hass, "head_battery", { value: head.battery })}</span>` : A}
+      ${head.valve_opening !== null ? b`<span class="flag">${t(this.hass, "head_valve", { value: head.valve_opening })}</span>` : A}
+      ${head.heat_request === null ? A : b`<span class="flag ${head.heat_request ? "hot" : ""}"
+            >${t(this.hass, head.heat_request ? "el_heat_request" : "el_no_heat_request")}</span
+          >`}
+      ${head.window_open === null ? A : b`<span class="flag ${head.window_open ? "warn" : ""}"
+            >${t(this.hass, head.window_open ? "head_window_open" : "el_window_closed")}</span
+          >`}
+      ${head.child_lock ? b`<span class="flag">${t(this.hass, "head_child_lock")}</span>` : A}
+      ${head.faults.map(
+      (f2) => b`<span class="flag bad" title=${f2.action ?? ""}
+            >${t(this.hass, "head_fault", { code: f2.code })}${f2.label ? ` — ${f2.label}` : ""}</span
+          >`
+    )}`;
+  }
+  /**
+   * Entités d'un appareil HA, par groupe. `explain` : dit pourquoi il n'y a rien (pas
+   * d'appareil, pas d'entité) ; sinon la section est simplement absente.
+   */
+  _renderEntities(deviceId, titleKey, explain) {
+    const groups = deviceId ? deviceEntities(this.hass, deviceId) : null;
+    if (!groups || entityCount(groups) === 0) {
+      return explain ? b`<div class="unavailable">
+            ${t(this.hass, deviceId ? "el_no_entities" : "el_no_device")}
+          </div>` : A;
+    }
+    const titled = titleKey === "el_room_entities";
+    return b`
+      ${titled ? b`<h2 class="section-title">${t(this.hass, titleKey)}</h2>` : A}
+      <div class="room-sub wrap">${t(this.hass, "el_entities_hint")}</div>
+      ${ENTITY_GROUPS.filter((g2) => groups[g2].length > 0).map(
+      (g2) => b`
+          <section class="home">
+            <div class="home-head"><h2>${t(this.hass, `el_group_${g2}`)}</h2></div>
+            <div class="ent-list">${groups[g2].map((row) => this._renderEntityRow(row))}</div>
+          </section>
+        `
+    )}
+    `;
+  }
+  _renderEntityRow(row) {
+    const stateObj = this.hass?.states?.[row.entity_id];
+    const value = !row.available ? t(this.hass, "el_unavailable") : stateObj && this.hass?.formatEntityState ? this.hass.formatEntityState(stateObj) : `${row.state}${row.unit ? ` ${row.unit}` : ""}`;
+    return b`
+      <button
+        class="ent-row ${row.available ? "" : "ent-off"}"
+        @click=${() => this._moreInfo(row.entity_id)}
+      >
+        <span class="ent-name">${row.name}</span>
+        <span class="ent-state">${value}</span>
+      </button>
+    `;
+  }
+  /** Ouvre la fenêtre d'entité de Home Assistant (lecture, et réglage par l'entité elle-même). */
+  _moreInfo(entityId) {
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        detail: { entityId },
+        bubbles: true,
+        composed: true
+      })
+    );
+  }
+  /** Pastille d'un relais ou d'une passerelle : lien vers sa page. */
+  _renderChip(deviceId, dot, name, stateLabel, offline, extra = null) {
+    const path = elementPath(deviceId);
+    return b`
+      <a
+        class="relay chip ${offline ? "relay-offline" : ""}"
+        href=${this._href(path)}
+        @click=${(ev) => this._navigate(path, ev)}
+      >
+        <span class="relay-dot ${dot}"></span>
+        <span class="relay-name">${name}</span>
+        <span class="relay-state">${stateLabel}</span>
+        ${extra ? b`<span class="relay-rooms">${extra}</span>` : A}
+      </a>
     `;
   }
   /**
@@ -4264,14 +4598,14 @@ let DanfossAllyPanel = class extends i {
     const on = !offline && relay.on === true;
     const state2 = offline ? "offline" : on ? "on" : "off";
     const label = offline ? "relay_offline" : on ? "relay_on" : "relay_off";
-    return b`
-      <div class="relay ${offline ? "relay-offline" : ""}">
-        <span class="relay-dot ${state2}"></span>
-        <span class="relay-name">${relay.name}</span>
-        <span class="relay-state">${t(this.hass, label)}</span>
-        <span class="relay-rooms">${t(this.hass, "rooms_linked", { n: relay.linked_rooms })}</span>
-      </div>
-    `;
+    return this._renderChip(
+      relay.device_id,
+      state2,
+      relay.name,
+      t(this.hass, label),
+      offline,
+      t(this.hass, "rooms_linked", { n: relay.linked_rooms })
+    );
   }
 };
 DanfossAllyPanel.styles = i$3`
@@ -4426,7 +4760,60 @@ DanfossAllyPanel.styles = i$3`
     a.room.link:hover {
       box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
     }
+    a.relay.chip {
+      text-decoration: none;
+      border: 1px solid var(--divider-color, #e8e8e8);
+      border-radius: 14px;
+      padding: 3px 10px;
+      cursor: pointer;
+    }
+    a.relay.chip:hover {
+      box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+    }
+    .relay-dot.on-ok {
+      background: var(--success-color, #2e7d32);
+    }
+    .section-title {
+      margin: 18px 0 6px;
+    }
+    .ent-list {
+      display: flex;
+      flex-direction: column;
+    }
+    .ent-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      width: 100%;
+      padding: 9px 4px;
+      border: 0;
+      border-top: 1px solid var(--divider-color, #eee);
+      background: none;
+      color: var(--primary-text-color);
+      font: inherit;
+      font-size: 0.9rem;
+      text-align: left;
+      cursor: pointer;
+    }
+    .ent-row:first-child {
+      border-top: 0;
+    }
+    .ent-row:hover {
+      background: var(--secondary-background-color, #f5f5f5);
+    }
+    .ent-state {
+      font-variant-numeric: tabular-nums;
+      color: var(--secondary-text-color);
+      text-align: right;
+    }
+    .ent-off .ent-state {
+      color: var(--warning-color, #ffa600);
+      font-style: italic;
+    }
     a.room.link:focus-visible,
+    a.relay.chip:focus-visible,
+    .ent-row:focus-visible,
     .crumb-link:focus-visible {
       outline: 2px solid var(--primary-color, #03a9f4);
       outline-offset: 2px;
@@ -4589,6 +4976,9 @@ __decorateClass([
 __decorateClass([
   r()
 ], DanfossAllyPanel.prototype, "_overview", 2);
+__decorateClass([
+  r()
+], DanfossAllyPanel.prototype, "_rooms", 2);
 __decorateClass([
   r()
 ], DanfossAllyPanel.prototype, "_loaded", 2);

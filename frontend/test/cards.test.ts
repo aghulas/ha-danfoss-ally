@@ -946,6 +946,157 @@ describe("panneau — navigation", () => {
   });
 });
 
+describe("panneau — éléments", () => {
+  const overview = {
+    homes: [
+      {
+        gid: "h1",
+        name: "École",
+        holiday_active: false,
+        gateways: [{ device_id: "gw1", name: "Passerelle", online: true, head_count: 2, relay_count: 1 }],
+        relays: [{ device_id: "r1", name: "Relais chaufferie", on: true, online: false, linked_rooms: 2 }],
+        rooms: [
+          {
+            id: "g1",
+            name: "Salle 1",
+            kind: "group",
+            head_count: 1,
+            offline: 0,
+            low_battery: 0,
+            heating: false,
+            window_open: false,
+            inconsistent: 0,
+            faults: 0,
+          },
+        ],
+      },
+    ],
+    totals: {},
+  };
+  const rooms = [
+    {
+      id: "g1",
+      name: "Salle 1",
+      heads: [
+        {
+          device_id: "a",
+          name: "Salle 1 #1",
+          room_id: "g1",
+          online: true,
+          mode_displayed: "at_home",
+          schedule_active: false,
+          preheat: null,
+          mounting: false,
+          inconsistent: false,
+          battery: 80,
+          valve_opening: 20,
+          heat_request: null,
+          window_open: true,
+          window_detection: null,
+          child_lock: null,
+          faults: [{ code: "E14", label: "low battery" }],
+        },
+      ],
+    },
+  ];
+
+  function panel(path: string, registries: Record<string, unknown> = {}): Internals {
+    const el = new DanfossAllyPanel() as Internals;
+    el.hass = { callWS: async () => ({}), language: "en", ...registries };
+    el._overview = overview;
+    el._rooms = rooms;
+    el.route = { prefix: "/p", path };
+    el.willUpdate(new Map([["route", undefined]]));
+    return el;
+  }
+
+  it("le bâtiment relie relais et passerelles à leur page", () => {
+    const text = templateText(panel("").render());
+    expect(text).toContain("/p/device/r1");
+    expect(text).toContain("/p/device/gw1");
+  });
+
+  it("la page d'une pièce liste ses têtes, chacune un lien", () => {
+    const text = templateText(panel("/room/g1").render());
+    expect(text).toContain("Elements");
+    expect(text).toContain("/p/room/g1/device/a");
+    expect(text).toContain("Battery 80%");
+  });
+
+  it("la page d'une tête montre son état connu et un lien vers sa pièce", () => {
+    const text = templateText(panel("/device/a").render());
+    expect(text).toContain("Thermostat");
+    expect(text).toContain("/p/room/g1"); // fil d'Ariane vers la pièce réelle
+    expect(text).toContain("Not following the schedule");
+    expect(text).toContain("Window open");
+    expect(text).toContain("Fault E14");
+    expect(text).not.toContain("Calling for heat"); // champ `null` : rien n'est supposé
+    expect(text).toContain("No Home Assistant device matches");
+  });
+
+  it("un relais hors ligne ne montre pas son dernier marche/arrêt", () => {
+    const text = templateText(panel("/device/r1").render());
+    expect(text).toContain("Boiler relay");
+    expect(text).toContain("Offline");
+    expect(text).not.toMatch(/>\s*On\s*</);
+    expect(text).toContain("2 linked rooms");
+  });
+
+  it("une passerelle dit ce qu'elle porte", () => {
+    expect(templateText(panel("/device/gw1").render())).toContain(
+      "Carries 2 thermostat(s) and 1 relay(s)",
+    );
+  });
+
+  it("les entités de l'appareil sont listées ; une indisponible le reste", () => {
+    const el = panel("/device/a", {
+      devices: { d1: { id: "d1", name: "Salle 1 #1", identifiers: [["danfoss_ally_cloud", "a"]] } },
+      entities: {
+        "number.off": { entity_id: "number.off", device_id: "d1", entity_category: "config" },
+        "switch.pre": { entity_id: "switch.pre", device_id: "d1", entity_category: "config" },
+      },
+      states: {
+        "number.off": {
+          entity_id: "number.off",
+          state: "0.5",
+          attributes: { friendly_name: "Salle 1 #1 Offset", unit_of_measurement: "°C" },
+        },
+        "switch.pre": {
+          entity_id: "switch.pre",
+          state: "unavailable",
+          attributes: { friendly_name: "Salle 1 #1 Preheat" },
+        },
+      },
+    });
+    const text = templateText(el.render());
+    expect(text).toContain("Settings");
+    expect(text).toContain("0.5 °C");
+    expect(text).toMatch(/Preheat[\s\S]*Unavailable/);
+    expect(text).not.toContain("No Home Assistant device");
+  });
+
+  it("une ligne d'entité ouvre la fenêtre d'entité de Home Assistant, sans rien écrire", () => {
+    const el = panel("/device/a");
+    const calls: unknown[] = [];
+    el.hass.callWS = async (msg: unknown) => void calls.push(msg);
+    el.hass.callService = async (...args: unknown[]) => void calls.push(args);
+    const events: CustomEvent[] = [];
+    el.dispatchEvent = (ev: CustomEvent) => (events.push(ev), true);
+    el._moreInfo("switch.pre");
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe("hass-more-info");
+    expect(events[0].detail).toEqual({ entityId: "switch.pre" });
+    expect(events[0].bubbles && events[0].composed).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it("un élément disparu se dégrade avec le fil d'Ariane", () => {
+    expect(templateText(panel("/device/gone").render())).toContain(
+      "no longer in the fleet overview",
+    );
+  });
+});
+
 describe("abonnement aux lots", () => {
   function subscribingHass(): { hass: HassLike; active: () => number } {
     let active = 0;

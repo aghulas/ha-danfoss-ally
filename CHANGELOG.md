@@ -15,6 +15,11 @@
   under the panel URL) with a breadcrumb back to the building; the browser's back button and a
   copied link work. A grouped room's page embeds the room card unchanged (same reads, actions and
   rules); a single-head room's page is read-only. The panel adds no write path of its own.
+- Side panel: element pages (contract §8.2). A room page lists its heads; heads, boiler relays and
+  gateways each have a page with their known state and the entities of their Home Assistant
+  device, grouped (controls and readings, settings, diagnostics). A row opens the entity in Home
+  Assistant's own dialog, where a setting is changed under the entity's rules; an unavailable
+  entity stays listed as unavailable. A grouped room's page also lists the room's entities.
 
 ## 2.0.10 — Direct-cloud onboarding with email, password and country only
 
