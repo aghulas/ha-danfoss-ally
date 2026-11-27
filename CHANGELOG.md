@@ -8,6 +8,10 @@
   it measures when the coordinator knows the link (v2 Companion), never guessed from a name. The
   side panel lists a room's sensors on its page, links the others from their home, and gives each
   a page (online, temperature, humidity, battery, entities). Offline readings are not shown.
+- v2 Companion: boiler relays' room linkage, read from `bridge/relays` (published by
+  `danfoss2mqtt` from the next `pydanfoss-cloud` release). `overview` (`linked_rooms`),
+  `get_relays` and the relay's linked-rooms sensor were always 0 / empty under the Companion;
+  they now show what the bridge publishes. Read only; empty until a bridge publishes it.
 
 ## 2.0.11 — Side panel navigation, relays under their own home
 

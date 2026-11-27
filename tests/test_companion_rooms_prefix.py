@@ -66,6 +66,44 @@ async def test_two_bridges_holidays_do_not_overwrite(hass: HomeAssistant) -> Non
 
 
 @pytest.mark.asyncio
+async def test_relays_linkage_is_ingested_per_bridge(hass: HomeAssistant) -> None:
+    comp = MqttCompanionCoordinator(hass, ("danfoss2mqtt", "danfoss-rooms"))
+    assert comp.relay_rooms == {}  # nothing published: no linkage is assumed
+    comp.process_mqtt_message(
+        "danfoss2mqtt/bridge/relays",
+        json.dumps(
+            {
+                "relay-1": [
+                    {"room_id": 77, "name": "Salle 1", "linked": True},
+                    {"room_id": 78, "name": "Salle 2", "linked": False},
+                    {"name": "no id"},  # dropped
+                    "not a room",  # dropped
+                ],
+                "relay-bad": "not a list",  # dropped
+            }
+        ),
+    )
+    comp.process_mqtt_message("danfoss-rooms/bridge/relays", json.dumps({"relay-9": []}))
+    assert comp.relay_rooms == {
+        "relay-1": [
+            {"room_id": "77", "name": "Salle 1", "linked": True},
+            {"room_id": "78", "name": "Salle 2", "linked": False},
+        ],
+        "relay-9": [],
+    }
+    # A malformed payload leaves the previous linkage in place.
+    comp.process_mqtt_message("danfoss2mqtt/bridge/relays", "{not json")
+    comp.process_mqtt_message("danfoss2mqtt/bridge/relays", json.dumps(["not", "a dict"]))
+    assert "relay-1" in comp.relay_rooms
+    # The Companion view exposes it to overview / get_relays / the linked-rooms sensor.
+    from custom_components.danfoss_ally_cloud.companion_adapter import CompanionCoordinatorView
+    from custom_components.danfoss_ally_cloud.companion_rooms import CompanionRoomManager
+
+    view = CompanionCoordinatorView(comp, CompanionRoomManager(comp))
+    assert sum(1 for r in view.relay_rooms["relay-1"] if r["linked"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_bad_payloads_leave_store_untouched(hass: HomeAssistant) -> None:
     comp = MqttCompanionCoordinator(hass, ("danfoss-rooms",))
     comp.process_mqtt_message("danfoss-rooms/bridge/rooms", _rooms("room-aa"))

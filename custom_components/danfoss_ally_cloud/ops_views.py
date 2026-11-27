@@ -230,8 +230,9 @@ def _relay_home_gid(
 
     The per-home device list (``head_home``) is exact and wins: the direct-cloud coordinator reads
     it from the account, and ``danfoss2mqtt`` publishes it per device (``danfoss.home_id``). It is
-    the only source under the v2 Companion, whose ``relay_rooms`` is empty: without it every relay
-    fell back to the first home. The vote below is the fallback when that home is unknown.
+    the only source under the v2 Companion while no bridge has published ``bridge/relays`` (its
+    ``relay_rooms`` is then empty): without it every relay fell back to the first home. The vote
+    below is the fallback when that home is unknown.
 
     The relay -> room link (``relay_rooms``) carries Tuya *room* ids (type 4), a different id space
     from the schedule *groups* (type 5) that ``home_of`` knows, so rooms are matched by name (the

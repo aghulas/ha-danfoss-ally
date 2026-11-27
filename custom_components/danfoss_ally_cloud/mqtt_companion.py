@@ -109,6 +109,8 @@ class MqttCompanionCoordinator:
         self._rooms_by_prefix: dict[str, dict[str, dict[str, Any]]] = {}
         self._holidays_by_prefix: dict[str, dict[str, Any]] = {}
         self._heat_demand_by_prefix: dict[str, dict[str, Any]] = {}
+        # Boiler relays' room linkage (``bridge/relays``): relay id -> [{room_id, name, linked}].
+        self._relays_by_prefix: dict[str, dict[str, list[dict[str, Any]]]] = {}
         # Optional home_id per device published under danfoss.home_id in bridge/devices
         self.device_home: dict[str, str] = {}
         # Devices served by a cloud-only bridge (danfoss2mqtt) whose /set surface is restricted
@@ -129,6 +131,17 @@ class MqttCompanionCoordinator:
         merged: dict[str, dict[str, Any]] = {}
         for rooms in self._rooms_by_prefix.values():
             merged.update(rooms)
+        return merged
+
+    @property
+    def relay_rooms(self) -> dict[str, list[dict[str, Any]]]:
+        """All bridges' relay -> rooms linkage merged (read-only view, ``bridge/relays``).
+
+        Empty for a relay until its bridge has published it: a linkage is never assumed.
+        """
+        merged: dict[str, list[dict[str, Any]]] = {}
+        for relays in self._relays_by_prefix.values():
+            merged.update(relays)
         return merged
 
     @property
@@ -213,6 +226,7 @@ class MqttCompanionCoordinator:
                 f"{prefix}/bridge/devices",
                 f"{prefix}/bridge/rooms",
                 f"{prefix}/bridge/holidays",
+                f"{prefix}/bridge/relays",
                 f"{prefix}/bridge/heat_demand",
                 f"{prefix}/bridge/response/#",
                 f"{prefix}/+",
@@ -266,6 +280,10 @@ class MqttCompanionCoordinator:
 
         if suffix == "bridge/holidays":
             self._ingest_bridge_holidays(matched_prefix, raw_payload)
+            return
+
+        if suffix == "bridge/relays":
+            self._ingest_bridge_relays(matched_prefix, raw_payload)
             return
 
         if suffix == "bridge/heat_demand":
@@ -386,6 +404,34 @@ class MqttCompanionCoordinator:
         except (ValueError, UnicodeDecodeError):
             return
         self._holidays_by_prefix[prefix] = holidays
+        self._notify_listeners()
+
+    def _ingest_bridge_relays(self, prefix: str, raw_payload: str | bytes) -> None:
+        """Ingest ``bridge/relays``: ``{relay_id: [{"room_id", "name", "linked"}]}``.
+
+        A malformed payload is ignored (the previous linkage stands); malformed rooms are dropped.
+        """
+        try:
+            text = raw_payload.decode("utf-8") if isinstance(raw_payload, bytes) else raw_payload
+            relays = json.loads(text)
+            if not isinstance(relays, dict):
+                return
+        except (ValueError, UnicodeDecodeError):
+            return
+        clean: dict[str, list[dict[str, Any]]] = {}
+        for relay_id, rooms in relays.items():
+            if not isinstance(rooms, list):
+                continue
+            clean[str(relay_id)] = [
+                {
+                    "room_id": str(r["room_id"]),
+                    "name": r.get("name"),
+                    "linked": bool(r.get("linked")),
+                }
+                for r in rooms
+                if isinstance(r, dict) and r.get("room_id") is not None
+            ]
+        self._relays_by_prefix[prefix] = clean
         self._notify_listeners()
 
     def _ingest_bridge_heat_demand(self, prefix: str, raw_payload: str | bytes) -> None:
