@@ -574,6 +574,7 @@ const STRINGS = {
     card_description: "Weekly schedule of a Danfoss Ally room (cloud). Minimal card — editing comes later.",
     no_room: "No room selected",
     unknown_room: "Unknown room ({id})",
+    loading: "Loading…",
     version: "Version {version}",
     reload_available: "A new version of the card is available.",
     reload: "Reload",
@@ -762,6 +763,7 @@ const STRINGS = {
     card_description: "Programme hebdomadaire d'une pièce Danfoss Ally (cloud). Carte minimale — l'édition viendra plus tard.",
     no_room: "Aucune pièce choisie",
     unknown_room: "Pièce inconnue ({id})",
+    loading: "Chargement…",
     version: "Version {version}",
     reload_available: "Une nouvelle version de la carte est disponible.",
     reload: "Recharger",
@@ -3193,6 +3195,7 @@ let DanfossAllyRoomCard = class extends i {
     this._info = null;
     this._schedule = null;
     this._loaded = false;
+    this._pending = true;
     this._refreshing = false;
     this._busy = false;
     this._error = null;
@@ -3223,6 +3226,7 @@ let DanfossAllyRoomCard = class extends i {
       this._schedule = null;
       this._job = null;
       this._error = null;
+      this._pending = true;
       void this._load();
     }
   }
@@ -3315,6 +3319,7 @@ let DanfossAllyRoomCard = class extends i {
       }
       this._info = info;
       this._rooms = rooms;
+      this._pending = false;
       this._schedule = schedule;
       this._scheduleRoomId = target?.id;
       if (!target && this._target) {
@@ -3481,19 +3486,20 @@ let DanfossAllyRoomCard = class extends i {
     const comfort = this._schedule?.comfort ?? room?.comfort ?? null;
     const setback = this._schedule?.setback ?? room?.setback ?? null;
     const areaMode = Boolean(this._config?.area_id);
+    const loading = this._pending && !areaMode && !room && Boolean(this._config?.room_id);
     return b`
       <ha-card>
         <div class="content">
           ${showReload ? renderReloadBanner(this.hass, () => this._reload()) : A}
           <div class="titlebar">
-            <div class="room">${this._title(room)}</div>
+            <div class="room">${loading ? t(this.hass, "loading") : this._title(room)}</div>
             ${this._renderActions(room)}
           </div>
           ${areaMode ? this._renderRoomSensors() : A}
           ${areaMode && room ? b`<div class="hint">${t(this.hass, "area_ally_room", { name: room.name })}</div>` : A}
           ${readOnly ? b`<div class="hint">${t(this.hass, "read_only")}</div>` : A}
           ${this._error ? b`<div class="banner error" role="alert">${this._error}</div>` : A}
-          ${room || !areaMode ? this._renderAllyBody(room, comfort, setback) : A}
+          ${loading ? A : room || !areaMode ? this._renderAllyBody(room, comfort, setback) : A}
           ${areaMode ? this._renderAreaClimates(room) : A}
           ${room || !areaMode ? renderCardFooter(
       this.hass,
@@ -3921,6 +3927,9 @@ __decorateClass$1([
 __decorateClass$1([
   r()
 ], DanfossAllyRoomCard.prototype, "_loaded", 2);
+__decorateClass$1([
+  r()
+], DanfossAllyRoomCard.prototype, "_pending", 2);
 __decorateClass$1([
   r()
 ], DanfossAllyRoomCard.prototype, "_refreshing", 2);

@@ -8,6 +8,8 @@
   relay-to-room linkage is empty, so with several homes every relay fell back to the first one. The
   relay's own home (published per device by `danfoss2mqtt`) now wins; the vote of the linked rooms
   is only the fallback when that home is unknown.
+- Room card: while its first read is in flight, the card says "Loading…" instead of "Unknown room",
+  "schedule unavailable" and "no thermostat". Visible for a few seconds on the panel's room page.
 
 **Added**
 

@@ -501,6 +501,31 @@ describe("carte pièce", () => {
     return el;
   }
 
+  it("pendant la première lecture, la carte dit qu'elle charge, pas « pièce inconnue »", async () => {
+    const gate = deferred<{ rooms: unknown[] }>();
+    const { hass } = fakeHass({
+      rooms: () => gate.promise,
+      "schedule/get": () => schedule("13000000", []),
+    });
+    const el = new DanfossAllyRoomCard() as Internals;
+    el.setConfig({ room_id: "13000000" });
+    el.hass = { ...hass, language: "en" };
+    el._loaded = true;
+    const load = el._load();
+    let text = templateText(el.render());
+    expect(text).toContain("Loading…");
+    expect(text).not.toContain("Unknown room");
+    expect(text).not.toContain("No thermostat");
+    gate.resolve({ rooms: [] }); // lecture aboutie, pièce absente : là, elle est inconnue
+    await load;
+    text = templateText(el.render());
+    expect(text).toContain("Unknown room (13000000)");
+    expect(text).not.toContain("Loading…");
+    // Changer de pièce remet la carte en chargement.
+    el.setConfig({ room_id: "13000001" });
+    expect(templateText(el.render())).toContain("Loading…");
+  });
+
   it("annuler l'éditeur imbriqué ne remplace pas une lecture plus fraîche du parent", async () => {
     vi.stubGlobal("document", { createElement: () => new DanfossAllyScheduleCard() });
     const { hass } = roomHass(() => schedule("13000000", [r("08:00", "12:00")]));
