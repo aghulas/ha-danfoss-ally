@@ -1020,7 +1020,7 @@ function formatReadAt(iso, lang2) {
     timeStyle: "short"
   }).format(date);
 }
-const CARD_VERSION = "2.0.9";
+const CARD_VERSION = "2.0.10";
 function needsReload(cardVersion, serverVersion) {
   if (!serverVersion) {
     return false;
