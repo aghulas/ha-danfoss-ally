@@ -115,6 +115,9 @@ class MqttCompanionCoordinator:
         self.device_home: dict[str, str] = {}
         # Devices served by a cloud-only bridge (danfoss2mqtt) whose /set surface is restricted
         self._cloud_bridge_devices: set[str] = set()
+        # /set keys a cloud-only bridge advertises for a device (``danfoss.set_keys`` in
+        # ``bridge/devices``): what it can write right now. Absent for an older bridge.
+        self._advertised_set_keys: dict[str, frozenset[str]] = {}
 
         self._unsubs: list[CALLBACK_TYPE] = []
         self._listeners: list[Callable[[], None]] = []
@@ -185,13 +188,18 @@ class MqttCompanionCoordinator:
     def supports_device_set(self, dev_id: str, z2m_key: str) -> bool:
         """Return True if publishing ``z2m_key`` to ``dev_id``'s ``/set`` topic is supported.
 
-        Zigbee2MQTT devices accept the full Z2M ``/set`` surface; cloud-only ``danfoss2mqtt``
-        devices only have a proven path 1a for room setpoints (``occupied_heating_setpoint``),
-        matching ``api.bridge_daemon._CLOUD_UNSUPPORTED_SET_KEYS``.
+        Zigbee2MQTT devices accept the full Z2M ``/set`` surface. A cloud-only ``danfoss2mqtt``
+        device accepts the keys its bridge advertises for it (``danfoss.set_keys``: the head
+        settings it can write on a proven channel right now, e.g. only on the trial head while
+        that supervised write is open); a bridge that advertises nothing only has the room
+        setpoint (``occupied_heating_setpoint``).
         """
         if dev_id not in self.device_route:
             return False
         if dev_id in self._cloud_bridge_devices:
+            advertised = self._advertised_set_keys.get(dev_id)
+            if advertised is not None:
+                return z2m_key in advertised
             return z2m_key in CLOUD_BRIDGE_SUPPORTED_SET_KEYS
         return True
 
@@ -346,6 +354,11 @@ class MqttCompanionCoordinator:
                 self._cloud_bridge_devices.add(dev.id)
             else:
                 self._cloud_bridge_devices.discard(dev.id)
+            keys = ext.get("set_keys") if isinstance(ext, dict) else None
+            if isinstance(keys, list):
+                self._advertised_set_keys[dev.id] = frozenset(str(k) for k in keys)
+            else:
+                self._advertised_set_keys.pop(dev.id, None)
             seen_for_prefix.add(dev.id)
 
         # Remove stale devices that belonged to this prefix and disappeared from bridge/devices
@@ -359,6 +372,7 @@ class MqttCompanionCoordinator:
             self._by_topic_key.pop((p, f), None)
             self.device_home.pop(dev_id, None)
             self._cloud_bridge_devices.discard(dev_id)
+            self._advertised_set_keys.pop(dev_id, None)
             self.data.pop(dev_id, None)
 
         self._notify_listeners()

@@ -466,6 +466,12 @@ class DanfossSwitch(DanfossEntity, SwitchEntity):
             route = companion.device_route.get(dev.id) if companion is not None else None
             if route is not None:
                 attrs["mqtt_bridge"] = route[0]
+            group_id = self.coordinator.group_of(dev.id)
+            if companion is not None and companion.is_cloud_bridge_device(dev.id) and group_id:
+                # The cloud bridge writes a grouped head's setting on its room's group publish:
+                # every head of the room takes it, not this one alone (contract §4.2).
+                attrs["write_scope"] = "room"
+                attrs["room_head_count"] = len(self.coordinator.room_members(group_id))
         elif path == PATH_ROOM and dev is not None:
             group_id = self.coordinator.group_of(dev.id)
             attrs["write_scope"] = "room"
