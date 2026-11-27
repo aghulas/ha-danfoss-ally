@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Room sensors in the side panel
+
+**Added**
+
+- `overview`: room sensors (`homes[].sensors`, `totals.sensors`; contract §3.6), each with the room
+  it measures when the coordinator knows the link (v2 Companion), never guessed from a name. The
+  side panel lists a room's sensors on its page, links the others from their home, and gives each
+  a page (online, temperature, humidity, battery, entities). Offline readings are not shown.
+
 ## 2.0.11 — Side panel navigation, relays under their own home
 
 **Fixed**
@@ -29,10 +38,6 @@
   device, grouped (controls and readings, settings, diagnostics). A row opens the entity in Home
   Assistant's own dialog, where a setting is changed under the entity's rules; an unavailable
   entity stays listed as unavailable. A grouped room's page also lists the room's entities.
-- `overview`: room sensors (`homes[].sensors`, `totals.sensors`; contract §3.6), each with the room
-  it measures when the coordinator knows the link (v2 Companion), never guessed from a name. The
-  side panel lists a room's sensors on its page, links the others from their home, and gives each
-  a page (online, temperature, humidity, battery, entities). Offline readings are not shown.
 
 ## 2.0.10 — Direct-cloud onboarding with email, password and country only
 
