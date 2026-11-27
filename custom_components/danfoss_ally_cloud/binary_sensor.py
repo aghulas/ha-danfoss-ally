@@ -64,6 +64,23 @@ async def async_setup_entry(
             entities.append(DanfossBridgeConnectivity(entry.entry_id, companion, prefix))
     async_add_entities(entities)
 
+    if companion is not None:
+        # The Companion fleet arrives over MQTT AFTER the platforms are set up: a boiler relay
+        # known only later had no on/off entity (and no device). Add it when it appears.
+        known_relays: set[str] = {dev.id for dev in coordinator.data.values() if dev.is_relay}
+
+        @callback
+        def _sync_companion_relays() -> None:
+            added: list[BinarySensorEntity] = []
+            for dev in list(coordinator.data.values()):
+                if dev.is_relay and dev.id not in known_relays:
+                    known_relays.add(dev.id)
+                    added.append(DanfossRelay(coordinator, dev.id))
+            if added:
+                async_add_entities(added)
+
+        entry.async_on_unload(companion.async_add_listener(_sync_companion_relays))
+
 
 class DanfossBridgeConnectivity(BinarySensorEntity):
     """Online/offline connectivity of a v2.x MQTT bridge (e.g. ``danfoss2mqtt``, ``zigbee2mqtt``).

@@ -264,6 +264,30 @@ async def async_setup_entry(
 
         entry.async_on_unload(companion.async_add_listener(_sync_heat_demand))
 
+        # The Companion fleet arrives over MQTT AFTER the platforms are set up: at setup time
+        # ``coordinator.data`` is usually empty, so the room sensors and boiler relays listed
+        # above were never created (they had no entity and no device at all). Add them as they
+        # appear, like the climate / number / switch platforms do for heads.
+        known_devices: set[str] = {
+            dev.id for dev in coordinator.data.values() if dev.is_sensor or dev.is_relay
+        }
+
+        @callback
+        def _sync_companion_devices() -> None:
+            added: list[SensorEntity] = []
+            for dev in list(coordinator.data.values()):
+                if dev.id in known_devices or not (dev.is_sensor or dev.is_relay):
+                    continue
+                known_devices.add(dev.id)
+                if dev.is_sensor:
+                    added.extend(DanfossSensor(coordinator, dev.id, desc) for desc in ROOM_SENSORS)
+                else:
+                    added.append(DanfossRelayRooms(coordinator, dev.id))
+            if added:
+                async_add_entities(added)
+
+        entry.async_on_unload(companion.async_add_listener(_sync_companion_devices))
+
 
 class DanfossLocalSensor(DanfossLocalEntity, SensorEntity):
     """What the head itself reports, read through the local tunnel (read only).
