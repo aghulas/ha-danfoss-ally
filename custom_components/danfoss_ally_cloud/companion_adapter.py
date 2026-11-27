@@ -85,6 +85,23 @@ class CompanionCoordinatorView:
         route = self.companion.device_route.get(head_id)
         return route[0] if route is not None else None
 
+    def sensor_rooms(self) -> dict[str, str]:
+        """Room sensor id -> ``group_id`` of the room it measures (overview, contract §3.6).
+
+        A native room names its sensor in ``bridge/rooms`` (``sensor``); a Companion-managed room in
+        its stored configuration (``sensor_id``). Only sensors present in the fleet are returned; a
+        sensor named by two rooms keeps the first one.
+        """
+        out: dict[str, str] = {}
+        for gid, raw in self.companion.native_rooms.items():
+            sensor_id = str(raw["sensor"]) if isinstance(raw, dict) and raw.get("sensor") else None
+            if sensor_id and sensor_id in self.data:
+                out.setdefault(sensor_id, gid)
+        for gid, cfg in self.room_manager.virtual_rooms.items():
+            if cfg.sensor_id and cfg.sensor_id in self.data:
+                out.setdefault(cfg.sensor_id, gid)
+        return out
+
     @property
     def grouped_ids(self) -> set[str]:
         out: set[str] = set()

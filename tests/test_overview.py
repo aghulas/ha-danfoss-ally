@@ -107,6 +107,7 @@ def test_overview_relays_and_totals():
         "heating": 2,
         "faults": 1,
         "relays_on": 1,
+        "sensors": 0,
     }
 
 
@@ -270,6 +271,85 @@ def test_relay_home_is_its_own_home_when_known():
     assert ops._relay_home_gid(coord, coord.data["r2"], homes, by_name) == "h2"
     coord.device_home["r2"] = "gone"
     assert ops._relay_home_gid(coord, coord.data["r2"], homes, by_name) == "h1"
+
+
+# --- Room sensors (§3.6): listed per home, with their room when the coordinator knows it --------
+
+
+def _sensor(dev_id, name, **kw) -> DanfossDevice:
+    base = dict(
+        id=dev_id,
+        name=name,
+        category="sensor",
+        online=True,
+        temperature=19.5,
+        humidity=48.0,
+        battery=80.0,
+    )
+    base.update(kw)
+    return DanfossDevice(**base)
+
+
+def test_overview_lists_room_sensors_with_their_room_and_home():
+    coord = _TwoHomeCoord()
+    coord.data["s1"] = _sensor("s1", "Capteur Salle 1")
+    coord.data["s2"] = _sensor("s2", "Capteur Hall", online=False)  # offline: stale readings
+    coord.data["s3"] = _sensor("s3", "Capteur libre")
+    coord.device_home.update({"s1": "h1", "s3": "h2"})  # s2: home known only through its room
+    coord.sensor_rooms = lambda: {"s1": "g1", "s2": "g4"}
+    data = ops.overview_payload({DATA_COORDINATOR: coord})
+    by_home = {h["gid"]: {s["device_id"]: s for s in h["sensors"]} for h in data["homes"]}
+    assert set(by_home["h1"]) == {"s1"} and set(by_home["h2"]) == {"s2", "s3"}
+    assert by_home["h1"]["s1"] == {
+        "device_id": "s1",
+        "name": "Capteur Salle 1",
+        "online": True,
+        "room_id": "g1",
+        "temperature": 19.5,
+        "humidity": 48.0,
+        "battery": 80.0,
+    }
+    # Offline: the last temperature / humidity are stale and not shown; the battery is kept.
+    s2 = by_home["h2"]["s2"]
+    assert s2["online"] is False and s2["temperature"] is None and s2["humidity"] is None
+    assert s2["battery"] == 80.0 and s2["room_id"] == "g4"
+    assert by_home["h2"]["s3"]["room_id"] is None
+    assert data["totals"]["sensors"] == 3
+
+
+def test_overview_sensors_without_a_room_link_are_listed_unlinked():
+    """The direct-cloud coordinator reads no sensor -> room link: listed, never guessed."""
+    coord = _TwoHomeCoord()
+    coord.data["s1"] = _sensor("s1", "Salle 1")  # same name as a room: still not linked
+    data = ops.overview_payload({DATA_COORDINATOR: coord})
+    sensors = [s for h in data["homes"] for s in h["sensors"]]
+    assert [(s["device_id"], s["room_id"]) for s in sensors] == [("s1", None)]
+    assert data["homes"][0]["sensors"]  # unknown home: first home, kept visible
+
+
+def test_companion_view_maps_sensors_to_rooms():
+    from types import SimpleNamespace
+
+    from custom_components.danfoss_ally_cloud.companion_adapter import CompanionCoordinatorView
+
+    companion = SimpleNamespace(
+        hass=None,
+        data={"s1": _sensor("s1", "A"), "s2": _sensor("s2", "B")},
+        native_rooms={
+            "g1": {"name": "Salle 1", "sensor": "s1"},
+            "g2": {"name": "Salle 2", "sensor": "gone"},  # not in the fleet
+            "g3": {"name": "Salle 3"},
+        },
+    )
+    manager = SimpleNamespace(
+        virtual_rooms={
+            "v1": SimpleNamespace(sensor_id="s2"),
+            "v2": SimpleNamespace(sensor_id="s1"),  # already claimed by g1
+            "v3": SimpleNamespace(sensor_id=None),
+        }
+    )
+    view = CompanionCoordinatorView(companion, manager)
+    assert view.sensor_rooms() == {"s1": "g1", "s2": "v1"}
 
 
 # --- Single-head rooms (a head with no schedule-group): listed and counted (§3.6) --------------

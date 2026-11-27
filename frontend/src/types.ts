@@ -269,6 +269,21 @@ export interface FleetRelay {
   linked_rooms: number;
 }
 
+/**
+ * Capteur de pièce dans la vue d'ensemble (contrat §3.6). `room_id` : la pièce qu'il
+ * mesure quand le backend connaît le lien, sinon `null` (jamais deviné). Hors ligne,
+ * température et humidité sont `null` (dernière valeur périmée, non montrée).
+ */
+export interface FleetSensor {
+  device_id: string;
+  name: string;
+  online: boolean;
+  room_id: string | null;
+  temperature: number | null;
+  humidity: number | null;
+  battery: number | null;
+}
+
 /** Une maison (account "home") dans la vue d'ensemble. */
 export interface FleetHome {
   gid: string;
@@ -277,6 +292,8 @@ export interface FleetHome {
   gateways: FleetGateway[];
   rooms: FleetRoom[];
   relays: FleetRelay[];
+  /** Capteurs de pièce (optionnel : absent d'un backend plus ancien). */
+  sensors?: FleetSensor[];
 }
 
 /** Totaux à l'échelle du bâtiment. */
@@ -290,6 +307,8 @@ export interface FleetTotals {
   heating: number;
   faults: number;
   relays_on: number;
+  /** Capteurs de pièce (optionnel : absent d'un backend plus ancien). */
+  sensors?: number;
 }
 
 /** Réponse de `danfoss_ally_cloud/overview` (contrat §3.6). */

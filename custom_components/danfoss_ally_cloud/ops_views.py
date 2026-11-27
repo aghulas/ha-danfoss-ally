@@ -304,6 +304,46 @@ def _gateway_overview(coordinator: DanfossCoordinator, gateway) -> dict[str, Any
     }
 
 
+def _sensor_rooms(coordinator: DanfossCoordinator) -> dict[str, str]:
+    """Room sensor id -> group id of its room, where the coordinator knows the link.
+
+    Only the v2 Companion view does (``sensor_rooms``): the direct-cloud coordinator reads no
+    sensor -> room link, so its sensors are listed with ``room_id`` None rather than guessed.
+    """
+    lookup = getattr(coordinator, "sensor_rooms", None)
+    return dict(lookup()) if callable(lookup) else {}
+
+
+def _sensor_home_gid(
+    coordinator: DanfossCoordinator, sensor, room_id: str | None, home_gids: list[str]
+) -> str | None:
+    """Home of a room sensor: its own home, else its room's, else the first (kept visible)."""
+    own = coordinator.head_home(sensor.id)
+    if own in home_gids:
+        return own
+    via_room = coordinator.home_of(room_id) if room_id else None
+    if via_room in home_gids:
+        return via_room
+    return home_gids[0] if home_gids else None
+
+
+def _sensor_overview(sensor, room_id: str | None) -> dict[str, Any]:
+    """A room sensor for the fleet overview (contract §3.6). Read only.
+
+    Offline, the cloud keeps the last readings: temperature and humidity are then None (stale, not
+    shown), like a head's temperature. The battery is kept: it does not go stale within hours.
+    """
+    return {
+        "device_id": sensor.id,
+        "name": sensor.name,
+        "online": bool(sensor.online),
+        "room_id": room_id,
+        "temperature": sensor.temperature if sensor.online else None,
+        "humidity": sensor.humidity if sensor.online else None,
+        "battery": sensor.battery,
+    }
+
+
 def overview_payload(store: dict) -> dict:
     """Building / fleet overview (contract §3.6). Read-only, from the coordinator cache only.
 
@@ -314,6 +354,11 @@ def overview_payload(store: dict) -> dict:
     names = {gid: (h.get("name") or f"Home {gid}") for gid, h in coordinator.holidays.items()}
     gateways = [d for d in coordinator.data.values() if d.category == "gateway"]
     relays = [d for d in coordinator.data.values() if d.is_relay]
+    sensors = [d for d in coordinator.data.values() if d.is_sensor]
+    sensor_rooms = _sensor_rooms(coordinator)
+    sensor_home = {
+        s.id: _sensor_home_gid(coordinator, s, sensor_rooms.get(s.id), home_gids) for s in sensors
+    }
 
     home_by_name = _home_by_room_name(coordinator)
     gateway_home = {g.id: _gateway_home_gid(coordinator, g, home_gids) for g in gateways}
@@ -350,6 +395,11 @@ def overview_payload(store: dict) -> dict:
                 "gateways": home_gateways,
                 "rooms": rooms,
                 "relays": home_relays,
+                "sensors": [
+                    _sensor_overview(s, sensor_rooms.get(s.id))
+                    for s in sensors
+                    if sensor_home[s.id] == gid
+                ],
             }
         )
 
@@ -364,6 +414,7 @@ def overview_payload(store: dict) -> dict:
         "faults": sum(r["faults"] for h in homes for r in h["rooms"]),
         # An offline relay's on/off is its last known (stale) state: not counted as on.
         "relays_on": sum(1 for d in relays if d.relay_on and d.online),
+        "sensors": len(sensors),
     }
     return {"homes": homes, "totals": totals}
 

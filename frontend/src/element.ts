@@ -1,7 +1,7 @@
 /**
  * Page d'un élément du panneau (contrat §8.2) : logique pure, sans DOM.
  *
- * Un élément est une tête, un relais de chaudière ou une passerelle. Son état vient de
+ * Un élément est une tête, un capteur de pièce, un relais de chaudière ou une passerelle. Son état vient de
  * ce que le panneau a déjà lu (`overview`, `rooms`) ; ses réglages sont les ENTITÉS de
  * son appareil Home Assistant, lues dans les registres du frontend (`hass.devices`,
  * `hass.entities`, `hass.states`). Le panneau ne les écrit jamais lui-même : une ligne
@@ -15,6 +15,7 @@ import type {
   FleetOverview,
   FleetRelay,
   FleetRoom,
+  FleetSensor,
   HassLike,
   HeadState,
   Room,
@@ -23,6 +24,7 @@ import type {
 /** Élément retrouvé, avec ce qui le situe (maison, pièce) et son état connu. */
 export type PanelElement =
   | { kind: "head"; id: string; name: string; online: boolean; home: FleetHome; room: FleetRoom; head: HeadState | null }
+  | { kind: "sensor"; id: string; name: string; online: boolean; home: FleetHome; room: FleetRoom | null; sensor: FleetSensor }
   | { kind: "relay"; id: string; name: string; online: boolean; home: FleetHome; relay: FleetRelay }
   | { kind: "gateway"; id: string; name: string; online: boolean; home: FleetHome; gateway: FleetGateway };
 
@@ -52,6 +54,21 @@ export function roomHeads(room: FleetRoom, rooms: readonly Room[]): RoomHead[] {
   }));
 }
 
+/** Capteurs de pièce d'une maison qui mesurent la pièce donnée. */
+export function roomSensors(home: FleetHome, roomId: string): FleetSensor[] {
+  return (home.sensors ?? []).filter((s) => s.room_id === roomId);
+}
+
+/**
+ * Capteurs d'une maison sans pièce connue dans cette maison (lien absent, ou pièce
+ * disparue) : le bâtiment les montre lui-même, pour qu'aucun ne soit invisible.
+ */
+export function unplacedSensors(home: FleetHome): FleetSensor[] {
+  return (home.sensors ?? []).filter(
+    (s) => s.room_id === null || !home.rooms.some((r) => r.id === s.room_id),
+  );
+}
+
 /** Retrouve un élément par son identifiant d'appareil, ou `null`. */
 export function findElement(
   overview: FleetOverview | null,
@@ -64,6 +81,11 @@ export function findElement(
       if (hit) {
         return { kind: "head", id: hit.id, name: hit.name, online: hit.online, home, room, head: hit.head };
       }
+    }
+    const sensor = (home.sensors ?? []).find((s) => s.device_id === deviceId);
+    if (sensor) {
+      const room = home.rooms.find((r) => r.id === sensor.room_id) ?? null;
+      return { kind: "sensor", id: deviceId, name: sensor.name, online: sensor.online, home, room, sensor };
     }
     const relay = home.relays.find((r) => r.device_id === deviceId);
     if (relay) {

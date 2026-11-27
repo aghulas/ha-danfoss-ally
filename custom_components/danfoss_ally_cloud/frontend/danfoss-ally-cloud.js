@@ -740,6 +740,9 @@ const STRINGS = {
     el_elements: "Elements",
     el_gateways: "Gateways",
     el_kind_head: "Thermostat",
+    el_kind_sensor: "Room sensor",
+    el_temperature: "{value} °C",
+    el_humidity: "Humidity {value}%",
     el_kind_relay: "Boiler relay",
     el_kind_gateway: "Gateway",
     el_state: "State",
@@ -929,6 +932,9 @@ const STRINGS = {
     el_elements: "Éléments",
     el_gateways: "Passerelles",
     el_kind_head: "Tête thermostatique",
+    el_kind_sensor: "Capteur de pièce",
+    el_temperature: "{value} °C",
+    el_humidity: "Humidité {value} %",
     el_kind_relay: "Relais de chaudière",
     el_kind_gateway: "Passerelle",
     el_state: "État",
@@ -3106,7 +3112,7 @@ function climateDevices(hass) {
   return out;
 }
 const round1 = (x2) => Math.round(x2 * 10) / 10;
-function roomSensors(hass, areaId) {
+function roomSensors$1(hass, areaId) {
   const excluded = climateDevices(hass);
   const temps = [];
   const hums = [];
@@ -3613,7 +3619,7 @@ let DanfossAllyRoomCard = class extends i {
     if (!this.hass || !areaId) {
       return A;
     }
-    const s2 = roomSensors(this.hass, areaId);
+    const s2 = roomSensors$1(this.hass, areaId);
     if (s2.temperature === null && s2.humidity === null) {
       return A;
     }
@@ -3994,6 +4000,14 @@ function roomHeads(room, rooms) {
     head
   }));
 }
+function roomSensors(home, roomId) {
+  return (home.sensors ?? []).filter((s2) => s2.room_id === roomId);
+}
+function unplacedSensors(home) {
+  return (home.sensors ?? []).filter(
+    (s2) => s2.room_id === null || !home.rooms.some((r2) => r2.id === s2.room_id)
+  );
+}
 function findElement(overview, rooms, deviceId) {
   for (const home of overview?.homes ?? []) {
     for (const room of home.rooms) {
@@ -4001,6 +4015,11 @@ function findElement(overview, rooms, deviceId) {
       if (hit) {
         return { kind: "head", id: hit.id, name: hit.name, online: hit.online, home, room, head: hit.head };
       }
+    }
+    const sensor = (home.sensors ?? []).find((s2) => s2.device_id === deviceId);
+    if (sensor) {
+      const room = home.rooms.find((r2) => r2.id === sensor.room_id) ?? null;
+      return { kind: "sensor", id: deviceId, name: sensor.name, online: sensor.online, home, room, sensor };
     }
     const relay = home.relays.find((r2) => r2.device_id === deviceId);
     if (relay) {
@@ -4280,6 +4299,18 @@ let DanfossAllyPanel = class extends i {
       )
     )}
             </div>` : A}
+        ${unplacedSensors(home).length > 0 ? b`<div class="relays">
+              ${unplacedSensors(home).map(
+      (sensor) => this._renderChip(
+        sensor.device_id,
+        sensor.online ? "on-ok" : "offline",
+        sensor.name,
+        sensor.online && sensor.temperature !== null ? t(this.hass, "el_temperature", { value: sensor.temperature }) : t(this.hass, sensor.online ? "head_online" : "head_offline"),
+        !sensor.online,
+        t(this.hass, "el_kind_sensor")
+      )
+    )}
+            </div>` : A}
       </section>
     `;
   }
@@ -4373,14 +4404,24 @@ let DanfossAllyPanel = class extends i {
         ${single ? b`<div class="room-sub wrap note">${t(this.hass, "nav_single_head_note")}</div>` : A}
       </section>
       ${single ? A : b`<div class="room-card-slot">${this._embeddedRoomCard(room.id)}</div>`}
-      ${this._renderRoomElements(room)}
+      ${this._renderRoomElements(home, room)}
       ${single ? A : this._renderEntities(haDeviceId(this.hass, roomDeviceIdent(room.id)), "el_room_entities", false)}
     `;
   }
-  /** Têtes de la pièce, chacune un lien vers sa page. */
-  _renderRoomElements(room) {
+  /** Résumé d'un capteur de pièce : mesures (si connues), batterie. */
+  _sensorFlags(sensor) {
+    return b`
+      ${sensor.online ? b`<span class="flag ok">${t(this.hass, "head_online")}</span>` : b`<span class="flag warn">${t(this.hass, "head_offline")}</span>`}
+      ${sensor.temperature !== null ? b`<span class="flag">${t(this.hass, "el_temperature", { value: sensor.temperature })}</span>` : A}
+      ${sensor.humidity !== null ? b`<span class="flag">${t(this.hass, "el_humidity", { value: sensor.humidity })}</span>` : A}
+      ${sensor.battery !== null ? b`<span class="flag">${t(this.hass, "head_battery", { value: sensor.battery })}</span>` : A}
+    `;
+  }
+  /** Têtes et capteurs de la pièce, chacun un lien vers sa page. */
+  _renderRoomElements(home, room) {
     const heads = roomHeads(room, this._rooms);
-    if (heads.length === 0) {
+    const sensors = roomSensors(home, room.id);
+    if (heads.length === 0 && sensors.length === 0) {
       return A;
     }
     return b`
@@ -4409,6 +4450,22 @@ let DanfossAllyPanel = class extends i {
               </a>
             `;
     })}
+          ${sensors.map((sensor) => {
+      const path = elementPath(sensor.device_id);
+      return b`
+              <a
+                class="room link ${sensor.online ? "ok" : "attn"}"
+                href=${this._href(path)}
+                @click=${(ev) => this._navigate(path, ev)}
+              >
+                <div class="room-top">
+                  <span class="room-name" title=${sensor.name}>${sensor.name}</span>
+                </div>
+                <div class="room-sub">${t(this.hass, "el_kind_sensor")}</div>
+                <div class="flags">${this._sensorFlags(sensor)}</div>
+              </a>
+            `;
+    })}
         </div>
       </section>
     `;
@@ -4426,9 +4483,16 @@ let DanfossAllyPanel = class extends i {
     const trail = [{ label: el.home.name }];
     if (el.kind === "head") {
       trail.push({ label: el.room.name, path: roomPath(el.room.id) });
+    } else if (el.kind === "sensor" && el.room) {
+      trail.push({ label: el.room.name, path: roomPath(el.room.id) });
     }
     trail.push({ label: el.name });
-    const kindKey = el.kind === "head" ? "el_kind_head" : el.kind === "relay" ? "el_kind_relay" : "el_kind_gateway";
+    const kindKey = {
+      head: "el_kind_head",
+      sensor: "el_kind_sensor",
+      relay: "el_kind_relay",
+      gateway: "el_kind_gateway"
+    }[el.kind];
     return b`
       ${this._renderCrumbs(trail)}
       <section class="home room-page">
@@ -4444,6 +4508,9 @@ let DanfossAllyPanel = class extends i {
   /** État connu d'un élément, tiré de `overview` / `rooms` (jamais supposé). */
   _elementFlags(el) {
     const online = el.online ? b`<span class="flag ok">${t(this.hass, "head_online")}</span>` : b`<span class="flag warn">${t(this.hass, "head_offline")}</span>`;
+    if (el.kind === "sensor") {
+      return this._sensorFlags(el.sensor);
+    }
     if (el.kind === "relay") {
       return b`${online}
         ${el.online && el.relay.on !== null ? b`<span class="flag ${el.relay.on ? "hot" : ""}"

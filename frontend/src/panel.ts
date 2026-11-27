@@ -43,6 +43,8 @@ import {
   haDeviceId,
   roomDeviceIdent,
   roomHeads,
+  roomSensors,
+  unplacedSensors,
 } from "./element";
 import { modeLabel, t } from "./localize";
 import {
@@ -59,6 +61,7 @@ import type {
   FleetOverview,
   FleetRelay,
   FleetRoom,
+  FleetSensor,
   HassLike,
   Room,
   RoomCardConfig,
@@ -266,6 +269,22 @@ export class DanfossAllyPanel extends LitElement {
               )}
             </div>`
           : nothing}
+        ${unplacedSensors(home).length > 0
+          ? html`<div class="relays">
+              ${unplacedSensors(home).map((sensor) =>
+                this._renderChip(
+                  sensor.device_id,
+                  sensor.online ? "on-ok" : "offline",
+                  sensor.name,
+                  sensor.online && sensor.temperature !== null
+                    ? t(this.hass, "el_temperature", { value: sensor.temperature })
+                    : t(this.hass, sensor.online ? "head_online" : "head_offline"),
+                  !sensor.online,
+                  t(this.hass, "el_kind_sensor"),
+                ),
+              )}
+            </div>`
+          : nothing}
       </section>
     `;
   }
@@ -371,17 +390,36 @@ export class DanfossAllyPanel extends LitElement {
           : nothing}
       </section>
       ${single ? nothing : html`<div class="room-card-slot">${this._embeddedRoomCard(room.id)}</div>`}
-      ${this._renderRoomElements(room)}
+      ${this._renderRoomElements(home, room)}
       ${single
         ? nothing
         : this._renderEntities(haDeviceId(this.hass, roomDeviceIdent(room.id)), "el_room_entities", false)}
     `;
   }
 
-  /** Têtes de la pièce, chacune un lien vers sa page. */
-  private _renderRoomElements(room: FleetRoom): TemplateResult | typeof nothing {
+  /** Résumé d'un capteur de pièce : mesures (si connues), batterie. */
+  private _sensorFlags(sensor: FleetSensor): TemplateResult {
+    return html`
+      ${sensor.online
+        ? html`<span class="flag ok">${t(this.hass, "head_online")}</span>`
+        : html`<span class="flag warn">${t(this.hass, "head_offline")}</span>`}
+      ${sensor.temperature !== null
+        ? html`<span class="flag">${t(this.hass, "el_temperature", { value: sensor.temperature })}</span>`
+        : nothing}
+      ${sensor.humidity !== null
+        ? html`<span class="flag">${t(this.hass, "el_humidity", { value: sensor.humidity })}</span>`
+        : nothing}
+      ${sensor.battery !== null
+        ? html`<span class="flag">${t(this.hass, "head_battery", { value: sensor.battery })}</span>`
+        : nothing}
+    `;
+  }
+
+  /** Têtes et capteurs de la pièce, chacun un lien vers sa page. */
+  private _renderRoomElements(home: FleetHome, room: FleetRoom): TemplateResult | typeof nothing {
     const heads = roomHeads(room, this._rooms);
-    if (heads.length === 0) {
+    const sensors = roomSensors(home, room.id);
+    if (heads.length === 0 && sensors.length === 0) {
       return nothing;
     }
     return html`
@@ -418,6 +456,22 @@ export class DanfossAllyPanel extends LitElement {
               </a>
             `;
           })}
+          ${sensors.map((sensor) => {
+            const path = elementPath(sensor.device_id);
+            return html`
+              <a
+                class="room link ${sensor.online ? "ok" : "attn"}"
+                href=${this._href(path)}
+                @click=${(ev: Event) => this._navigate(path, ev)}
+              >
+                <div class="room-top">
+                  <span class="room-name" title=${sensor.name}>${sensor.name}</span>
+                </div>
+                <div class="room-sub">${t(this.hass, "el_kind_sensor")}</div>
+                <div class="flags">${this._sensorFlags(sensor)}</div>
+              </a>
+            `;
+          })}
         </div>
       </section>
     `;
@@ -440,10 +494,18 @@ export class DanfossAllyPanel extends LitElement {
     if (el.kind === "head") {
       // La pièce de la tête fait foi, pas celle de l'adresse (lien périmé, tête déplacée).
       trail.push({ label: el.room.name, path: roomPath(el.room.id) });
+    } else if (el.kind === "sensor" && el.room) {
+      trail.push({ label: el.room.name, path: roomPath(el.room.id) });
     }
     trail.push({ label: el.name });
-    const kindKey =
-      el.kind === "head" ? "el_kind_head" : el.kind === "relay" ? "el_kind_relay" : "el_kind_gateway";
+    const kindKey = (
+      {
+        head: "el_kind_head",
+        sensor: "el_kind_sensor",
+        relay: "el_kind_relay",
+        gateway: "el_kind_gateway",
+      } as const
+    )[el.kind];
     return html`
       ${this._renderCrumbs(trail)}
       <section class="home room-page">
@@ -462,6 +524,9 @@ export class DanfossAllyPanel extends LitElement {
     const online = el.online
       ? html`<span class="flag ok">${t(this.hass, "head_online")}</span>`
       : html`<span class="flag warn">${t(this.hass, "head_offline")}</span>`;
+    if (el.kind === "sensor") {
+      return this._sensorFlags(el.sensor);
+    }
     if (el.kind === "relay") {
       // Hors ligne, le marche/arrêt est le dernier état connu : il n'est pas affiché.
       return html`${online}

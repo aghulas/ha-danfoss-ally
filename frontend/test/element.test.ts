@@ -8,6 +8,8 @@ import {
   haDeviceId,
   roomDeviceIdent,
   roomHeads,
+  roomSensors,
+  unplacedSensors,
 } from "../src/element";
 import { elementPath, parsePath } from "../src/nav";
 import type { FleetOverview, FleetRoom, HassLike, HeadState, Room } from "../src/types";
@@ -111,6 +113,38 @@ describe("éléments d'une pièce", () => {
     expect(findElement(overview, rooms, "gw1")?.home.name).toBe("École");
     expect(findElement(overview, rooms, "nope")).toBeNull();
     expect(findElement(null, rooms, "a")).toBeNull();
+  });
+});
+
+describe("capteurs de pièce", () => {
+  const sensor = (id: string, room_id: string | null) => ({
+    device_id: id,
+    name: `Capteur ${id}`,
+    online: true,
+    room_id,
+    temperature: 19.5,
+    humidity: 48,
+    battery: 80,
+  });
+  const withSensors = {
+    ...overview,
+    homes: [{ ...overview.homes[0], sensors: [sensor("s1", "g1"), sensor("s2", null), sensor("s3", "gone")] }],
+  } as unknown as FleetOverview;
+  const home = withSensors.homes[0];
+
+  it("la pièce liste ses capteurs ; le bâtiment ceux sans pièce connue", () => {
+    expect(roomSensors(home, "g1").map((s) => s.device_id)).toEqual(["s1"]);
+    expect(unplacedSensors(home).map((s) => s.device_id)).toEqual(["s2", "s3"]);
+    // Backend plus ancien : pas de champ `sensors`.
+    expect(roomSensors(overview.homes[0], "g1")).toEqual([]);
+    expect(unplacedSensors(overview.homes[0])).toEqual([]);
+  });
+
+  it("retrouve un capteur, avec sa pièce quand elle est connue", () => {
+    const s1 = findElement(withSensors, rooms, "s1");
+    expect(s1?.kind === "sensor" && s1.room?.name).toBe("Salle 1");
+    const s2 = findElement(withSensors, rooms, "s2");
+    expect(s2?.kind === "sensor" && s2.room).toBeNull();
   });
 });
 
