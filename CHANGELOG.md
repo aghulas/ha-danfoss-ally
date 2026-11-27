@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Room scope on cloud-bridge bounds
+## 2.0.17 — Room scope on cloud-bridge bounds
 
 **Fixed**
 
