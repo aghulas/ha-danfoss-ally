@@ -81,6 +81,15 @@ def sync_repairs(
                     "faults": _format_faults(dev.faults),
                 },
             )
+        elif dev.is_head and dev.online is True:
+            # Head read online with no active fault: delete its fault issue directly rather than
+            # relying only on the ``previous - current`` diff below. ``_ACTIVE_ISSUES`` is in
+            # memory, so after a Home Assistant restart an issue persisted in the issue registry is
+            # not in ``previous`` and the diff would never clear it; this explicit delete reaps such
+            # stale fault issues on the next cycle the head reports ``fault == 0``. Deleting an
+            # absent issue is a no-op. A head that is offline (fault unknown) is left untouched so a
+            # genuine fault is not falsely resolved while we cannot read it.
+            ir.async_delete_issue(hass, DOMAIN, _fault_issue_id(entry_id, dev.id))
 
     previous = _ACTIVE_ISSUES.get(entry_id, set())
     for stale_id in previous - current:
