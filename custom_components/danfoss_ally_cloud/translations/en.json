@@ -10,16 +10,32 @@
         }
       },
       "cloud": {
-        "title": "Danfoss Ally (Cloud)",
-        "description": "Sign in with your Danfoss Ally / Smart Life app account. No developer app or API key is required. The installation secrets (sign key, device id, channel key) are captured once on the installation (see the documentation).",
+        "title": "Danfoss Ally Cloud — account",
+        "description": "Step 1 of 2. Sign in with your Danfoss Ally / Smart Life app account — the same email and password you use in the app. No developer account or API key is required. The next step asks for the one-time installation secrets.",
         "data": {
-          "username": "Username (email)",
+          "username": "Email",
           "password": "Password",
-          "country_code": "Country calling code (e.g. 33 for France)",
-          "region": "Datacenter (eu, us, cn, in)",
+          "country_code": "Country",
+          "region": "Datacenter (advanced)"
+        },
+        "data_description": {
+          "username": "The email address of your Danfoss Ally / Smart Life app account.",
+          "country_code": "The country of your app account. The datacenter is derived from it automatically.",
+          "region": "Leave on \"Automatic\": the datacenter is derived from your country. Only change it if your account lives in a different Tuya datacenter."
+        }
+      },
+      "cloud_secrets": {
+        "title": "Danfoss Ally Cloud — installation secrets",
+        "description": "Step 2 of 2. These three values are the device-registration material of your installation. They are captured once from the app's network traffic (see the documentation for the capture procedure) and cannot be guessed from your account. They are stored encrypted and never shown again or logged.",
+        "data": {
           "sign_key": "Sign key (sign_key)",
           "device_id": "Device id (deviceId)",
           "ch_key": "Channel key (chKey)"
+        },
+        "data_description": {
+          "sign_key": "The sign_key captured from the app (starts with \"com.danfoss.ally_\").",
+          "device_id": "The deviceId captured from the app.",
+          "ch_key": "The chKey captured from the app."
         }
       },
       "reauth_confirm": {
@@ -35,14 +51,17 @@
       },
       "reconfigure": {
         "title": "Reconfigure Danfoss Ally (Cloud)",
-        "description": "Update the country code, datacenter, password or installation secrets. Leave any secret field empty to keep the current value.",
+        "description": "Update the country, datacenter, password or installation secrets. Leave any secret field empty to keep the current value.",
         "data": {
-          "country_code": "Country calling code (e.g. 33 for France)",
-          "region": "Datacenter (eu, us, cn, in)",
+          "country_code": "Country",
+          "region": "Datacenter (advanced)",
           "password": "Password — only if it changed",
           "sign_key": "Sign key (sign_key) — only if it changed",
           "device_id": "Device id (deviceId) — only if it changed",
           "ch_key": "Channel key (chKey) — only if it changed"
+        },
+        "data_description": {
+          "region": "Leave on \"Automatic\" to derive the datacenter from the country."
         }
       },
       "companion": {
