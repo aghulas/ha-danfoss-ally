@@ -50,15 +50,15 @@ LOAD_MEAN_REFRESH_SECONDS = 900.0  # 15 min; on the telemetry tick this lands at
 LOAD_MEAN_DELTA = 25  # load estimate delta to trigger update
 LOAD_ESTIMATE_DISABLED_RAW = -8000
 
-# ZCL/Z2M day-of-week bit per canonical (cloud, 3-letter) day key.
-_Z2M_DAY_BITS: dict[str, int] = {
-    "sun": 0x01,
-    "mon": 0x02,
-    "tue": 0x04,
-    "wed": 0x08,
-    "thu": 0x10,
-    "fri": 0x20,
-    "sat": 0x40,
+# ZCL/Z2M day-of-week name per canonical (cloud, 3-letter) day key (zhc >= 26 needs list[str]).
+_Z2M_DAY_NAMES: dict[str, str] = {
+    "sun": "sunday",
+    "mon": "monday",
+    "tue": "tuesday",
+    "wed": "wednesday",
+    "thu": "thursday",
+    "fri": "friday",
+    "sat": "saturday",
 }
 
 # Accept both the cloud 3-letter day keys used by the schedule services (``api.schedule.DAYS``:
@@ -344,8 +344,8 @@ class CompanionRoomManager:
         payloads: list[dict[str, Any]] = []
         for day_name, windows in days.items():
             canon = normalize_day(day_name)
-            day_bit = _Z2M_DAY_BITS.get(canon) if canon else None
-            if day_bit is None:
+            z2m_day = _Z2M_DAY_NAMES.get(canon) if canon else None
+            if z2m_day is None:
                 raise ValueError(f"Invalid day name: {day_name}")
             transitions = _build_z2m_day_transitions(windows, comfort, setback)
             if len(transitions) > MAX_TRANSITIONS_PER_DAY:
@@ -356,8 +356,7 @@ class CompanionRoomManager:
             payloads.append(
                 {
                     "weekly_schedule": {
-                        "dayofweek": day_bit,
-                        "num_of_transitions": len(transitions),
+                        "dayofweek": [z2m_day],
                         "transitions": transitions,
                     }
                 }
