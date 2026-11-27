@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Room sensors in the side panel
+## 2.0.12 — Room sensors and relay linkage in the side panel
 
 **Added**
 
@@ -9,7 +9,7 @@
   side panel lists a room's sensors on its page, links the others from their home, and gives each
   a page (online, temperature, humidity, battery, entities). Offline readings are not shown.
 - v2 Companion: boiler relays' room linkage, read from `bridge/relays` (published by
-  `danfoss2mqtt` from the next `pydanfoss-cloud` release). `overview` (`linked_rooms`),
+  `danfoss2mqtt` from `pydanfoss-cloud` 0.7.4). `overview` (`linked_rooms`),
   `get_relays` and the relay's linked-rooms sensor were always 0 / empty under the Companion;
   they now show what the bridge publishes. Read only; empty until a bridge publishes it.
 
