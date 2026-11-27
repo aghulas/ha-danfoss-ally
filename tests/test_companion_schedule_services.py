@@ -125,7 +125,7 @@ async def test_set_get_restore_schedule_on_z2m_companion_room(
     fanned = [p for topic, p in sent if topic.endswith("/set") and "weekly_schedule" in p]
     assert len(fanned) == 2
     week = fanned[0]["weekly_schedule"]
-    assert week["dayofweek"] == 0x02 and week["num_of_transitions"] == 3
+    assert week["dayofweek"] == ["monday"] and len(week["transitions"]) == 3
 
     # get_schedule (SupportsResponse.ONLY) reads back what was fanned out, in the cloud shape.
     schedule = await ops.get_schedule(store, target)

@@ -264,7 +264,7 @@ async def test_batches_2_3_to_2_5_unified_companion_z2m_and_danfoss2mqtt(
     )
     assert n_sched == 2
     sched_msg = sent_mqtt[0][1]["weekly_schedule"]
-    assert sched_msg["dayofweek"] == 0x02 and sched_msg["num_of_transitions"] == 3
+    assert sched_msg["dayofweek"] == ["monday"] and len(sched_msg["transitions"]) == 3
 
     # Boiler demand across both bridges
     calling = room_mgr.rooms_calling_for_heat()

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.9 — Fix Zigbee2MQTT `weekly_schedule` `dayofweek` encoding
+
+**Fixed**
+
+- `companion_rooms.py` (`async_set_room_schedule`): encode `weekly_schedule.dayofweek` as a list
+  of English day names (`["monday"]`..`["sunday"]`) instead of an integer bitmask (`0x01`..`0x40`)
+  which `zigbee-herdsman-converters >= 26` (`tz.thermostat_weekly_schedule`) evaluated to `0`
+  (dropping all scheduled days), and omit unused `num_of_transitions`. Matching `pydanfoss-cloud`
+  `0.7.2`.
+
 ## 2.0.8 — Fix coordinator room switch fallback when `desired` omits settings
 
 **Fixed**
