@@ -90,6 +90,72 @@ CONF_REGION = "region"  # datacenter: "eu" | "us" | "cn" | "in"
 CONF_SIGN_KEY = "sign_key"
 CONF_DEVICE_ID = "device_id"
 CONF_CH_KEY = "ch_key"
+
+# --- Onboarding helpers: country list and datacenter derivation (config_flow path 1a) ---
+# The config flow shows a dropdown of country NAMES instead of raw calling codes, and derives the
+# Tuya datacenter (CONF_REGION) from the chosen country so the user almost never sets it by hand.
+# Each entry is (calling code, English display name, datacenter region). The calling code is what
+# the Tuya login expects as ``countryCode`` and is what we store in CONF_COUNTRY_CODE. Codes stay
+# unique; NANP countries collapse into one entry (same code "1", same region). CONF_REGION
+# defaults to REGION_AUTO, which resolves through this table; an explicit datacenter can be chosen.
+REGION_AUTO = "auto"
+REGIONS = ("eu", "us", "cn", "in")  # the datacenters the client's ENDPOINTS map to
+DEFAULT_COUNTRY_CODE = "33"  # France (the project's home country)
+DEFAULT_REGION = "eu"
+
+# (calling code, display name, datacenter). Sorted by name in the UI; order here is not significant.
+COUNTRIES: tuple[tuple[str, str, str], ...] = (
+    ("33", "France", "eu"),
+    ("32", "Belgium", "eu"),
+    ("41", "Switzerland", "eu"),
+    ("352", "Luxembourg", "eu"),
+    ("377", "Monaco", "eu"),
+    ("49", "Germany", "eu"),
+    ("31", "Netherlands", "eu"),
+    ("34", "Spain", "eu"),
+    ("39", "Italy", "eu"),
+    ("351", "Portugal", "eu"),
+    ("43", "Austria", "eu"),
+    ("353", "Ireland", "eu"),
+    ("44", "United Kingdom", "eu"),
+    ("45", "Denmark", "eu"),
+    ("46", "Sweden", "eu"),
+    ("47", "Norway", "eu"),
+    ("358", "Finland", "eu"),
+    ("354", "Iceland", "eu"),
+    ("48", "Poland", "eu"),
+    ("420", "Czechia", "eu"),
+    ("421", "Slovakia", "eu"),
+    ("386", "Slovenia", "eu"),
+    ("385", "Croatia", "eu"),
+    ("36", "Hungary", "eu"),
+    ("40", "Romania", "eu"),
+    ("359", "Bulgaria", "eu"),
+    ("30", "Greece", "eu"),
+    ("372", "Estonia", "eu"),
+    ("371", "Latvia", "eu"),
+    ("370", "Lithuania", "eu"),
+    ("1", "United States / Canada", "us"),
+    ("52", "Mexico", "us"),
+    ("55", "Brazil", "us"),
+    ("61", "Australia", "us"),
+    ("64", "New Zealand", "us"),
+    ("86", "China", "cn"),
+    ("91", "India", "in"),
+)
+
+# calling code -> datacenter, for auto-derivation when CONF_REGION is REGION_AUTO.
+COUNTRY_TO_REGION: dict[str, str] = {code: region for code, _name, region in COUNTRIES}
+
+
+def resolve_region(country_code: str, region: str | None) -> str:
+    """Datacenter to use: the explicit ``region`` unless it is REGION_AUTO/blank, in which case it
+    is derived from the country (falling back to DEFAULT_REGION for an unknown country)."""
+    if region and region != REGION_AUTO:
+        return region
+    return COUNTRY_TO_REGION.get(str(country_code).strip(), DEFAULT_REGION)
+
+
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_ENABLE_LOCAL = "enable_local"
 # Coexistence: use a deviceId distinct from the app's / the MCP connector's captured one (same

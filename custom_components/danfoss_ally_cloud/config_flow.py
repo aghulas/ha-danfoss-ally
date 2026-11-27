@@ -19,6 +19,10 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.selector import (
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
@@ -53,10 +57,12 @@ from .const import (
     CONF_SIGN_KEY,
     CONF_USERNAME,
     CONNECTION_MODE_MQTT_COMPANION,
+    COUNTRIES,
     DATA_COORDINATOR,
     DEFAULT_CLOUD_MQTT_PROBE,
     DEFAULT_COMPANION_FEED_EXTERNAL_SENSOR,
     DEFAULT_COMPANION_FEED_LOAD_MEAN,
+    DEFAULT_COUNTRY_CODE,
     DEFAULT_DISTINCT_DEVICE_ID,
     DEFAULT_ENABLE_CLOUD_MQTT,
     DEFAULT_ENABLE_HEAD_UNBIND,
@@ -68,6 +74,9 @@ from .const import (
     DEFAULT_POST_COMMAND_REFRESH,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    REGION_AUTO,
+    REGIONS,
+    resolve_region,
 )
 from .local_write import LOCAL_TRIAL_SETTINGS
 
@@ -80,13 +89,33 @@ def _schema(schema: vol.Schema) -> Any:
     return schema
 
 
-_REGIONS = ["eu", "us", "cn", "in"]
-
 # Password and installation secrets are typed in a masked field, never shown on screen.
 _SECRET = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
 # Installation secrets the reauth step may replace (left empty = keep the entry's value).
 _INSTALL_SECRETS = (CONF_SIGN_KEY, CONF_DEVICE_ID, CONF_CH_KEY)
+
+
+def _country_selector() -> SelectSelector:
+    """Dropdown of country NAMES (value = calling code), sorted by name, searchable. The datacenter
+    is derived from the choice, so the user picks a country rather than a raw phone code."""
+    options = [
+        SelectOptionDict(value=code, label=name)
+        for code, name, _region in sorted(COUNTRIES, key=lambda c: c[1])
+    ]
+    return SelectSelector(
+        SelectSelectorConfig(options=options, mode=SelectSelectorMode.DROPDOWN, sort=False)
+    )
+
+
+def _region_selector() -> SelectSelector:
+    """Datacenter override. Defaults to "auto" (derived from the country); the four Tuya
+    datacenters stay selectable for the rare install that needs a specific one."""
+    options = [SelectOptionDict(value=REGION_AUTO, label="Automatic (from country)")]
+    options += [SelectOptionDict(value=r, label=r.upper()) for r in REGIONS]
+    return SelectSelector(
+        SelectSelectorConfig(options=options, mode=SelectSelectorMode.DROPDOWN, sort=False)
+    )
 
 
 def _account_id(username: str) -> str:
@@ -140,6 +169,9 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    # Account step's answers, kept between the two cloud steps (account -> installation secrets).
+    _cloud_account: dict[str, Any]
+
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> Any:
         """Choose between v2 MQTT Companion mode (Z2M / danfoss2mqtt) and v1 direct Cloud mode."""
         return self.async_show_menu(
@@ -148,19 +180,55 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_cloud(self, user_input: dict[str, Any] | None = None) -> Any:
-        """v1 direct Danfoss Ally / Tuya cloud account setup."""
+        """v1 direct cloud setup, step 1/2: the app account (email, password, country).
+
+        The datacenter is derived from the country (CONF_REGION defaults to "auto"); an advanced
+        override stays available. The installation secrets are asked on the next step so the account
+        details and the one-time captured secrets never crowd the same form.
+        """
         errors: dict[str, str] = {}
         if user_input is not None:
             await self.async_set_unique_id(_account_id(user_input[CONF_USERNAME]))
             self._abort_if_unique_id_configured()
+            self._cloud_account = {
+                CONF_USERNAME: user_input[CONF_USERNAME],
+                CONF_PASSWORD: user_input[CONF_PASSWORD],
+                CONF_COUNTRY_CODE: user_input[CONF_COUNTRY_CODE],
+                CONF_REGION: resolve_region(
+                    user_input[CONF_COUNTRY_CODE], user_input.get(CONF_REGION)
+                ),
+            }
+            return await self.async_step_cloud_secrets()
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_USERNAME): str,
+                vol.Required(CONF_PASSWORD): _SECRET,
+                vol.Required(CONF_COUNTRY_CODE, default=DEFAULT_COUNTRY_CODE): _country_selector(),
+                vol.Required(CONF_REGION, default=REGION_AUTO): _region_selector(),
+            }
+        )
+        return self.async_show_form(step_id="cloud", data_schema=_schema(schema), errors=errors)
+
+    async def async_step_cloud_secrets(self, user_input: dict[str, Any] | None = None) -> Any:
+        """v1 direct cloud setup, step 2/2: the one-time installation secrets.
+
+        sign_key / device_id / ch_key are the device-registration material captured once from the
+        app's traffic (see the documentation). They cannot be derived from the account, so the three
+        are required; the account+secrets are validated together by a real login before the entry is
+        created. Nothing typed here is logged.
+        """
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            data = {**self._cloud_account, **user_input}
             client = CloudClient(
-                username=user_input[CONF_USERNAME],
-                password=user_input[CONF_PASSWORD],
-                country_code=user_input[CONF_COUNTRY_CODE],
-                sign_key=user_input[CONF_SIGN_KEY],
-                device_id=user_input[CONF_DEVICE_ID],
-                ch_key=user_input[CONF_CH_KEY],
-                region=user_input[CONF_REGION],
+                username=data[CONF_USERNAME],
+                password=data[CONF_PASSWORD],
+                country_code=data[CONF_COUNTRY_CODE],
+                sign_key=data[CONF_SIGN_KEY],
+                device_id=data[CONF_DEVICE_ID],
+                ch_key=data[CONF_CH_KEY],
+                region=data[CONF_REGION],
                 # Validate with the distinct deviceId (the runtime default), so even setup keeps
                 # its own Tuya session rather than briefly stealing the app's / MCP's.
                 distinct_device_id=DEFAULT_DISTINCT_DEVICE_ID,
@@ -176,20 +244,18 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
             else:
                 await client.async_close()
-                return self.async_create_entry(title=user_input[CONF_USERNAME], data=user_input)
+                return self.async_create_entry(title=data[CONF_USERNAME], data=data)
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_USERNAME): str,
-                vol.Required(CONF_PASSWORD): _SECRET,
-                vol.Required(CONF_COUNTRY_CODE, default="33"): str,
-                vol.Required(CONF_REGION, default="eu"): vol.In(_REGIONS),
                 vol.Required(CONF_SIGN_KEY): _SECRET,
                 vol.Required(CONF_DEVICE_ID): _SECRET,
                 vol.Required(CONF_CH_KEY): _SECRET,
             }
         )
-        return self.async_show_form(step_id="cloud", data_schema=_schema(schema), errors=errors)
+        return self.async_show_form(
+            step_id="cloud_secrets", data_schema=_schema(schema), errors=errors
+        )
 
     async def async_step_companion(self, user_input: dict[str, Any] | None = None) -> Any:
         """v2.x MQTT Companion setup: connect to zigbee2mqtt and/or danfoss2mqtt via Mosquitto."""
@@ -285,7 +351,9 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             updates: dict[str, Any] = {
                 CONF_COUNTRY_CODE: user_input[CONF_COUNTRY_CODE],
-                CONF_REGION: user_input[CONF_REGION],
+                CONF_REGION: resolve_region(
+                    user_input[CONF_COUNTRY_CODE], user_input.get(CONF_REGION)
+                ),
             }
             for key in (CONF_PASSWORD, *_INSTALL_SECRETS):
                 value = str(user_input.get(key) or "").strip()
@@ -321,11 +389,12 @@ class DanfossAllyCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(
             {
                 vol.Required(
-                    CONF_COUNTRY_CODE, default=entry.data.get(CONF_COUNTRY_CODE, "33")
-                ): str,
-                vol.Required(CONF_REGION, default=entry.data.get(CONF_REGION, "eu")): vol.In(
-                    _REGIONS
-                ),
+                    CONF_COUNTRY_CODE,
+                    default=entry.data.get(CONF_COUNTRY_CODE, DEFAULT_COUNTRY_CODE),
+                ): _country_selector(),
+                vol.Required(
+                    CONF_REGION, default=entry.data.get(CONF_REGION, REGION_AUTO)
+                ): _region_selector(),
                 vol.Optional(CONF_PASSWORD): _SECRET,
                 vol.Optional(CONF_SIGN_KEY): _SECRET,
                 vol.Optional(CONF_DEVICE_ID): _SECRET,

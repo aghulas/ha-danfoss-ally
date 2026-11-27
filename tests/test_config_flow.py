@@ -9,31 +9,64 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.danfoss_ally_cloud.api.client import CloudAuthError, CloudError
 from custom_components.danfoss_ally_cloud.const import (
+    CONF_CH_KEY,
     CONF_COMPANION_FEED_EXTERNAL_SENSOR,
     CONF_COMPANION_FEED_LOAD_MEAN,
     CONF_CONNECTION_MODE,
+    CONF_COUNTRY_CODE,
+    CONF_DEVICE_ID,
     CONF_ENABLE_CLOUD_MQTT,
     CONF_ENABLE_LOCAL,
     CONF_MQTT_MODE,
     CONF_MQTT_PREFIXES,
+    CONF_PASSWORD,
+    CONF_REGION,
     CONF_SCAN_INTERVAL,
+    CONF_SIGN_KEY,
+    CONF_USERNAME,
     CONNECTION_MODE_MQTT_COMPANION,
     DOMAIN,
+    REGION_AUTO,
 )
 
 from .common import ENTRY_DATA, FakeCloudClient
 
 _FLOW = "custom_components.danfoss_ally_cloud.config_flow.CloudClient"
 
+# The account step (1/2): email, password, country, datacenter.
+_ACCOUNT = {
+    CONF_USERNAME: ENTRY_DATA[CONF_USERNAME],
+    CONF_PASSWORD: ENTRY_DATA[CONF_PASSWORD],
+    CONF_COUNTRY_CODE: ENTRY_DATA[CONF_COUNTRY_CODE],
+    CONF_REGION: ENTRY_DATA[CONF_REGION],
+}
+# The installation-secrets step (2/2).
+_SECRETS = {
+    CONF_SIGN_KEY: ENTRY_DATA[CONF_SIGN_KEY],
+    CONF_DEVICE_ID: ENTRY_DATA[CONF_DEVICE_ID],
+    CONF_CH_KEY: ENTRY_DATA[CONF_CH_KEY],
+}
 
-async def _submit(hass: HomeAssistant, fake: FakeCloudClient):
+
+async def _submit(hass: HomeAssistant, fake: FakeCloudClient, account=None):
+    """Drive the two-step cloud flow: account step then installation-secrets step.
+
+    Returns early if the account step itself ends the flow (e.g. already_configured abort).
+    """
     with patch(_FLOW, return_value=fake):
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
         assert result["type"] == FlowResultType.MENU
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], {"next_step_id": "cloud"}
         )
-        return await hass.config_entries.flow.async_configure(result["flow_id"], ENTRY_DATA)
+        assert result["step_id"] == "cloud"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], account or _ACCOUNT
+        )
+        if result["type"] != FlowResultType.FORM:
+            return result
+        assert result["step_id"] == "cloud_secrets"
+        return await hass.config_entries.flow.async_configure(result["flow_id"], _SECRETS)
 
 
 async def test_user_success(hass: HomeAssistant):
@@ -41,6 +74,18 @@ async def test_user_success(hass: HomeAssistant):
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["title"] == ENTRY_DATA["username"]
     assert result["data"]["username"] == ENTRY_DATA["username"]
+    # The two steps are merged into the stored entry (account + secrets).
+    for key in (CONF_COUNTRY_CODE, CONF_REGION, CONF_SIGN_KEY, CONF_DEVICE_ID, CONF_CH_KEY):
+        assert result["data"][key] == ENTRY_DATA[key]
+
+
+async def test_cloud_region_auto_derived_from_country(hass: HomeAssistant):
+    """Auto datacenter resolves from the chosen country (91 India -> "in")."""
+    account = {**_ACCOUNT, CONF_COUNTRY_CODE: "91", CONF_REGION: REGION_AUTO}
+    result = await _submit(hass, FakeCloudClient(), account=account)
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_COUNTRY_CODE] == "91"
+    assert result["data"][CONF_REGION] == "in"
 
 
 async def test_user_invalid_auth(hass: HomeAssistant):
