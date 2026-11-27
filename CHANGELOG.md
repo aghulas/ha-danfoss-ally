@@ -1,9 +1,16 @@
 # Changelog
 
-## Unreleased — Side panel navigation, relays under their own home
+## 2.0.11 — Side panel navigation, relays under their own home
 
 **Fixed**
 
+- Repairs: a per-head "hardware fault" issue is now deleted directly whenever the head is read
+  online with no active fault (`fault == 0`), rather than only through the in-memory previous↔current
+  diff. That diff could only clear issues the running process had created, so a fault issue raised
+  before a Home Assistant restart lingered forever in the issue registry even after the head reported
+  `fault == 0` (four such stale issues were observed on real hardware). Such issues are now reaped on
+  the next cycle the head reports no fault; an offline head is left untouched (the fault is unknown
+  while unreachable).
 - Side panel / `overview`: a boiler relay is listed under its own home. Under the v2 Companion the
   relay-to-room linkage is empty, so with several homes every relay fell back to the first one. The
   relay's own home (published per device by `danfoss2mqtt`) now wins; the vote of the linked rooms
