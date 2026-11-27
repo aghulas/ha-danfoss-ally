@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Head readings under the Companion
+## 2.0.15 — Head readings under the Companion
 
 **Added**
 
