@@ -4,7 +4,8 @@
 
 - add-on `danfoss2mqtt` `0.1.7`, with `pydanfoss-cloud` `0.7.6`;
 - Companion `2.0.16`;
-- then `0.1.8` / `0.7.7` / `2.0.17` for the follow-up fixes.
+- then `0.1.8` / `0.7.7` / `2.0.17` for the follow-up fixes, and for the room-route writes completed on
+  2026-11-28.
 
 This trial covers the settings the `danfoss2mqtt` bridge writes for a cloud head: child lock, open-window
 detection, and the upper and lower setpoint bounds. It does not cover the setpoint, which was proven
@@ -67,6 +68,26 @@ connector (DP 120, gateway echo).
 HA and the bridge did not show the unlocked state in between: their 180 s poll is longer than the 50 s it
 lasted. Only the cloud read saw it, which is expected because nothing on those paths sets state in advance.
 
+### Same room, 2026-11-28 — window detection and upper bound through the room route
+
+This ran with the gate open to every head (see Rollout), Companion `2.0.17`, add-on `0.1.8`. Each write was asked on
+head 1 only, from Home Assistant, and each had its own go-ahead. Both heads were read back through the per-device
+cloud route right after each write.
+
+| # | Write | Independent read-back | Verdict |
+|---|---|---|---|
+| 7 | Window detection on → off (DP 116) | **Both** heads showed it off | **Pass** |
+| 8 | Window detection back on | Both heads showed it on | **Pass** |
+| 9 | Upper bound 21 → 21.5 °C (DP 18) | Both heads at 21.5 °C | **Pass** |
+| 10 | Upper bound back to 21 °C | Both heads at 21 °C | **Pass** |
+
+The bound was raised and not lowered. Comfort was at 21 °C, so a bound under 21 °C could have pulled that
+setpoint down, and putting the bound back would not have raised it again.
+
+No other setting or setpoint moved, and the room ended in its exact original state. One cloud field,
+`heat_available`, went from true to false on both heads during the trial. None of these writes touches it. It most
+likely reflects the boiler idling at night.
+
 ### Rollout
 
 After the trial, the trial head was cleared and the gate was opened to every head:
@@ -93,5 +114,5 @@ carry `write_scope: head`.
   - The bound numbers of a grouped head now state their room scope (`2.0.17`).
   - The text form of `window_open_internal` is not yet seen on site: the key only appears with a cloud push
     that carries the window state.
-- **Not proven via the room route:** window detection (DP 116) and the upper bound (DP 18). The child lock was
-  proven there; the other two rely on the 2026-11-19 proof of the group route (interface contract §4.2).
+- **All three room-route settings are now proven through the bridge:** the child lock on 2026-11-27, and window
+  detection and the upper bound on 2026-11-28 (writes 7–10). The lower bound has no group route.
