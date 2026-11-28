@@ -118,6 +118,12 @@ class MqttCompanionCoordinator:
         # /set keys a cloud-only bridge advertises for a device (``danfoss.set_keys`` in
         # ``bridge/devices``): what it can write right now. Absent for an older bridge.
         self._advertised_set_keys: dict[str, frozenset[str]] = {}
+        # Retained state / availability that arrived before ``bridge/devices`` declared the device
+        # (the broker does not order retained messages across topics). Kept by topic, last one
+        # wins, and applied as soon as the device is declared: a bridge republishes a reading only
+        # when it changes, so a dropped one would leave the entity unknown until the next change.
+        self._early_states: dict[tuple[str, str], str | bytes] = {}
+        self._early_availability: dict[tuple[str, str], bool] = {}
 
         self._unsubs: list[CALLBACK_TYPE] = []
         self._listeners: list[Callable[[], None]] = []
@@ -310,11 +316,14 @@ class MqttCompanionCoordinator:
             if "/" in friendly:
                 return
             dev_id = self._by_topic_key.get((matched_prefix, friendly))
+            online = _parse_online_payload(raw_payload)
+            if online is None:
+                return
             if dev_id is not None and dev_id in self.data:
-                online = _parse_online_payload(raw_payload)
-                if online is not None:
-                    self.data[dev_id].online = online
-                    self._notify_listeners()
+                self.data[dev_id].online = online
+                self._notify_listeners()
+            else:
+                self._early_availability[(matched_prefix, friendly)] = online
             return
 
         if "/" not in suffix:
@@ -375,22 +384,40 @@ class MqttCompanionCoordinator:
             self._advertised_set_keys.pop(dev_id, None)
             self.data.pop(dev_id, None)
 
+        self._apply_early_messages(prefix)
         self._notify_listeners()
+
+    def _apply_early_messages(self, prefix: str) -> None:
+        """Apply the state / availability kept for devices ``bridge/devices`` now declares."""
+        for key in [k for k in self._early_states if k[0] == prefix]:
+            dev_id = self._by_topic_key.get(key)
+            if dev_id is not None and dev_id in self.data:
+                self._decode_state(dev_id, self._early_states.pop(key))
+        for key in [k for k in self._early_availability if k[0] == prefix]:
+            dev_id = self._by_topic_key.get(key)
+            if dev_id is not None and dev_id in self.data:
+                self.data[dev_id].online = self._early_availability.pop(key)
 
     def _ingest_device_state(self, prefix: str, friendly: str, raw_payload: str | bytes) -> None:
         dev_id = self._by_topic_key.get((prefix, friendly))
         if dev_id is None or dev_id not in self.data:
+            self._early_states[(prefix, friendly)] = raw_payload
             return
+        if self._decode_state(dev_id, raw_payload):
+            self._notify_listeners()
+
+    def _decode_state(self, dev_id: str, raw_payload: str | bytes) -> bool:
+        """Apply a device state JSON onto ``self.data[dev_id]``; False unless a JSON object."""
         try:
             text = raw_payload.decode("utf-8") if isinstance(raw_payload, bytes) else raw_payload
             payload = json.loads(text)
             if not isinstance(payload, dict):
-                return
+                return False
         except (ValueError, UnicodeDecodeError):
-            return
+            return False
 
         decode_z2m_state(self.data[dev_id], payload)
-        self._notify_listeners()
+        return True
 
     def _ingest_bridge_rooms(self, prefix: str, raw_payload: str | bytes) -> None:
         try:
