@@ -80,7 +80,9 @@ from .ops_rooms import (  # noqa: F401
     link_relay_room,
     relay_room_link_writable,
     rename_room,
+    sensor_room_writable,
     set_relay_room,
+    set_sensor_room,
 )
 from .ops_views import (  # noqa: F401
     _gateway_carried,

@@ -15,7 +15,12 @@ from .ops_common import (
     _room_target,
     _run_cloud_write,
 )
-from .ops_views import RELAY_ROOM_LINK_KEY, relay_room_link_writable
+from .ops_views import (
+    RELAY_ROOM_LINK_KEY,
+    SENSOR_ROOM_KEY,
+    relay_room_link_writable,
+    sensor_room_writable,
+)
 
 if TYPE_CHECKING:
     from .coordinator import DanfossCoordinator
@@ -272,6 +277,66 @@ async def link_relay_room(
     except Exception as err:  # noqa: BLE001 - a publish failure is a refused write, never silent
         raise OperationError("publish_failed", f"could not publish to the bridge: {err}") from err
     return {"relay": relay, "room_id": str(room_id), "linked": linked, "status": "sent"}
+
+
+async def set_sensor_room(
+    hass: HomeAssistant, store: dict, sensor: str, room_id: str | None
+) -> dict:
+    """Ask the sensor's bridge to put it in a Danfoss room, or take it out (``sensor_room``).
+
+    ⚠ Changes what the room's heads regulate on. Companion only, admin-gated by the caller.
+    Checked here before anything is published, against what the bridge last read
+    (``bridge/sensor_rooms``): the sensor is known, its bridge advertises ``sensor_room`` for it,
+    the room is one of its home's rooms, the sensor is not in another room (take it out first),
+    and no other sensor is in that room. The result is ``status: "sent"``: the bridge re-reads,
+    writes, reads back and republishes ``bridge/sensor_rooms``; the new room shows only once it
+    does (never optimistic).
+    """
+    companion = store.get("companion")
+    if companion is None:
+        raise OperationError(
+            "sensor_room_unsupported",
+            "placing a room sensor from the panel needs the Bridge + Companion mode",
+        )
+    coordinator = store[DATA_COORDINATOR]
+    dev = coordinator.data.get(sensor)
+    if dev is None or not dev.is_sensor:
+        raise OperationError("unknown_sensor", f"room sensor not found: {sensor}")
+    if not sensor_room_writable(store, sensor):
+        raise OperationError(
+            "sensor_room_unavailable",
+            "this sensor's bridge does not accept a room change right now "
+            "(add-on option sensor_rooms_writes, or another trial sensor)",
+        )
+    cloud = companion.sensor_cloud_rooms
+    entry = cloud.get(sensor)
+    if entry is None:
+        raise OperationError("sensor_room_unknown", "the bridge has not read this sensor's room")
+    current = entry.get("room_id")
+    target = None if room_id in (None, "") else str(room_id).strip()
+    if target is None:
+        if current is None:
+            raise OperationError("no_change", "the sensor is already in no room")
+    else:
+        if not any(r["room_id"] == target for r in entry["rooms"]):
+            raise OperationError("unknown_room", "this room is not one of the sensor's home rooms")
+        if current == target:
+            raise OperationError("no_change", "the sensor is already in this room")
+        if current is not None:
+            raise OperationError(
+                "sensor_in_other_room", "the sensor is in another room: take it out first"
+            )
+        if any(
+            sid != sensor and e.get("room_id") == target and e.get("home_id") == entry["home_id"]
+            for sid, e in cloud.items()
+        ):
+            raise OperationError("room_has_sensor", "that room already holds another room sensor")
+    payload = {SENSOR_ROOM_KEY: {"room_id": target}}
+    try:
+        await companion.async_send_raw_device_set(sensor, payload)
+    except Exception as err:  # noqa: BLE001 - a publish failure is a refused write, never silent
+        raise OperationError("publish_failed", f"could not publish to the bridge: {err}") from err
+    return {"sensor": sensor, "room_id": target, "status": "sent"}
 
 
 # --- Sub-device UNBIND / "disconnect" (contract write-safety). The most DESTRUCTIVE cloud write:

@@ -256,6 +256,13 @@ const OVERVIEW: FleetOverview = {
           temperature: null,
           humidity: null,
           battery: 52,
+          // Servi par le pont cloud : dans aucune pièce Danfoss, plaçable (sensor_room).
+          cloud_room: null,
+          cloud_rooms: [
+            { room_id: "71", name: "Couloir", sensor_id: null },
+            { room_id: "70", name: "Salle 1", sensor_id: "sensor-synth-1" },
+          ],
+          room_writable: true,
         },
       ],
       relays: [
@@ -407,6 +414,7 @@ const DEMO_ENTITIES = [
 
 const fakeHass: HassLike = {
   language: "fr",
+  user: { is_admin: true },
   devices: {
     "dev-h1": { id: "dev-h1", name: "Salle 1 #1", identifiers: [["danfoss_ally_cloud", "head-synth-1"]] },
     "dev-room": { id: "dev-room", name: "Salle 1", identifiers: [["danfoss_ally_cloud", "group_13000000"]] },
@@ -455,6 +463,18 @@ const fakeHass: HassLike = {
     }
     if (msg.type === "danfoss_ally_cloud/overview") {
       return OVERVIEW as unknown as T;
+    }
+    if (msg.type === "danfoss_ally_cloud/sensor/set_room") {
+      // Simule le pont : la pièce relue n'apparaît qu'après quelques secondes.
+      const sensor = OVERVIEW.homes.flatMap((h) => h.sensors ?? []).find((x) => x.device_id === msg.sensor);
+      const roomId = msg.room_id as string | null;
+      setTimeout(() => {
+        if (sensor) {
+          const room = sensor.cloud_rooms?.find((r) => r.room_id === roomId);
+          sensor.cloud_room = room ? { room_id: room.room_id, name: room.name } : null;
+        }
+      }, 4000);
+      return { sensor: msg.sensor, room_id: roomId, status: "sent" } as unknown as T;
     }
     if (msg.type === "danfoss_ally_cloud/schedule/get") {
       const target = msg.target as { id?: string } | undefined;

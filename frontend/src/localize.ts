@@ -205,6 +205,22 @@ const STRINGS = {
     relay_rooms_confirm_unlink:
       "Unlink “{room}” from “{relay}”? This room will no longer switch the boiler on.",
     relay_rooms_error: "Not sent: {message}",
+    sensor_room_title: "Danfoss room",
+    sensor_room_none: "In no room",
+    sensor_room_read_only:
+      "Read-only: the bridge does not accept a room change for this sensor (add-on option sensor_rooms_writes), or you are not an administrator.",
+    sensor_room_warning:
+      "Warning: a sensor in a room becomes that room's reference measurement in Danfoss Ally: the room's heads may then regulate on it.",
+    sensor_room_choose: "Choose a room…",
+    sensor_room_assign: "Put in this room",
+    sensor_room_remove: "Take out of this room",
+    sensor_room_no_choice: "Every room of this home already holds a sensor.",
+    sensor_room_confirm_assign:
+      "Put “{sensor}” in “{room}”? The heads of “{room}” may then regulate on this sensor.",
+    sensor_room_confirm_remove:
+      "Take “{sensor}” out of “{room}”? The heads of “{room}” will no longer use it as their reference.",
+    sensor_room_timeout:
+      "The bridge has not confirmed the change yet. The page shows what it last read; refresh later.",
     relay_rooms_timeout:
       "The bridge has not confirmed the change yet. The list shows what it last read; refresh later.",
     el_kind_gateway: "Gateway",
@@ -424,6 +440,22 @@ const STRINGS = {
     relay_rooms_confirm_unlink:
       "Délier « {room} » de « {relay} » ? Cette pièce ne fera plus démarrer la chaudière.",
     relay_rooms_error: "Non envoyé : {message}",
+    sensor_room_title: "Pièce Danfoss",
+    sensor_room_none: "Dans aucune pièce",
+    sensor_room_read_only:
+      "Lecture seule : le pont n'accepte pas de changement de pièce pour ce capteur (option sensor_rooms_writes du module), ou vous n'êtes pas administrateur.",
+    sensor_room_warning:
+      "Attention : dans Danfoss Ally, un capteur placé dans une pièce devient la mesure de référence de la pièce : ses têtes peuvent alors réguler dessus.",
+    sensor_room_choose: "Choisir une pièce…",
+    sensor_room_assign: "Placer dans cette pièce",
+    sensor_room_remove: "Retirer de cette pièce",
+    sensor_room_no_choice: "Toutes les pièces de cette maison ont déjà un capteur.",
+    sensor_room_confirm_assign:
+      "Placer « {sensor} » dans « {room} » ? Les têtes de « {room} » pourront alors réguler sur ce capteur.",
+    sensor_room_confirm_remove:
+      "Retirer « {sensor} » de « {room} » ? Les têtes de « {room} » ne l'utiliseront plus comme référence.",
+    sensor_room_timeout:
+      "Le pont n'a pas encore confirmé la modification. La page montre sa dernière lecture ; actualisez plus tard.",
     relay_rooms_timeout:
       "Le pont n'a pas encore confirmé la modification. La liste montre sa dernière lecture ; actualisez plus tard.",
     el_kind_gateway: "Passerelle",

@@ -145,6 +145,7 @@ The Companion issues device-level writes by publishing a JSON object to `<prefix
 | Room load mean (`load_room_mean`) | `{"load_room_mean": 35}` |
 | Weekly schedule day (`weekly_schedule`) | `{"weekly_schedule": {"dayofweek": 1, "num_of_transitions": 3, "transitions": [...]}}` |
 | Relay room linkage (`link_relay_room`, relay only, §3) | `{"room_link": {"room_id": "71", "linked": true}}` |
+| Sensor's Danfoss room (`set_sensor_room`, cloud room sensor only, §3) | `{"sensor_room": {"room_id": "71"}}` or `{"sensor_room": {"room_id": null}}` |
 
 ### 2.4 Direct-cloud-only write paths are not part of the Companion (by design)
 
@@ -277,6 +278,21 @@ While `zigbee2mqtt` manages individual Zigbee devices, a Danfoss heating system 
        room shows "awaiting the bridge" until `bridge/relays` shows the new state; nothing is
        optimistic. The page states that the change alters the boiler's heat demand and asks for a
        confirmation before each write.
+   - **Sensor room** (`sensor_room`, design and risks: [`sensor-room-assign.md`](sensor-room-assign.md)).
+     `danfoss2mqtt/bridge/sensor_rooms` (`retain`) gives each cloud room sensor (`014G2480`) its
+     home, its Tuya room (`room_id`, `null` = none, from the device -> room map) and its home's
+     rooms: `{"<sensor id>": {"home_id", "room_id", "rooms": [{"room_id", "name"}]}}`. The sensor's
+     descriptor carries `danfoss.set_keys: ["sensor_room"]` only while the add-on gate is open for
+     it (`sensor_rooms_writes`, off by default; `sensor_rooms_trial_sensor` confines it to one
+     sensor) and its entry is known, else `[]`. ⚠ A sensor in a room is meant to become its heads'
+     reference measurement. `/set` ← `{"sensor_room": {"room_id": "<id>" | null}}` puts it in that
+     room / takes it out. The bridge re-reads the home's rooms and device -> room map, refuses a
+     room not of that home, a sensor already in another room (take it out first), and a room that
+     holds another sensor; writes one `relation.save` / `relation.delete` (captured from the app,
+     2026-11-28); reads the map back (3 × 5 s) and republishes `bridge/sensor_rooms` at once with
+     what it read. The Companion checks the same before publishing (admin-only WebSocket
+     `sensor/set_room`) and shows the new room only once the bridge has read it back.
+     **Not yet written on real hardware through the bridge.**
    - `danfoss2mqtt/bridge/request/<action>` → `danfoss2mqtt/bridge/response/<action>` and
      `danfoss2mqtt/bridge/jobs/<job_id>` for room/schedule/vacation operations.
 2. **Companion-managed rooms (for `zigbee2mqtt` heads + `014G2480` sensors)**:

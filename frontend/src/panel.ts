@@ -29,6 +29,9 @@
  * l'utilisateur est administrateur ; sinon la liste est en lecture seule. Chaque geste
  * est confirmé (il change la demande de chauffe de la chaudière) et l'état affiché reste
  * celui relu par le pont : la pièce est « en attente » jusqu'à ce que `bridge/relays` change.
+ * De même, la page d'un capteur de pièce servi par le pont cloud montre sa pièce Danfoss et
+ * permet de l'y placer / l'en retirer (`sensor/set_room`, `sensor_room`) aux mêmes conditions
+ * (annonce du pont, administrateur, confirmation, état relu par le pont).
  *
  * Sous les pièces de l'intégration, une section « autres zones » (§8.3, affichable
  * ou non par un bouton, affichée par défaut) résume, zone HA par zone, les `climate`
@@ -64,6 +67,12 @@ import {
   roomPath,
 } from "./nav";
 import { type RelayPending, pendingConfirmed, relayRoomRows } from "./relay";
+import {
+  type SensorRoomPending,
+  sensorPendingConfirmed,
+  sensorRoomAction,
+  sensorRoomChoices,
+} from "./sensor-room";
 import "./room-card";
 import type {
   FleetHome,
@@ -77,7 +86,7 @@ import type {
   RoomCardConfig,
 } from "./types";
 import { CARD_VERSION } from "./version";
-import { fetchOverview, fetchRooms, linkRelayRoom } from "./ws";
+import { fetchOverview, fetchRooms, linkRelayRoom, setSensorRoom } from "./ws";
 
 /** Relecture de la vue d'ensemble après une demande `room_link` : tous les 3 s, 2 min au plus. */
 export const RELAY_WATCH_MS = 3000;
@@ -102,6 +111,12 @@ export class DanfossAllyPanel extends LitElement {
   @state() private _relayPending: RelayPending | null = null;
   /** Dernier refus ou délai dépassé d'une demande `room_link`, affiché sur la page du relais. */
   @state() private _relayNote: string | null = null;
+  /** Demande `sensor_room` envoyée au pont, pas encore relue (une à la fois). */
+  @state() private _sensorPending: SensorRoomPending | null = null;
+  /** Dernier refus ou délai dépassé d'une demande `sensor_room`. */
+  @state() private _sensorNote: string | null = null;
+  /** Pièce choisie dans la liste, pour placer le capteur. */
+  @state() private _sensorChoice = "";
   /** Attente entre deux relectures (remplaçable dans les tests). */
   private _sleep = (ms: number): Promise<void> =>
     new Promise((resolve) => setTimeout(resolve, ms));
@@ -112,6 +127,11 @@ export class DanfossAllyPanel extends LitElement {
   protected willUpdate(changed: Map<string, unknown>): void {
     if (changed.has("route")) {
       this._path = this.route?.path ?? FLEET_PATH;
+    }
+    if (changed.has("_path")) {
+      // Le choix de pièce d'un capteur ne suit pas l'utilisateur d'une page à l'autre.
+      this._sensorChoice = "";
+      this._sensorNote = null;
     }
   }
 
@@ -541,6 +561,7 @@ export class DanfossAllyPanel extends LitElement {
         <div class="flags">${this._elementFlags(el)}</div>
       </section>
       ${el.kind === "relay" ? this._renderRelayRooms(el.relay) : nothing}
+      ${el.kind === "sensor" ? this._renderSensorRoom(el.sensor) : nothing}
       ${this._renderEntities(haDeviceId(this.hass, el.id), "el_state", true)}
     `;
   }
@@ -662,6 +683,135 @@ export class DanfossAllyPanel extends LitElement {
       this._relayNote = t(this.hass, "relay_rooms_timeout");
     } finally {
       this._relayPending = null;
+    }
+  }
+
+  /** Le capteur accepte un geste maintenant : pont qui annonce `sensor_room` + administrateur. */
+  private _sensorWritable(sensor: FleetSensor): boolean {
+    return sensor.room_writable === true && this.hass?.user?.is_admin === true;
+  }
+
+  /**
+   * Pièce Danfoss d'un capteur servi par le pont cloud (`bridge/sensor_rooms`) : la pièce
+   * relue par le pont et, si le pont annonce `sensor_room` et que l'utilisateur est
+   * administrateur, le geste possible (placer dans une pièce sans capteur, ou retirer).
+   * Rien si le backend ne publie pas la pièce Danfoss du capteur.
+   */
+  private _renderSensorRoom(sensor: FleetSensor): TemplateResult | typeof nothing {
+    if (sensor.cloud_room === undefined) {
+      return nothing;
+    }
+    const writable = this._sensorWritable(sensor);
+    const action = sensorRoomAction(sensor, writable, this._sensorPending);
+    const choices = sensorRoomChoices(sensor);
+    const pending = this._sensorPending?.sensor === sensor.device_id;
+    const current = sensor.cloud_room;
+    return html`
+      <section class="home">
+        <div class="home-head">
+          <h2>${t(this.hass, "sensor_room_title")}</h2>
+          <span class="heads-count"
+            >${current
+              ? (current.name ?? current.room_id)
+              : t(this.hass, "sensor_room_none")}</span
+          >
+        </div>
+        ${writable
+          ? html`<div class="relay-warning" role="note">${t(this.hass, "sensor_room_warning")}</div>`
+          : html`<div class="room-sub wrap note">${t(this.hass, "sensor_room_read_only")}</div>`}
+        ${this._sensorNote
+          ? html`<div class="relay-note" role="alert">${this._sensorNote}</div>`
+          : nothing}
+        ${pending ? html`<span class="flag warn">${t(this.hass, "relay_room_pending")}</span>` : nothing}
+        ${action === "remove"
+          ? html`<button
+              class="relay-room-action"
+              @click=${() => void this._changeSensorRoom(sensor, null)}
+            >
+              ${t(this.hass, "sensor_room_remove")}
+            </button>`
+          : nothing}
+        ${action === "assign" && choices.length > 0
+          ? html`<div class="sensor-room-pick">
+              <select
+                aria-label=${t(this.hass, "sensor_room_title")}
+                @change=${(ev: Event) => {
+                  this._sensorChoice = (ev.target as HTMLSelectElement).value;
+                }}
+              >
+                <option value="" ?selected=${this._sensorChoice === ""}>
+                  ${t(this.hass, "sensor_room_choose")}
+                </option>
+                ${choices.map(
+                  (room) =>
+                    html`<option value=${room.room_id} ?selected=${this._sensorChoice === room.room_id}>
+                      ${room.name ?? room.room_id}
+                    </option>`,
+                )}
+              </select>
+              <button
+                class="relay-room-action"
+                ?disabled=${this._sensorChoice === ""}
+                @click=${() => void this._changeSensorRoom(sensor, this._sensorChoice)}
+              >
+                ${t(this.hass, "sensor_room_assign")}
+              </button>
+            </div>`
+          : nothing}
+        ${action === "assign" && choices.length === 0
+          ? html`<div class="room-sub wrap note">${t(this.hass, "sensor_room_no_choice")}</div>`
+          : nothing}
+      </section>
+    `;
+  }
+
+  /**
+   * Place le capteur dans une pièce (`roomId`) ou l'en retire (`null`) : confirmation, envoi
+   * au pont, puis relecture de la vue d'ensemble jusqu'à ce que `bridge/sensor_rooms` montre
+   * la pièce demandée (ou délai dépassé). Rien n'est affiché comme fait avant cette relecture.
+   */
+  private async _changeSensorRoom(sensor: FleetSensor, roomId: string | null): Promise<void> {
+    if (!this.hass || this._sensorPending !== null || !this._sensorWritable(sensor)) {
+      return;
+    }
+    if (roomId === "") {
+      return;
+    }
+    const target = roomId === null ? sensor.cloud_room : sensor.cloud_rooms?.find((r) => r.room_id === roomId);
+    const roomName = target ? (target.name ?? target.room_id) : (roomId ?? "");
+    const question = t(this.hass, roomId === null ? "sensor_room_confirm_remove" : "sensor_room_confirm_assign", {
+      sensor: sensor.name,
+      room: roomName,
+    });
+    if (typeof globalThis.confirm !== "function" || !globalThis.confirm(question)) {
+      return;
+    }
+    this._sensorNote = null;
+    try {
+      await setSensorRoom(this.hass, sensor.device_id, roomId);
+    } catch (err) {
+      this._sensorNote = t(this.hass, "relay_rooms_error", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    const pending: SensorRoomPending = { sensor: sensor.device_id, room_id: roomId };
+    this._sensorPending = pending;
+    try {
+      for (let i = 0; i < RELAY_WATCH_TRIES; i += 1) {
+        await this._sleep(RELAY_WATCH_MS);
+        const overview = await fetchOverview(this.hass);
+        if (overview) {
+          this._overview = overview;
+          if (sensorPendingConfirmed(overview, pending)) {
+            this._sensorChoice = "";
+            return;
+          }
+        }
+      }
+      this._sensorNote = t(this.hass, "sensor_room_timeout");
+    } finally {
+      this._sensorPending = null;
     }
   }
 
@@ -1275,6 +1425,22 @@ export class DanfossAllyPanel extends LitElement {
       color: var(--primary-color, #03a9f4);
       background: transparent;
       cursor: pointer;
+    }
+    .relay-room-action:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .sensor-room-pick {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .sensor-room-pick select {
+      font: inherit;
+      padding: 4px 8px;
+      max-width: 100%;
     }
     .relay-rooms {
       color: var(--secondary-text-color);

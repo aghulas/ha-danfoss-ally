@@ -329,13 +329,18 @@ def _sensor_home_gid(
     return home_gids[0] if home_gids else None
 
 
-def _sensor_overview(sensor, room_id: str | None) -> dict[str, Any]:
+def _sensor_overview(sensor, room_id: str | None, store: dict | None = None) -> dict[str, Any]:
     """A room sensor for the fleet overview (contract §3.6). Read only.
 
     Offline, the cloud keeps the last readings: temperature and humidity are then None (stale, not
     shown), like a head's temperature. The battery is kept: it does not go stale within hours.
+
+    A sensor its bridge publishes on ``bridge/sensor_rooms`` also carries its Danfoss (Tuya) room
+    as the bridge read it (``cloud_room``), the rooms of its home it can be put in
+    (``cloud_rooms``, each with the other sensor already in it, if any) and whether the bridge
+    accepts ``sensor_room`` for it right now (``room_writable``).
     """
-    return {
+    out: dict[str, Any] = {
         "device_id": sensor.id,
         "name": sensor.name,
         "online": bool(sensor.online),
@@ -344,6 +349,46 @@ def _sensor_overview(sensor, room_id: str | None) -> dict[str, Any]:
         "humidity": sensor.humidity if sensor.online else None,
         "battery": sensor.battery,
     }
+    companion = (store or {}).get("companion")
+    cloud = companion.sensor_cloud_rooms if companion is not None else {}
+    entry = cloud.get(sensor.id)
+    if entry is None:
+        return out
+    holder = {
+        e["room_id"]: sid
+        for sid, e in cloud.items()
+        if sid != sensor.id and e.get("room_id") and e.get("home_id") == entry.get("home_id")
+    }
+    rooms = sorted(
+        (
+            {"room_id": r["room_id"], "name": r.get("name"), "sensor_id": holder.get(r["room_id"])}
+            for r in entry["rooms"]
+        ),
+        key=lambda r: (str(r["name"] or "").casefold(), r["room_id"]),
+    )
+    current = entry.get("room_id")
+    out["cloud_room"] = (
+        None
+        if current is None
+        else {
+            "room_id": current,
+            "name": next((r["name"] for r in rooms if r["room_id"] == current), None),
+        }
+    )
+    out["cloud_rooms"] = rooms
+    out["room_writable"] = sensor_room_writable(store or {}, sensor.id)
+    return out
+
+
+# Key a bridge advertises on a room sensor (``danfoss.set_keys``) while it can put it in a room /
+# take it out (contract companion §3, ``sensor_room``).
+SENSOR_ROOM_KEY = "sensor_room"
+
+
+def sensor_room_writable(store: dict, sensor: str) -> bool:
+    """True when the sensor's bridge advertises ``sensor_room`` for it now (Companion only)."""
+    companion = store.get("companion")
+    return companion is not None and companion.supports_device_set(sensor, SENSOR_ROOM_KEY)
 
 
 # Key a bridge advertises on a boiler relay (``danfoss.set_keys``) while it can link / unlink its
@@ -438,7 +483,7 @@ def overview_payload(store: dict) -> dict:
                 "rooms": rooms,
                 "relays": home_relays,
                 "sensors": [
-                    _sensor_overview(s, sensor_rooms.get(s.id))
+                    _sensor_overview(s, sensor_rooms.get(s.id), store)
                     for s in sensors
                     if sensor_home[s.id] == gid
                 ],

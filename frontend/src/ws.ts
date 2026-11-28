@@ -175,6 +175,35 @@ export async function subscribeJobs(
   }
 }
 
+/** Réponse de `sensor/set_room` : la demande est partie vers le pont, pas encore appliquée. */
+export interface SensorRoomSent {
+  sensor: string;
+  room_id: string | null;
+  status: "sent";
+}
+
+/**
+ * Demande au pont de placer un capteur de pièce dans une pièce Danfoss (`roomId`), ou de
+ * l'en retirer (`null`) (contrat companion §3, `sensor/set_room`, administrateur).
+ * ⚠ Change la mesure sur laquelle les têtes de la pièce régulent. Lève une
+ * `ScheduleCommandError` au code stable en cas de refus ; un succès veut dire « envoyé ».
+ */
+export async function setSensorRoom(
+  hass: HassLike,
+  sensor: string,
+  roomId: string | null,
+): Promise<SensorRoomSent> {
+  try {
+    return await hass.callWS<SensorRoomSent>({
+      type: "danfoss_ally_cloud/sensor/set_room",
+      sensor,
+      room_id: roomId,
+    });
+  } catch (err) {
+    throw toCommandError(err);
+  }
+}
+
 /** Réponse de `relay/link_room` : la demande est partie vers le pont, pas encore appliquée. */
 export interface RelayLinkSent {
   relay: string;
