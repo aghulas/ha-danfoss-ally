@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.2.2 — Cloud sensors in an isolated head's room
+
+**Added**
+
+- v2 Companion: a cloud room sensor whose Tuya room has no schedule group (its one head is
+  isolated) is now placed in that head's room in the side panel. The bridge names it on the head
+  (`danfoss.room_sensor` in `bridge/devices`, `danfoss2mqtt` 0.1.10 / `pydanfoss-cloud` 0.8.1),
+  from the same device→room map as `bridge/rooms`, and only when unambiguous: one isolated head
+  and exactly one sensor in the room, no grouped head. Never from names. Without that bridge
+  version nothing changes.
+
 ## 2.2.1 — Cloud sensors read at once after a restart
 
 **Fixed**
