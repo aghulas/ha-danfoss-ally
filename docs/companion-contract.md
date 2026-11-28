@@ -201,7 +201,20 @@ While `zigbee2mqtt` manages individual Zigbee devices, a Danfoss heating system 
 
 1. **Native Danfoss rooms** published by `danfoss2mqtt` on:
    - `danfoss2mqtt/bridge/rooms` (`retain`): list of room objects (`group_id`, `name`, `home_id`,
-     `members`, `temperature`, `humidity`, `setpoint`, `setpoints`, `mode`, `heating`, `schedule`).
+     `members`, `temperature`, `humidity`, `setpoint`, `setpoints`, `mode`, `heating`, `schedule`,
+     `sensor`).
+     `sensor` is the device id of the room sensor (`014G2480`) in that room, or `null`. The bridge
+     sets it only from a proven link: the account's device -> Tuya room map
+     (`m.life.my.group.device.sort.list` v2.1, the route the Danfoss app uses to place a device
+     in a room; each device's `roomId`, `-1` = in no room; validated on real hardware
+     2026-11-28). A group's Tuya room is the single `roomId` shared by all its member heads that
+     carry one (heads in different rooms: no room); its `sensor` is the one sensor with that
+     `roomId` (none, or two or more: `null`). Never a name match. The map is re-read at most once
+     an hour (one request per home); a failed read keeps the last one. The Companion places the
+     sensor in that room in the side panel (`CompanionCoordinatorView.sensor_rooms`).
+     *Follow-up, not built:* a Tuya room with no schedule group (a room whose heads are not
+     grouped) is not on `bridge/rooms`, so a sensor in such a room stays without a room in the
+     panel; publishing those rooms would need its own design.
    - `danfoss2mqtt/bridge/holidays`, `danfoss2mqtt/bridge/relays`, `danfoss2mqtt/bridge/alerts` (`retain`).
      `bridge/relays` is a dict keyed by the boiler relay's device id, each value the rooms eligible
      to drive it: `{"<relay id>": [{"room_id": "<id>", "name": "Room 1", "linked": true}]}`
