@@ -8,13 +8,15 @@ only keeps what still decides future work.
 - **2.0.x — Bridge + Companion, stable since 2.0.0 (2026-11-22).** Home Assistant reads Zigbee2MQTT
   (heads on a Zigbee coordinator) and `danfoss2mqtt` (heads on Danfoss gateways, cloud path)
   through the local Mosquitto broker; the integration talks to the broker only
-  (`docs/companion-contract.md`). Current: 2.0.5.
+  (`docs/companion-contract.md`). Current: 2.0.17. The switch-over from 1.x is done on the live
+  install (2026-11-24).
 - **1.4.x — frozen.** The direct-cloud line (cloud HTTP + Tuya cloud MQTT + local tunnel inside the
   integration) gets no new feature. Its routing rules live on in `danfoss2mqtt`
   (`docs/architecture.md`).
 - **`pydanfoss-cloud`** — the `api/` layer as a library, released from its own repository
   (`docs/publishing-pydanfoss-cloud.md`).
-- **Not done yet: public HACS inclusion.** Installable as a custom repository.
+- **Not done yet: public HACS inclusion.** Installable as a custom repository; nothing technical
+  blocks the inclusion request any more (§6).
 
 Cross-cutting goal, unchanged: exercise the code on other installs (firmwares, product ids,
 gateway models) to make the DP assumptions more reliable.
@@ -23,16 +25,24 @@ gateway models) to make the DP assumptions more reliable.
 
 Ordered by what blocks what, not by date. No version number is attached until the work is scoped.
 
-### 1. Finish the 2.x switch-over
+### 1. Finish the 2.x switch-over — done
 
-- **Companion cutover on the live install** — disable the 1.x direct-cloud entry, stop the third
-  provider's MQTT discovery, reclaim the entity ids. A manual, on-site step: `docs/v2-cutover.md`.
-- **Real-hardware validation of Companion writes** with the owner present, per bridge
-  (Zigbee2MQTT heads over the local broker, `danfoss2mqtt` heads over the gateway bridge):
-  `docs/validation/real-validation-plan.md`.
-- **Isolated heads over `danfoss2mqtt`** are read-only by design today. Decide whether the proven
-  cloud-MQTT writes of the 1.x line (child lock, window detection, bounds, setpoints) are exposed
-  through the bridge.
+Kept for the record; nothing left here.
+
+- **Companion cutover on the live install**: done on 2026-11-24. The 1.x direct-cloud entry was
+  removed, and the third provider's MQTT discovery cut down to per-head liveness
+  (`docs/v2-cutover.md`).
+- **Real-hardware validation of Companion writes**, per bridge, owner present: done on 2026-11-22
+  (`docs/validation/2026-11-22-companion-v2-validation.md`).
+- **Head settings over `danfoss2mqtt`**: shipped in 2.0.16 and 2.0.17, behind an add-on gate.
+  - Child lock, window detection and both setpoint bounds are written by the bridge: through the
+    room group publish for a grouped head (the whole room takes the value), and through cloud MQTT
+    for an isolated head.
+  - All of them are proven on real heads (2026-11-27 and 2026-11-28,
+    `docs/validation/2026-11-27-cloud-bridge-head-settings.md`). The gate is open to every head on
+    the live install.
+  - Left out on purpose: lowering the pause setpoint when the lower bound goes down. It would be a
+    write the app does not make, and a "pause setpoint" setting would need its own trial.
 
 ### 2. Preheat that lasts
 
@@ -83,13 +93,18 @@ A head paired to Zigbee2MQTT loses what the gateway and the cloud did above it: 
 room sensor feed, load balancing, holidays, the re-imposition of settings. Inventory, state of the
 Companion's first version and the proposal — a standalone room coordinator on MQTT, sibling of
 `danfoss2mqtt`, in stages each gated by a supervised trial: `docs/z2m-cloud-parity.md`. Direction
-approved on 2026-11-23; stage 0 (identify the existing sensor feed, gate the Companion's two
-periodic feeds, fix the sensor keep-alive) comes first.
+approved on 2026-11-23.
+
+The coordinator ships as the `danfoss-room-coordinator` add-on, and stages 0 to 7 are built. The
+setpoint fan-out was proven in a supervised trial
+(`docs/validation/2026-11-23-setpoint-fanout-stage2.md`). Stages 3 to 7 run live on one test room, and what is
+left needs someone on site or a multi-day window
+(`docs/validation/2026-11-25-coordinator-stages3-7.md`).
 
 ### 6. Publication
 
-- Tagged releases are in place. Remaining: the **HACS inclusion pull request** (only the owner can
-  submit it), once the cutover and the Companion write validation above are done.
+- Tagged releases are in place. Remaining: the **HACS inclusion pull request**. Only the owner can
+  submit it. Its prerequisites (the cutover and the Companion write validation, §1) are done.
 - Keep the "unofficial" framing and the conservative polling defaults.
 
 ## Standing decisions
