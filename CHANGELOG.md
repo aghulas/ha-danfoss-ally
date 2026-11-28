@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.2.1 — Cloud sensors read at once after a restart
+
+**Fixed**
+
+- v2 Companion: a device's state or availability that arrives before the `bridge/devices` that
+  declares it is now kept, then applied as soon as the device is declared. On a restart the broker
+  replays retained messages in no particular order. `danfoss2mqtt` republishes a reading only when
+  it changes, so a dropped one left the entity "unknown" until then. Seen on real hardware after
+  the 2.2.0 restart: cloud room sensors read "unknown", and a room whose sensor is named on
+  `bridge/rooms` showed no temperature.
+
 ## 2.2.0 — Relay rooms from the panel, cloud room sensors in their room
 
 **Added**
