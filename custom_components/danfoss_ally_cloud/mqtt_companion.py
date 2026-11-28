@@ -111,6 +111,9 @@ class MqttCompanionCoordinator:
         self._heat_demand_by_prefix: dict[str, dict[str, Any]] = {}
         # Boiler relays' room linkage (``bridge/relays``): relay id -> [{room_id, name, linked}].
         self._relays_by_prefix: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        # Cloud room sensors' Tuya room (``bridge/sensor_rooms``): sensor id ->
+        # {home_id, room_id (None = in no room), rooms: [{room_id, name}]}.
+        self._sensor_rooms_by_prefix: dict[str, dict[str, dict[str, Any]]] = {}
         # Optional home_id per device published under danfoss.home_id in bridge/devices
         self.device_home: dict[str, str] = {}
         # Devices served by a cloud-only bridge (danfoss2mqtt) whose /set surface is restricted
@@ -154,6 +157,17 @@ class MqttCompanionCoordinator:
         merged: dict[str, list[dict[str, Any]]] = {}
         for relays in self._relays_by_prefix.values():
             merged.update(relays)
+        return merged
+
+    @property
+    def sensor_cloud_rooms(self) -> dict[str, dict[str, Any]]:
+        """All bridges' room sensor -> Tuya room merged (read-only view, ``bridge/sensor_rooms``).
+
+        Empty for a sensor until its bridge has published it: a sensor's room is never assumed.
+        """
+        merged: dict[str, dict[str, Any]] = {}
+        for sensors in self._sensor_rooms_by_prefix.values():
+            merged.update(sensors)
         return merged
 
     @property
@@ -244,6 +258,7 @@ class MqttCompanionCoordinator:
                 f"{prefix}/bridge/rooms",
                 f"{prefix}/bridge/holidays",
                 f"{prefix}/bridge/relays",
+                f"{prefix}/bridge/sensor_rooms",
                 f"{prefix}/bridge/heat_demand",
                 f"{prefix}/bridge/response/#",
                 f"{prefix}/+",
@@ -301,6 +316,10 @@ class MqttCompanionCoordinator:
 
         if suffix == "bridge/relays":
             self._ingest_bridge_relays(matched_prefix, raw_payload)
+            return
+
+        if suffix == "bridge/sensor_rooms":
+            self._ingest_bridge_sensor_rooms(matched_prefix, raw_payload)
             return
 
         if suffix == "bridge/heat_demand":
@@ -482,6 +501,36 @@ class MqttCompanionCoordinator:
                 if isinstance(r, dict) and r.get("room_id") is not None
             ]
         self._relays_by_prefix[prefix] = clean
+        self._notify_listeners()
+
+    def _ingest_bridge_sensor_rooms(self, prefix: str, raw_payload: str | bytes) -> None:
+        """Ingest ``bridge/sensor_rooms``: ``{sensor_id: {"home_id", "room_id", "rooms"}}``.
+
+        A malformed payload is ignored (the previous one stands); a malformed entry or room is
+        dropped. ``room_id`` None (or missing) means the sensor is in no room.
+        """
+        try:
+            text = raw_payload.decode("utf-8") if isinstance(raw_payload, bytes) else raw_payload
+            sensors = json.loads(text)
+            if not isinstance(sensors, dict):
+                return
+        except (ValueError, UnicodeDecodeError):
+            return
+        clean: dict[str, dict[str, Any]] = {}
+        for sensor_id, entry in sensors.items():
+            if not isinstance(entry, dict) or not isinstance(entry.get("rooms"), list):
+                continue
+            room_id = entry.get("room_id")
+            clean[str(sensor_id)] = {
+                "home_id": None if entry.get("home_id") is None else str(entry["home_id"]),
+                "room_id": None if room_id in (None, "") else str(room_id),
+                "rooms": [
+                    {"room_id": str(r["room_id"]), "name": r.get("name")}
+                    for r in entry["rooms"]
+                    if isinstance(r, dict) and r.get("room_id") is not None
+                ],
+            }
+        self._sensor_rooms_by_prefix[prefix] = clean
         self._notify_listeners()
 
     def _ingest_bridge_heat_demand(self, prefix: str, raw_payload: str | bytes) -> None:

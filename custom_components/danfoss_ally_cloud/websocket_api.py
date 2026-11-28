@@ -142,6 +142,7 @@ def async_register(hass: HomeAssistant) -> None:
     reg(hass, ws_room_detach)
     reg(hass, ws_relay_set_room)
     reg(hass, ws_relay_link_room)
+    reg(hass, ws_sensor_set_room)
     reg(hass, ws_vacation_set)
     reg(hass, ws_vacation_set_at_home)
     reg(hass, ws_vacation_cancel)
@@ -528,6 +529,33 @@ async def ws_relay_link_room(hass: HomeAssistant, connection, msg: dict) -> None
         return
     try:
         result = await ops.link_relay_room(hass, store, msg["relay"], msg["room_id"], msg["linked"])
+    except ops.OperationError as err:
+        _send_op_error(connection, msg["id"], err)
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.require_admin
+@_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/sensor/set_room",
+        vol.Required("sensor"): str,
+        # A Tuya room id from the overview's ``cloud_rooms``, or null to take the sensor out.
+        vol.Required("room_id"): vol.Any(None, str),
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_sensor_set_room(hass: HomeAssistant, connection, msg: dict) -> None:
+    """Ask the sensor's bridge to put it in a room / take it out (``sensor_room``). ⚠ Regulation.
+
+    Returns ``status: "sent"``; the panel waits for ``bridge/sensor_rooms`` to show the new room.
+    """
+    store = _write_store(hass, connection, msg)
+    if store is None:
+        return
+    try:
+        result = await ops.set_sensor_room(hass, store, msg["sensor"], msg["room_id"])
     except ops.OperationError as err:
         _send_op_error(connection, msg["id"], err)
         return

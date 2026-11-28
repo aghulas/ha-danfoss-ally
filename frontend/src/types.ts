@@ -295,6 +295,22 @@ export interface FleetSensor {
   temperature: number | null;
   humidity: number | null;
   battery: number | null;
+  /**
+   * Pièce Danfoss (Tuya) du capteur telle que le pont l'a relue (`bridge/sensor_rooms`),
+   * `null` = dans aucune pièce. Absent : le pont ne la publie pas (backend plus ancien).
+   */
+  cloud_room?: { room_id: string; name: string | null } | null;
+  /** Pièces de sa maison où il peut être placé (optionnel, même source). */
+  cloud_rooms?: FleetSensorRoom[];
+  /** Le pont accepte `sensor_room` pour ce capteur maintenant (optionnel, faux par défaut). */
+  room_writable?: boolean;
+}
+
+/** Pièce Danfoss où un capteur peut être placé ; `sensor_id` : l'autre capteur déjà dedans. */
+export interface FleetSensorRoom {
+  room_id: string;
+  name: string | null;
+  sensor_id: string | null;
 }
 
 /** Une maison (account "home") dans la vue d'ensemble. */
