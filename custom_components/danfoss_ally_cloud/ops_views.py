@@ -322,7 +322,8 @@ def _sensor_home_gid(
     own = coordinator.head_home(sensor.id)
     if own in home_gids:
         return own
-    via_room = coordinator.home_of(room_id) if room_id else None
+    # ``room_id`` is a schedule group's id, or an isolated head's id (its single-head room).
+    via_room = (coordinator.home_of(room_id) or coordinator.head_home(room_id)) if room_id else None
     if via_room in home_gids:
         return via_room
     return home_gids[0] if home_gids else None

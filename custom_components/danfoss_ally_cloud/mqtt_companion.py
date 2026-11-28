@@ -118,6 +118,9 @@ class MqttCompanionCoordinator:
         # /set keys a cloud-only bridge advertises for a device (``danfoss.set_keys`` in
         # ``bridge/devices``): what it can write right now. Absent for an older bridge.
         self._advertised_set_keys: dict[str, frozenset[str]] = {}
+        # Room sensor a cloud-only bridge names for an ISOLATED head (``danfoss.room_sensor`` in
+        # ``bridge/devices``): the sensor of the head's Tuya room, which has no schedule group.
+        self.head_room_sensor: dict[str, str] = {}
         # Retained state / availability that arrived before ``bridge/devices`` declared the device
         # (the broker does not order retained messages across topics). Kept by topic, last one
         # wins, and applied as soon as the device is declared: a bridge republishes a reading only
@@ -368,6 +371,11 @@ class MqttCompanionCoordinator:
                 self._advertised_set_keys[dev.id] = frozenset(str(k) for k in keys)
             else:
                 self._advertised_set_keys.pop(dev.id, None)
+            room_sensor = ext.get("room_sensor") if isinstance(ext, dict) else None
+            if room_sensor and isinstance(room_sensor, str | int):
+                self.head_room_sensor[dev.id] = str(room_sensor)
+            else:
+                self.head_room_sensor.pop(dev.id, None)
             seen_for_prefix.add(dev.id)
 
         # Remove stale devices that belonged to this prefix and disappeared from bridge/devices
@@ -382,6 +390,7 @@ class MqttCompanionCoordinator:
             self.device_home.pop(dev_id, None)
             self._cloud_bridge_devices.discard(dev_id)
             self._advertised_set_keys.pop(dev_id, None)
+            self.head_room_sensor.pop(dev_id, None)
             self.data.pop(dev_id, None)
 
         self._apply_early_messages(prefix)
