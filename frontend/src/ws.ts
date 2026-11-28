@@ -174,3 +174,35 @@ export async function subscribeJobs(
     return () => {};
   }
 }
+
+/** Réponse de `relay/link_room` : la demande est partie vers le pont, pas encore appliquée. */
+export interface RelayLinkSent {
+  relay: string;
+  room_id: string;
+  linked: boolean;
+  status: "sent";
+}
+
+/**
+ * Demande au pont de lier / délier une pièce d'un relais (contrat companion §3,
+ * `relay/link_room`, administrateur). ⚠ Change la demande de chauffe de la chaudière.
+ * Lève une `ScheduleCommandError` au code stable en cas de refus ; un succès veut dire
+ * « envoyé » : le nouvel état n'existe qu'une fois relu dans `overview`.
+ */
+export async function linkRelayRoom(
+  hass: HassLike,
+  relay: string,
+  roomId: string,
+  linked: boolean,
+): Promise<RelayLinkSent> {
+  try {
+    return await hass.callWS<RelayLinkSent>({
+      type: "danfoss_ally_cloud/relay/link_room",
+      relay,
+      room_id: roomId,
+      linked,
+    });
+  } catch (err) {
+    throw toCommandError(err);
+  }
+}

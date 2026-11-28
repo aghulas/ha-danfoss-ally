@@ -745,6 +745,19 @@ const STRINGS = {
     el_humidity: "Humidity {value}%",
     el_kind_relay: "Boiler relay",
     el_relay_rooms: "Rooms driving this relay",
+    relay_rooms_all: "Rooms of this relay",
+    relay_room_linked: "Linked",
+    relay_room_unlinked: "Not linked",
+    relay_room_link: "Link",
+    relay_room_unlink: "Unlink",
+    relay_room_pending: "Awaiting the bridge…",
+    relay_room_last: "Last linked room: unlink it in the Danfoss app",
+    relay_rooms_read_only: "Read-only: the bridge does not accept room changes for this relay (add-on option relay_links_writes), or you are not an administrator.",
+    relay_rooms_warning: "Warning: linking or unlinking a room changes the boiler's heat demand. A linked room that asks for heat switches the boiler on.",
+    relay_rooms_confirm_link: "Link “{room}” to “{relay}”? When this room asks for heat, the boiler will be switched on.",
+    relay_rooms_confirm_unlink: "Unlink “{room}” from “{relay}”? This room will no longer switch the boiler on.",
+    relay_rooms_error: "Not sent: {message}",
+    relay_rooms_timeout: "The bridge has not confirmed the change yet. The list shows what it last read; refresh later.",
     el_kind_gateway: "Gateway",
     el_state: "State",
     el_room_entities: "Room entities",
@@ -938,6 +951,19 @@ const STRINGS = {
     el_humidity: "Humidité {value} %",
     el_kind_relay: "Relais de chaudière",
     el_relay_rooms: "Pièces qui pilotent ce relais",
+    relay_rooms_all: "Pièces de ce relais",
+    relay_room_linked: "Liée",
+    relay_room_unlinked: "Non liée",
+    relay_room_link: "Lier",
+    relay_room_unlink: "Délier",
+    relay_room_pending: "En attente du pont…",
+    relay_room_last: "Dernière pièce liée : à délier dans l'app Danfoss",
+    relay_rooms_read_only: "Lecture seule : le pont n'accepte pas de modification des pièces de ce relais (option relay_links_writes du module), ou vous n'êtes pas administrateur.",
+    relay_rooms_warning: "Attention : lier ou délier une pièce change la demande de chauffe de la chaudière. Une pièce liée qui demande de la chaleur fait démarrer la chaudière.",
+    relay_rooms_confirm_link: "Lier « {room} » à « {relay} » ? Quand cette pièce demandera de la chaleur, la chaudière démarrera.",
+    relay_rooms_confirm_unlink: "Délier « {room} » de « {relay} » ? Cette pièce ne fera plus démarrer la chaudière.",
+    relay_rooms_error: "Non envoyé : {message}",
+    relay_rooms_timeout: "Le pont n'a pas encore confirmé la modification. La liste montre sa dernière lecture ; actualisez plus tard.",
     el_kind_gateway: "Passerelle",
     el_state: "État",
     el_room_entities: "Entités de la pièce",
@@ -1622,6 +1648,18 @@ async function subscribeJobs(hass, callback) {
   } catch {
     return () => {
     };
+  }
+}
+async function linkRelayRoom(hass, relay, roomId, linked) {
+  try {
+    return await hass.callWS({
+      type: "danfoss_ally_cloud/relay/link_room",
+      relay,
+      room_id: roomId,
+      linked
+    });
+  } catch (err) {
+    throw toCommandError(err);
   }
 }
 var __defProp$3 = Object.defineProperty;
@@ -4128,6 +4166,33 @@ function findRoom(overview, roomId) {
   }
   return null;
 }
+function relayRoomRows(relay, writable, pending) {
+  const rooms = relay.rooms ?? [];
+  const linkedCount = rooms.filter((r2) => r2.linked).length;
+  const busy = pending !== null && pending.relay === relay.device_id;
+  return rooms.map((room) => {
+    const isPending = busy && pending.room_id === room.room_id;
+    const lastLinked = room.linked && linkedCount <= 1;
+    let action = null;
+    if (writable && !busy && !lastLinked) {
+      action = room.linked ? "unlink" : "link";
+    }
+    return { ...room, pending: isPending, action, last_linked: lastLinked };
+  });
+}
+function findRelay(overview, relayId) {
+  for (const home of overview?.homes ?? []) {
+    const relay = home.relays.find((r2) => r2.device_id === relayId);
+    if (relay) {
+      return relay;
+    }
+  }
+  return void 0;
+}
+function pendingConfirmed(overview, pending) {
+  const room = findRelay(overview, pending.relay)?.rooms?.find((r2) => r2.room_id === pending.room_id);
+  return room !== void 0 && room.linked === pending.linked;
+}
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __decorateClass = (decorators, target, key, kind) => {
@@ -4138,6 +4203,8 @@ var __decorateClass = (decorators, target, key, kind) => {
   if (kind && result) __defProp(target, key, result);
   return result;
 };
+const RELAY_WATCH_MS = 3e3;
+const RELAY_WATCH_TRIES = 40;
 let DanfossAllyPanel = class extends i {
   constructor() {
     super(...arguments);
@@ -4148,6 +4215,9 @@ let DanfossAllyPanel = class extends i {
     this._refreshing = false;
     this._showOtherAreas = readShowOtherAreas();
     this._path = FLEET_PATH;
+    this._relayPending = null;
+    this._relayNote = null;
+    this._sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   }
   willUpdate(changed) {
     if (changed.has("route")) {
@@ -4517,11 +4587,15 @@ let DanfossAllyPanel = class extends i {
     `;
   }
   /**
-   * Pièces qui pilotent un relais, par leur nom. Ce sont des noms de pièces de l'app, pas
-   * des identifiants de la vue d'ensemble : du texte, pas des liens. Rien si le backend ne
-   * les donne pas (plus ancien) ou si aucune n'est liée.
+   * Pièces d'un relais. Avec la liste complète (`rooms`, backend récent) : chaque pièce,
+   * liée ou non, et — si le pont annonce `room_link` et que l'utilisateur est
+   * administrateur — un bouton pour la lier / délier. Sinon, les noms des pièces liées
+   * (backend plus ancien), en texte. Rien si le backend ne donne rien.
    */
   _renderRelayRooms(relay) {
+    if (relay.rooms !== void 0 && relay.rooms.length > 0) {
+      return this._renderRelayRoomList(relay);
+    }
     const names = relay.linked_room_names ?? [];
     if (names.length === 0) {
       return A;
@@ -4535,6 +4609,90 @@ let DanfossAllyPanel = class extends i {
         <div class="flags">${names.map((name) => b`<span class="flag">${name}</span>`)}</div>
       </section>
     `;
+  }
+  /** Le relais accepte un geste maintenant : pont qui annonce `room_link` + administrateur. */
+  _relayWritable(relay) {
+    return relay.room_link_writable === true && this.hass?.user?.is_admin === true;
+  }
+  _renderRelayRoomList(relay) {
+    const writable = this._relayWritable(relay);
+    const rows = relayRoomRows(relay, writable, this._relayPending);
+    return b`
+      <section class="home">
+        <div class="home-head">
+          <h2>${t(this.hass, "relay_rooms_all")}</h2>
+          <span class="heads-count"
+            >${t(this.hass, "rooms_linked", { n: rows.filter((r2) => r2.linked).length })}</span
+          >
+        </div>
+        ${writable ? b`<div class="relay-warning" role="note">${t(this.hass, "relay_rooms_warning")}</div>` : b`<div class="room-sub wrap note">${t(this.hass, "relay_rooms_read_only")}</div>`}
+        ${this._relayNote ? b`<div class="relay-note" role="alert">${this._relayNote}</div>` : A}
+        <ul class="relay-room-list">
+          ${rows.map(
+      (row) => b`
+              <li class="relay-room ${row.linked ? "linked" : ""}">
+                <span class="relay-room-name">${row.name ?? row.room_id}</span>
+                <span class="flag ${row.linked ? "ok" : ""}"
+                  >${t(this.hass, row.linked ? "relay_room_linked" : "relay_room_unlinked")}</span
+                >
+                ${row.pending ? b`<span class="flag warn">${t(this.hass, "relay_room_pending")}</span>` : A}
+                ${writable && row.last_linked ? b`<span class="room-sub">${t(this.hass, "relay_room_last")}</span>` : A}
+                ${row.action ? b`<button
+                      class="relay-room-action"
+                      @click=${() => void this._toggleRelayRoom(relay, row)}
+                    >
+                      ${t(this.hass, row.action === "link" ? "relay_room_link" : "relay_room_unlink")}
+                    </button>` : A}
+              </li>
+            `
+    )}
+        </ul>
+      </section>
+    `;
+  }
+  /**
+   * Lie / délie une pièce : confirmation, envoi au pont, puis relecture de la vue
+   * d'ensemble jusqu'à ce que `bridge/relays` montre l'état demandé (ou délai dépassé).
+   * Rien n'est affiché comme fait avant cette relecture.
+   */
+  async _toggleRelayRoom(relay, room) {
+    if (!this.hass || this._relayPending !== null || !this._relayWritable(relay)) {
+      return;
+    }
+    const linked = !room.linked;
+    const question = t(this.hass, linked ? "relay_rooms_confirm_link" : "relay_rooms_confirm_unlink", {
+      room: room.name ?? room.room_id,
+      relay: relay.name
+    });
+    if (typeof globalThis.confirm !== "function" || !globalThis.confirm(question)) {
+      return;
+    }
+    this._relayNote = null;
+    try {
+      await linkRelayRoom(this.hass, relay.device_id, room.room_id, linked);
+    } catch (err) {
+      this._relayNote = t(this.hass, "relay_rooms_error", {
+        message: err instanceof Error ? err.message : String(err)
+      });
+      return;
+    }
+    const pending = { relay: relay.device_id, room_id: room.room_id, linked };
+    this._relayPending = pending;
+    try {
+      for (let i2 = 0; i2 < RELAY_WATCH_TRIES; i2 += 1) {
+        await this._sleep(RELAY_WATCH_MS);
+        const overview = await fetchOverview(this.hass);
+        if (overview) {
+          this._overview = overview;
+          if (pendingConfirmed(overview, pending)) {
+            return;
+          }
+        }
+      }
+      this._relayNote = t(this.hass, "relay_rooms_timeout");
+    } finally {
+      this._relayPending = null;
+    }
   }
   /** État connu d'un élément, tiré de `overview` / `rooms` (jamais supposé). */
   _elementFlags(el) {
@@ -5060,6 +5218,43 @@ DanfossAllyPanel.styles = i$3`
       color: var(--warning-color, #ffa600);
       font-weight: 500;
     }
+    .relay-warning,
+    .relay-note {
+      margin: 8px 0;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border-left: 4px solid var(--warning-color, #ffa600);
+      background: var(--secondary-background-color, rgba(255, 166, 0, 0.08));
+    }
+    .relay-note {
+      border-left-color: var(--error-color, #db4437);
+    }
+    .relay-room-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .relay-room {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+    }
+    .relay-room-name {
+      flex: 1 1 160px;
+      min-width: 0;
+    }
+    .relay-room-action {
+      font: inherit;
+      padding: 4px 12px;
+      border-radius: 16px;
+      border: 1px solid var(--primary-color, #03a9f4);
+      color: var(--primary-color, #03a9f4);
+      background: transparent;
+      cursor: pointer;
+    }
     .relay-rooms {
       color: var(--secondary-text-color);
       font-size: 0.78rem;
@@ -5098,6 +5293,12 @@ __decorateClass([
 __decorateClass([
   r()
 ], DanfossAllyPanel.prototype, "_path", 2);
+__decorateClass([
+  r()
+], DanfossAllyPanel.prototype, "_relayPending", 2);
+__decorateClass([
+  r()
+], DanfossAllyPanel.prototype, "_relayNote", 2);
 DanfossAllyPanel = __decorateClass([
   t$1("danfoss-ally-panel")
 ], DanfossAllyPanel);

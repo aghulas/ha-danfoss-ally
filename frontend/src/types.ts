@@ -269,6 +269,17 @@ export interface FleetRelay {
   linked_rooms: number;
   /** Noms des pièces liées (optionnel : absent d'un backend plus ancien). Texte seulement. */
   linked_room_names?: string[];
+  /** Toutes les pièces éligibles, liées ou non, telles que le pont les a relues (optionnel). */
+  rooms?: FleetRelayRoom[];
+  /** Le pont accepte `room_link` pour ce relais maintenant (optionnel, faux par défaut). */
+  room_link_writable?: boolean;
+}
+
+/** Pièce éligible d'un relais (`bridge/relays`) : identifiant de pièce Tuya, pas un groupe. */
+export interface FleetRelayRoom {
+  room_id: string;
+  name: string | null;
+  linked: boolean;
 }
 
 /**

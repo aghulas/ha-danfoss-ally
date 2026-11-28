@@ -141,6 +141,7 @@ def async_register(hass: HomeAssistant) -> None:
     reg(hass, ws_room_attach)
     reg(hass, ws_room_detach)
     reg(hass, ws_relay_set_room)
+    reg(hass, ws_relay_link_room)
     reg(hass, ws_vacation_set)
     reg(hass, ws_vacation_set_at_home)
     reg(hass, ws_vacation_cancel)
@@ -500,6 +501,33 @@ async def ws_relay_set_room(hass: HomeAssistant, connection, msg: dict) -> None:
         return
     try:
         result = await ops.set_relay_room(hass, store, msg["relay"], msg["target"], msg["linked"])
+    except ops.OperationError as err:
+        _send_op_error(connection, msg["id"], err)
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.require_admin
+@_command(
+    {
+        vol.Required("type"): "danfoss_ally_cloud/relay/link_room",
+        vol.Required("relay"): str,
+        vol.Required("room_id"): str,
+        vol.Required("linked"): bool,
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_relay_link_room(hass: HomeAssistant, connection, msg: dict) -> None:
+    """Ask the relay's bridge to link / unlink one room (``room_link``). ⚠ Heat demand.
+
+    Returns ``status: "sent"``; the panel waits for ``bridge/relays`` to show the new state.
+    """
+    store = _write_store(hass, connection, msg)
+    if store is None:
+        return
+    try:
+        result = await ops.link_relay_room(hass, store, msg["relay"], msg["room_id"], msg["linked"])
     except ops.OperationError as err:
         _send_op_error(connection, msg["id"], err)
         return
