@@ -342,6 +342,7 @@ def test_companion_view_maps_sensors_to_rooms():
             "g2": {"name": "Salle 2", "sensor": "gone"},  # not in the fleet
             "g3": {"name": "Salle 3"},
         },
+        head_room_sensor={},
     )
     manager = SimpleNamespace(
         virtual_rooms={

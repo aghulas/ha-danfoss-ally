@@ -96,8 +96,10 @@ class CompanionCoordinatorView:
         """Room sensor id -> ``group_id`` of the room it measures (overview, contract §3.6).
 
         A native room names its sensor in ``bridge/rooms`` (``sensor``); a Companion-managed room in
-        its stored configuration (``sensor_id``). Only sensors present in the fleet are returned; a
-        sensor named by two rooms keeps the first one.
+        its stored configuration (``sensor_id``); an isolated head (no schedule group) names the
+        sensor of its Tuya room in ``bridge/devices`` (``danfoss.room_sensor``), and the sensor then
+        maps to the head's id, which is its single-head room's id in the overview. Only sensors
+        present in the fleet are returned; a sensor named by two rooms keeps the first one.
         """
         out: dict[str, str] = {}
         for gid, raw in self.companion.native_rooms.items():
@@ -107,6 +109,12 @@ class CompanionCoordinatorView:
         for gid, cfg in self.room_manager.virtual_rooms.items():
             if cfg.sensor_id and cfg.sensor_id in self.data:
                 out.setdefault(cfg.sensor_id, gid)
+        for head_id, sensor_id in self.companion.head_room_sensor.items():
+            head = self.data.get(head_id)
+            if head is None or not head.is_head or self.group_of(head_id) is not None:
+                continue
+            if sensor_id in self.data and self.data[sensor_id].is_sensor:
+                out.setdefault(sensor_id, head_id)
         return out
 
     @property

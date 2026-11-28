@@ -213,9 +213,9 @@ While `zigbee2mqtt` manages individual Zigbee devices, a Danfoss heating system 
      `roomId` (none, or two or more: `null`). Never a name match. The map is re-read at most once
      an hour (one request per home); a failed read keeps the last one. The Companion places the
      sensor in that room in the side panel (`CompanionCoordinatorView.sensor_rooms`).
-     *Follow-up, not built:* a Tuya room with no schedule group (a room whose heads are not
-     grouped) is not on `bridge/rooms`, so a sensor in such a room stays without a room in the
-     panel; publishing those rooms would need its own design.
+     A Tuya room with no schedule group (its one head is isolated) is not on `bridge/rooms`: its
+     sensor is carried on the **isolated head** instead, as `danfoss.room_sensor` in
+     `bridge/devices` (below).
    - `danfoss2mqtt/bridge/holidays`, `danfoss2mqtt/bridge/relays`, `danfoss2mqtt/bridge/alerts` (`retain`).
      `bridge/relays` is a dict keyed by the boiler relay's device id, each value the rooms eligible
      to drive it: `{"<relay id>": [{"room_id": "<id>", "name": "Room 1", "linked": true}]}`
@@ -224,6 +224,15 @@ While `zigbee2mqtt` manages individual Zigbee devices, a Danfoss heating system 
      and the relay's linked-rooms sensor; it changes only through `room_link` (below). Until a bridge has published a relay, its linkage is
      empty, never assumed; a malformed payload leaves the previous one in place. The bridge
      re-reads the linkage from the cloud at most once an hour (one request per relay).
+   - An **isolated head** (in no schedule group) in `danfoss2mqtt/bridge/devices` may carry
+     `danfoss.room_sensor`: the device id of the room sensor (`014G2480`) of its Tuya room, from
+     the same device -> Tuya room map as `bridge/rooms`' `sensor`. Set only when, in the head's
+     `roomId`, it is the **only** isolated head, **no** head of a schedule group sits there (the
+     room then belongs to that group), and **exactly one** sensor sits there. Any ambiguity (two
+     sensors, two isolated heads, a grouped head in the room, a head or sensor in no room) gives
+     no field. Never a name match. Absent on grouped heads, sensors and relays, and on an older
+     bridge. The Companion places that sensor in the head's own pseudo-room in the side panel
+     (the overview's `single_head` room, whose `id` is the head's device id).
    - Each head in `danfoss2mqtt/bridge/devices` carries `danfoss.set_keys`: the `/set` keys the
      bridge can write for it **right now**. Always `occupied_heating_setpoint`; plus, when the
      bridge's head-setting writes are open (add-on option `head_settings_writes`, off by default,
