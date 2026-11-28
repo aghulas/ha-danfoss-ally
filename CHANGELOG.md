@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.2.0 — Relay rooms from the panel, cloud room sensors in their room
+
+**Added**
+
+- v2 Companion: on a boiler relay's page, the side panel lists every room that can drive the
+  relay, linked or not, and can link or unlink one. ⚠ This changes the boiler's heat demand.
+  - The buttons appear only while the relay's `danfoss2mqtt` bridge advertises `room_link`.
+    That needs `danfoss2mqtt` 0.1.9 (`pydanfoss-cloud` 0.8.0) with its `relay_links_writes`
+    option open; the option is off by default.
+  - The action is reserved to admins and asks for a confirmation. The relay's last linked room
+    cannot be unlinked.
+  - The panel shows the new state only once the bridge has read it back from the cloud.
+  - Not yet written on real hardware through the bridge: the supervised trial plan is in
+    `docs/validation/2026-11-28-cloud-bridge-relay-room-link.md`.
+- v2 Companion: a room sensor served by `danfoss2mqtt` is placed in its room when the bridge
+  names it on `bridge/rooms` (`sensor`). That needs `danfoss2mqtt` 0.1.9. The link comes from the
+  cloud's own device→room map; the integration never guesses it from names. Seen on real
+  hardware: a cloud sensor now shows in its room. A sensor whose room has no schedule group, or
+  that is in no room, stays unplaced (`docs/companion-contract.md`).
+
+**Docs**
+
+- Design for moving the boiler relays to Zigbee2MQTT and rebuilding their switching in Home
+  Assistant without the cloud (`docs/relay-zigbee.md`).
+
 ## 2.1.0 — The 2.x switch-over is complete
 
 The code is the same as 2.0.17. This minor version marks the end of the switch-over from the 1.x
