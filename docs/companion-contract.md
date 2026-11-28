@@ -144,6 +144,7 @@ The Companion issues device-level writes by publishing a JSON object to `<prefix
 | External window state (`window_open_external`) | `{"window_open_external": true}` |
 | Room load mean (`load_room_mean`) | `{"load_room_mean": 35}` |
 | Weekly schedule day (`weekly_schedule`) | `{"weekly_schedule": {"dayofweek": 1, "num_of_transitions": 3, "transitions": [...]}}` |
+| Relay room linkage (`link_relay_room`, relay only, §3) | `{"room_link": {"room_id": "71", "linked": true}}` |
 
 ### 2.4 Direct-cloud-only write paths are not part of the Companion (by design)
 
@@ -219,8 +220,8 @@ While `zigbee2mqtt` manages individual Zigbee devices, a Danfoss heating system 
      `bridge/relays` is a dict keyed by the boiler relay's device id, each value the rooms eligible
      to drive it: `{"<relay id>": [{"room_id": "<id>", "name": "Room 1", "linked": true}]}`
      (`room_id` is a Tuya *room* id, not a schedule-group id; the relay's own on/off stays on its
-     device topic). Read only: the Companion feeds it to `overview` (`linked_rooms`), `get_relays`
-     and the relay's linked-rooms sensor. Until a bridge has published a relay, its linkage is
+     device topic). The Companion feeds it to `overview` (`linked_rooms`, `rooms`), `get_relays`
+     and the relay's linked-rooms sensor; it changes only through `room_link` (below). Until a bridge has published a relay, its linkage is
      empty, never assumed; a malformed payload leaves the previous one in place. The bridge
      re-reads the linkage from the cloud at most once an hour (one request per relay).
    - Each head in `danfoss2mqtt/bridge/devices` carries `danfoss.set_keys`: the `/set` keys the
@@ -233,6 +234,40 @@ While `zigbee2mqtt` manages individual Zigbee devices, a Danfoss heating system 
      reach its gateway (a DP publish, confirmed by the gateway's echo or a per-device read). The
      Companion opens a control only for an advertised key; without the list (older bridge) only
      the setpoint.
+   - **Relay room linkage** (`room_link`). A boiler relay's descriptor in `bridge/devices` also
+     carries `danfoss.set_keys`: `["room_link"]` while the bridge's relay linkage writes are open
+     for it **and** its rooms are known (published on `bridge/relays`), else `[]` (the relay's own
+     on/off is server-driven from the linked rooms' heat demand and is never written). ⚠ Linking
+     or unlinking a room **changes the boiler's heat demand**.
+     - *Payload*: `<prefix>/<relay friendly_name>/set` ←
+       `{"room_link": {"room_id": "<Tuya room id from bridge/relays>", "linked": true|false}}`.
+       One room per message. `room_id` is the id listed for that relay on `bridge/relays` (a
+       Tuya *room*, type 4), never a schedule-group id. Any other key on a relay's `/set` is
+       logged and ignored.
+     - *Gate*: add-on options `relay_links_writes` (off by default) and `relay_links_trial_relay`
+       (a Danfoss device id; when set, only that relay is written: the supervised first write).
+       Closed, or another relay than the trial one: refused and logged, no cloud request.
+     - *Validation* (bridge): `room_link` must be an object with a non-empty `room_id` and a
+       boolean `linked` (no string or number coerced). The bridge then **re-reads the relay's
+       rooms** (`async_relay_rooms`, one request) and refuses a room the relay does not list,
+       and refuses to unlink the relay's **last linked room** (the boiler would never be asked
+       for heat again: that stays a deliberate act in the app). A room already in the asked state
+       sends nothing. The Companion checks the same before publishing (relay known, key
+       advertised, room listed for that relay, not the last linked room), so a refused click
+       never reaches the broker.
+     - *Write*: one `async_relay_bind(relay, room_id, linked)` (`m.life.solution.wkf.reference.edit`),
+       one relay write at a time.
+     - *Read-back*: the bridge re-reads the relay's rooms (up to 3 reads, 5 s apart) until the room
+       shows the asked state, then **republishes `bridge/relays` at once** (not at the hourly TTL)
+       with what it read. An unconfirmed write is logged as such and `bridge/relays` carries the
+       state read back, never the asked one. A refusal after the fresh read also republishes
+       `bridge/relays`, so a stale linkage is corrected.
+     - *Companion*: the relay's page in the side panel lists the linked and unlinked rooms; the
+       add/remove controls appear only while the relay advertises `room_link` and the user is an
+       administrator (WebSocket `relay/link_room`), else the list is read-only. After a click the
+       room shows "awaiting the bridge" until `bridge/relays` shows the new state; nothing is
+       optimistic. The page states that the change alters the boiler's heat demand and asks for a
+       confirmation before each write.
    - `danfoss2mqtt/bridge/request/<action>` → `danfoss2mqtt/bridge/response/<action>` and
      `danfoss2mqtt/bridge/jobs/<job_id>` for room/schedule/vacation operations.
 2. **Companion-managed rooms (for `zigbee2mqtt` heads + `014G2480` sensors)**:

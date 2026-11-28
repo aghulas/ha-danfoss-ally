@@ -15,6 +15,7 @@ from .ops_common import (
     _room_target,
     _run_cloud_write,
 )
+from .ops_views import RELAY_ROOM_LINK_KEY, relay_room_link_writable
 
 if TYPE_CHECKING:
     from .coordinator import DanfossCoordinator
@@ -221,6 +222,56 @@ async def set_relay_room(
     await _run_cloud_write(client.async_relay_bind, relay, match["room_id"], bool(linked))
     await _refresh_after_structural_write(coordinator)
     return {"relay": relay, "room_id": str(match["room_id"]), "linked": bool(linked)}
+
+
+async def link_relay_room(
+    hass: HomeAssistant, store: dict, relay: str, room_id: str, linked: bool
+) -> dict:
+    """Ask the relay's bridge to link / unlink one room (``room_link``, contract companion §3).
+
+    ⚠ Changes the boiler's heat demand. Companion only, admin-gated by the caller. Checked here
+    before anything is published: the relay is known, its bridge advertises ``room_link`` for it,
+    the room is one ``bridge/relays`` lists for it, and it is not the relay's last linked room.
+    The result is ``status: "sent"``: the bridge re-reads, writes, reads back and republishes
+    ``bridge/relays``; the new state shows only once it does (never optimistic).
+    """
+    companion = store.get("companion")
+    if companion is None:
+        raise OperationError(
+            "relay_link_unsupported",
+            "linking a room to a relay from the panel needs the Bridge + Companion mode",
+        )
+    coordinator = store[DATA_COORDINATOR]
+    dev = coordinator.data.get(relay)
+    if dev is None or not dev.is_relay:
+        raise OperationError("unknown_relay", f"relay not found: {relay}")
+    if not isinstance(linked, bool):
+        raise OperationError("invalid_request", "linked must be a boolean")
+    if not relay_room_link_writable(store, relay):
+        raise OperationError(
+            "relay_link_unavailable",
+            "this relay's bridge does not accept room links right now "
+            "(add-on option relay_links_writes, or another trial relay)",
+        )
+    rooms = coordinator.relay_rooms.get(relay) or []
+    room = next((r for r in rooms if str(r.get("room_id")) == str(room_id)), None)
+    if room is None:
+        raise OperationError("unknown_room", "this room is not eligible for this relay")
+    if bool(room.get("linked")) == linked:
+        raise OperationError(
+            "no_change", "the room is already linked" if linked else "the room is already unlinked"
+        )
+    if not linked and sum(1 for r in rooms if r.get("linked")) <= 1:
+        raise OperationError(
+            "last_linked_room",
+            "refused: it is the relay's last linked room (the boiler would never ask for heat)",
+        )
+    payload = {RELAY_ROOM_LINK_KEY: {"room_id": str(room_id), "linked": linked}}
+    try:
+        await companion.async_send_raw_device_set(relay, payload)
+    except Exception as err:  # noqa: BLE001 - a publish failure is a refused write, never silent
+        raise OperationError("publish_failed", f"could not publish to the bridge: {err}") from err
+    return {"relay": relay, "room_id": str(room_id), "linked": linked, "status": "sent"}
 
 
 # --- Sub-device UNBIND / "disconnect" (contract write-safety). The most DESTRUCTIVE cloud write:

@@ -345,6 +345,21 @@ def _sensor_overview(sensor, room_id: str | None) -> dict[str, Any]:
     }
 
 
+# Key a bridge advertises on a boiler relay (``danfoss.set_keys``) while it can link / unlink its
+# rooms (contract companion §3, ``room_link``).
+RELAY_ROOM_LINK_KEY = "room_link"
+
+
+def relay_room_link_writable(store: dict, relay: str) -> bool:
+    """True when the relay's bridge advertises ``room_link`` for it right now (Companion only).
+
+    The direct-cloud (1.4.x) entry never opens it here: its ``set_relay_room`` path is frozen and
+    unvalidated, and the panel's controls follow the Companion contract only.
+    """
+    companion = store.get("companion")
+    return companion is not None and companion.supports_device_set(relay, RELAY_ROOM_LINK_KEY)
+
+
 def overview_payload(store: dict) -> dict:
     """Building / fleet overview (contract §3.6). Read-only, from the coordinator cache only.
 
@@ -391,6 +406,21 @@ def overview_payload(store: dict) -> dict:
                     ),
                     key=str.casefold,
                 ),
+                # Every eligible room with its link, as the bridge read it (``bridge/relays``),
+                # and whether the bridge accepts ``room_link`` for this relay right now.
+                "rooms": sorted(
+                    (
+                        {
+                            "room_id": str(r.get("room_id")),
+                            "name": r.get("name"),
+                            "linked": bool(r.get("linked")),
+                        }
+                        for r in coordinator.relay_rooms.get(d.id, [])
+                        if r.get("room_id") is not None
+                    ),
+                    key=lambda r: (str(r["name"] or "").casefold(), r["room_id"]),
+                ),
+                "room_link_writable": relay_room_link_writable(store, d.id),
             }
             for d in relays
             if _relay_home_gid(coordinator, d, home_gids, home_by_name) == gid

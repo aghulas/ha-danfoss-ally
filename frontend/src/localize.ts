@@ -189,6 +189,24 @@ const STRINGS = {
     el_humidity: "Humidity {value}%",
     el_kind_relay: "Boiler relay",
     el_relay_rooms: "Rooms driving this relay",
+    relay_rooms_all: "Rooms of this relay",
+    relay_room_linked: "Linked",
+    relay_room_unlinked: "Not linked",
+    relay_room_link: "Link",
+    relay_room_unlink: "Unlink",
+    relay_room_pending: "Awaiting the bridge…",
+    relay_room_last: "Last linked room: unlink it in the Danfoss app",
+    relay_rooms_read_only:
+      "Read-only: the bridge does not accept room changes for this relay (add-on option relay_links_writes), or you are not an administrator.",
+    relay_rooms_warning:
+      "Warning: linking or unlinking a room changes the boiler's heat demand. A linked room that asks for heat switches the boiler on.",
+    relay_rooms_confirm_link:
+      "Link “{room}” to “{relay}”? When this room asks for heat, the boiler will be switched on.",
+    relay_rooms_confirm_unlink:
+      "Unlink “{room}” from “{relay}”? This room will no longer switch the boiler on.",
+    relay_rooms_error: "Not sent: {message}",
+    relay_rooms_timeout:
+      "The bridge has not confirmed the change yet. The list shows what it last read; refresh later.",
     el_kind_gateway: "Gateway",
     el_state: "State",
     el_room_entities: "Room entities",
@@ -390,6 +408,24 @@ const STRINGS = {
     el_humidity: "Humidité {value} %",
     el_kind_relay: "Relais de chaudière",
     el_relay_rooms: "Pièces qui pilotent ce relais",
+    relay_rooms_all: "Pièces de ce relais",
+    relay_room_linked: "Liée",
+    relay_room_unlinked: "Non liée",
+    relay_room_link: "Lier",
+    relay_room_unlink: "Délier",
+    relay_room_pending: "En attente du pont…",
+    relay_room_last: "Dernière pièce liée : à délier dans l'app Danfoss",
+    relay_rooms_read_only:
+      "Lecture seule : le pont n'accepte pas de modification des pièces de ce relais (option relay_links_writes du module), ou vous n'êtes pas administrateur.",
+    relay_rooms_warning:
+      "Attention : lier ou délier une pièce change la demande de chauffe de la chaudière. Une pièce liée qui demande de la chaleur fait démarrer la chaudière.",
+    relay_rooms_confirm_link:
+      "Lier « {room} » à « {relay} » ? Quand cette pièce demandera de la chaleur, la chaudière démarrera.",
+    relay_rooms_confirm_unlink:
+      "Délier « {room} » de « {relay} » ? Cette pièce ne fera plus démarrer la chaudière.",
+    relay_rooms_error: "Non envoyé : {message}",
+    relay_rooms_timeout:
+      "Le pont n'a pas encore confirmé la modification. La liste montre sa dernière lecture ; actualisez plus tard.",
     el_kind_gateway: "Passerelle",
     el_state: "État",
     el_room_entities: "Entités de la pièce",

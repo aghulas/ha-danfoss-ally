@@ -77,6 +77,8 @@ from .ops_rooms import (  # noqa: F401
     delete_room,
     detach_heads,
     disconnect_head,
+    link_relay_room,
+    relay_room_link_writable,
     rename_room,
     set_relay_room,
 )

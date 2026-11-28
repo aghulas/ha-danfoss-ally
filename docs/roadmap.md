@@ -101,6 +101,11 @@ setpoint fan-out was proven in a supervised trial
 left needs someone on site or a multi-day window
 (`docs/validation/2026-11-25-coordinator-stages3-7.md`).
 
+The boiler relays are the last gateway devices with no local route: moving them to Zigbee2MQTT and
+switching them from the linked rooms' heat demand in the coordinator, fail-safe first, in
+supervised stages starting with a read-only observation of the cloud relays:
+`docs/relay-zigbee.md` (design only, 2026-11-28).
+
 ### 6. Publication
 
 - Tagged releases are in place. Remaining: the **HACS inclusion pull request**. Only the owner can
