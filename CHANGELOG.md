@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.1.0 — The 2.x switch-over is complete
+
+The code is the same as 2.0.17. This minor version marks the end of the switch-over from the 1.x
+direct-cloud line to the Bridge + Companion architecture, now that it is done and validated on
+real hardware. It is the version to install, or the one to pin, for a first install. Since 2.0.0:
+
+- **Bridges.** Zigbee2MQTT heads and `danfoss2mqtt` heads, the ones behind Danfoss gateways, are
+  read and written through the local Mosquitto broker only. The Companion's writes were validated
+  on both bridges (2026-11-22), and a real install was switched over from 1.x (2026-11-24).
+- **Head settings through the cloud bridge** (2.0.16, 2.0.17). Child lock, open-window detection
+  and setpoint bounds open only while the bridge advertises them. A grouped head is written on
+  its room, so every head of the room takes the value, and its entities say so. All of them are
+  proven on real heads, isolated and grouped, through the room route
+  (`docs/validation/2026-11-27-cloud-bridge-head-settings.md`).
+- **Fleet entities.** Head readings (2.0.15), room sensors and boiler relays (2.0.14) under the
+  Companion. The side panel now goes room by room, with relays under their own home (2.0.11 to
+  2.0.13).
+- **Room coordinator support.** Room entities and holiday services for the
+  `danfoss-room-coordinator` add-on, and a heat-demand sensor (2.0.5 to 2.0.9).
+- **Onboarding.** The direct-cloud setup asks only for email, password and country (2.0.10).
+
 ## 2.0.17 — Room scope on cloud-bridge bounds
 
 **Fixed**
